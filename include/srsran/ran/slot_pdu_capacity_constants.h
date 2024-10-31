@@ -59,7 +59,7 @@ static constexpr unsigned MAX_PREAMBLES_PER_PRACH_OCCASION = 64;
 static constexpr size_t MAX_CODEWORDS_PER_PDSCH = 2;
 
 /// [Implementation defined] Maximum number of PUSCH PDUs per slot.
-static constexpr size_t MAX_PUSCH_PDUS_PER_SLOT = 16U;
+static constexpr size_t MAX_PUSCH_PDUS_PER_SLOT = 64U;
 
 /// [Implementation defined] Maximum number of UL PDCCH PDUs per slot.
 static constexpr size_t MAX_UL_PDCCH_PDUS_PER_SLOT = 16U;
