@@ -25,6 +25,14 @@
 #include "srsran/srslog/srslog.h"
 #include "srsran/support/format_utils.h"
 
+#ifdef JBPF_ENABLED
+#include "jbpf.h"
+#include "jbpf_hook.h"
+#include "jbpf_defs.h"
+#include "jbpf_srsran_hooks.h"
+DEFINE_JBPF_HOOK(mac_bsr_update);
+#endif
+
 using namespace srsran;
 
 namespace {

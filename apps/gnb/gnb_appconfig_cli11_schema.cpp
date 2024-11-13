@@ -71,6 +71,60 @@ static void configure_cli11_e2_args(CLI::App& app, e2_appconfig& e2_params)
   add_option(app, "--e2sm_rc_enabled", e2_params.e2sm_rc_enabled, "Enable RC service module")->capture_default_str();
 }
 
+#ifdef JBPF_ENABLED
+
+static void configure_cli11_jbpf_args(CLI::App& app, jbpf_appconfig& config)
+{
+  app.add_option("--jbpf_enable_ipc", config.jbpf_ipc_enabled, "jbpf mode [0: Standalone mode 1: IPC mode]")
+      ->capture_default_str()->check(CLI::Range(0,1));
+  app.add_option("--jbpf_standalone_io_out_ip", config.jbpf_standalone_io_out_ip, "Standalone mode IO output IP")
+      ->capture_default_str();
+  app.add_option("--jbpf_standalone_io_out_port", config.jbpf_standalone_io_out_port, "Standalone mode IO out port")
+      ->capture_default_str()->check(CLI::Range(0, 65535));
+  app.add_option("--jbpf_standalone_io_in_port", config.jbpf_standalone_io_in_port, "Standalone mode IO in port")
+      ->capture_default_str()->check(CLI::Range(0, 65535));
+  app.add_option("--jbpf_standalone_io_cpu", config.jbpf_standalone_io_cpu, "Standalone mode IO thread CPU id")
+      ->capture_default_str();
+  app.add_option("--jbpf_standalone_io_policy", config.jbpf_standalone_io_policy, 
+      "Standalone IO thread CPU scheduling policy [0 : SCHED_OTHER, 1 : SCHED_FIFO]")
+      ->capture_default_str()->check(CLI::Range(0, 1));
+  app.add_option("--jbpf_standalone_io_priority", config.jbpf_standalone_io_priority, 
+      "Standalone mode IO thread CPU scheduling priority")
+      ->capture_default_str()->check(CLI::Range(0, 99));
+  app.add_option("--jbpf_io_mem_size_mb", config.jbpf_io_mem_size_mb, "jbpf IO memory size in MBs")
+      ->capture_default_str();
+  app.add_option("--jbpf_ipc_mem_name", config.jbpf_ipc_mem_name, "IPC mode memory name")
+      ->capture_default_str();
+  app.add_option("--jbpf_ipc_mem_size", config.jbpf_ipc_mem_size, "IPC mode memory size")
+      ->capture_default_str();  
+  app.add_option("--jbpf_enable_lcm_ipc", config.jbpf_has_lcm_ipc_thread, "Enable LCM IPC interface")
+      ->capture_default_str()->check(CLI::Range(0, 1));
+  app.add_option("--jbpf_lcm_ipc_name", config.jbpf_lcm_ipc_name, "LCM IPC socket name")
+      ->capture_default_str();
+  app.add_option("--jbpf_run_path", config.jbpf_run_path, "jbpf run path")
+      ->capture_default_str();
+  app.add_option("--jbpf_namespae", config.jbpf_namespace, "jbpf namespace")
+      ->capture_default_str();
+  app.add_option("--jbpf_agent_cpu", config.jbpf_agent_cpu, "Agent thread CPU id")
+      ->capture_default_str();
+  app.add_option("--jbpf_agent_policy", config.jbpf_agent_policy, 
+      "Agent thread CPU scheduling policy [0 : SCHED_OTHER, 1 : SCHED_FIFO]")
+      ->capture_default_str()->check(CLI::Range(0, 1));
+  app.add_option("--jbpf_agent_priority", config.jbpf_agent_priority, 
+      "Agent thread CPU scheduling priority")
+      ->capture_default_str()->check(CLI::Range(0, 99));
+  app.add_option("--jbpf_maint_cpu", config.jbpf_maint_cpu, "Maintenance thread CPU id")
+      ->capture_default_str();
+  app.add_option("--jbpf_maint_policy", config.jbpf_maint_policy, 
+      "Maintenance thread CPU scheduling policy [0 : SCHED_OTHER, 1 : SCHED_FIFO]")
+      ->capture_default_str()->check(CLI::Range(0, 1));
+  app.add_option("--jbpf_maint_priority", config.jbpf_maint_priority, 
+      "Maintenance thread CPU scheduling priority")
+      ->capture_default_str()->check(CLI::Range(0, 99));
+}
+
+#endif
+
 static void configure_cli11_hal_args(CLI::App& app, std::optional<hal_appconfig>& config)
 {
   config.emplace();
@@ -267,6 +321,14 @@ void srsran::configure_cli11_with_gnb_appconfig_schema(CLI::App& app, gnb_appcon
   // Expert section.
   CLI::App* expert_subcmd = app.add_subcommand("expert_execution", "Expert execution configuration")->configurable();
   configure_cli11_expert_execution_args(*expert_subcmd, gnb_cfg.expert_execution_cfg);
+
+#ifdef JBPF_ENABLED
+
+  // jbpf section.
+  CLI::App* jbpf_subcmd = app.add_subcommand("jbpf", "jbpf configuration")->configurable();
+  configure_cli11_jbpf_args(*jbpf_subcmd, gnb_cfg.jbpf_cfg);
+
+#endif
 
   // HAL section.
   CLI::App* hal_subcmd = add_subcommand(app, "hal", "HAL configuration")->configurable();

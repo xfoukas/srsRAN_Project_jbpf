@@ -48,6 +48,12 @@ target_link_libraries(srsran_support srsran_network ${CMAKE_THREAD_LIBS_INIT} ${
                       ${NUMA_LIBRARIES} srslog)
 add_backward(srsran_support)
 
+if (ENABLE_JBPF)
+    add_definitions(-DJBPF_ENABLED)
+    target_link_libraries(srsran_support jbpf)
+endif (ENABLE_JBPF)
+
+
 if (Backward_FOUND AND BACKWARD_HAS_EXTERNAL_LIBRARIES)
     set_source_files_properties(backtrace.cpp APPEND PROPERTIES COMPILE_DEFINITIONS "HAVE_BACKWARD")
     set_source_files_properties(backtrace.cpp APPEND PROPERTIES INCLUDE_DIRECTORIES ${CMAKE_SOURCE_DIR}/external)

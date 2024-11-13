@@ -37,3 +37,8 @@ target_link_libraries(srsran_ofh_transmitter
         srsran_instrumentation
         srslog
         srsvec)
+
+if (ENABLE_JBPF)
+    add_definitions(-DJBPF_ENABLED)
+    target_link_libraries(srsran_ofh_transmitter jbpf)
+endif (ENABLE_JBPF)

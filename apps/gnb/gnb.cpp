@@ -79,6 +79,10 @@
 #include "srsran/hal/dpdk/dpdk_eal_factory.h"
 #endif
 
+#ifdef JBPF_ENABLED
+#include "jbpf.h"
+#endif
+
 using namespace srsran;
 
 /// \file
@@ -299,6 +303,16 @@ int main(int argc, char** argv)
     // Prepend the application name in argv[0] as it is expected by EAL.
     eal = dpdk::create_dpdk_eal(std::string(argv[0]) + " " + gnb_cfg.hal_config->eal_args,
                                 srslog::fetch_basic_logger("EAL", false));
+  }
+#endif
+
+#ifdef JBPF_ENABLED  
+  struct jbpf_config *jconfig = (struct jbpf_config *) malloc(sizeof(struct jbpf_config));
+  jbpf_set_default_config_options(jconfig);
+
+  generate_jbpf_config(gnb_cfg, jconfig);
+  if (jbpf_init(jconfig) < 0) {
+    exit(-1);
   }
 #endif
 

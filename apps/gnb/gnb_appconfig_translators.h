@@ -35,6 +35,11 @@
 #include <map>
 #include <vector>
 
+#ifdef JBPF_ENABLED
+#include "jbpf.h"
+#endif
+
+
 namespace srsran {
 
 struct gnb_appconfig;
@@ -57,5 +62,7 @@ srsran::sctp_network_connector_config generate_e2ap_nw_config(const e2_appconfig
 
 /// Fills the gNB worker manager parameters of the given worker manager configuration.
 void fill_gnb_worker_manager_config(worker_manager_config& config, const gnb_appconfig& unit_cfg);
+
+void generate_jbpf_config(const gnb_appconfig& config, struct jbpf_config *jcfg);
 
 } // namespace srsran

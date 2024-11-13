@@ -26,6 +26,11 @@
 #include <pthread.h>
 #include <sys/types.h>
 
+#ifdef JBPF_ENABLED
+#include "jbpf.h"
+#endif
+
+
 using namespace srsran;
 
 /// Sets thread OS scheduling real-time priority.
@@ -186,6 +191,10 @@ std::thread unique_thread::make_thread(const std::string&               name,
     if (cpu_mask.any()) {
       thread_set_affinity(tself, cpu_mask, name);
     }
+#endif
+
+#ifdef JBPF_ENABLED
+    jbpf_register_thread();
 #endif
 
     // Run task.

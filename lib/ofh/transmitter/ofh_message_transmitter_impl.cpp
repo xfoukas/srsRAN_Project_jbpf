@@ -24,6 +24,14 @@
 #include "srsran/adt/static_vector.h"
 #include "srsran/instrumentation/traces/ofh_traces.h"
 
+#ifdef JBPF_ENABLED
+#include "jbpf.h"
+#include "jbpf_hook.h"
+#include "jbpf_defs.h"
+#include "jbpf_srsran_hooks.h"
+
+#endif
+
 using namespace srsran;
 using namespace ofh;
 
@@ -64,6 +72,13 @@ void message_transmitter_impl::enqueue_messages_into_burst(
   for (const auto& frame : frame_buffers) {
     frame_burst.emplace_back(frame->data());
   }
+
+#ifdef JBPF_ENABLED
+  for (unsigned idx = 0, end = frame_burst.size(); idx != end; ++idx) {
+    const auto frame = frame_burst[idx];
+    hook_capture_xran_packet(frame.data(), frame.size(), 1, 0);
+  }
+#endif
 
   logger.debug("Enqueueing '{}' frame(s) of type '{}-{}' in interval '{}_{}':{}_{} for tx burst",
                frame_buffers.size(),

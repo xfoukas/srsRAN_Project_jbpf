@@ -84,6 +84,7 @@ option(BUILD_TESTS           "Compile tests"                            ON)
 option(ENABLE_GPROF          "Enable gprof"                             OFF)
 option(USE_PHY_TESTVECTORS   "Enable testvector PHY tests"              OFF)
 option(FORCE_DEBUG_INFO      "Add debug information to Release build"   OFF)
+option(ENABLE_JBPF           "Enable jbpf"                              OFF)
 
 # Set assertion level options and default value.
 set(ASSERT_LEVEL "AUTO" CACHE STRING "Assertion paranoia level")
@@ -128,6 +129,25 @@ else (ENABLE_DPDK)
   unset(ENABLE_PDSCH_HWACC CACHE)
   unset(ENABLE_PUSCH_HWACC CACHE)
 endif (ENABLE_DPDK)
+
+# jbpf
+if (ENABLE_JBPF)
+    set(JBPF_EXPERIMENTAL_FEATURES ON CACHE BOOL "Enable jbpf experimental features" FORCE)
+    set(JBPF_STATIC ON CACHE BOOL "Build jbpf as static library" FORCE)
+    add_subdirectory(external/jbpf EXCLUDE_FROM_ALL)
+    add_definitions(-DJBPF_ENABLED)
+    include_directories(${JBPF_LIB_HEADER_FILES})
+    include_directories(${JBPF_IO_HEADER_FILES})
+    include_directories(${JBPF_MEM_MGMT_HEADER_FILES})
+    include_directories(${JBPF_COMMON_HEADERS})
+    include_directories(${JBPF_LCM_IPC_HEADER_FILES})
+    include_directories(${JBPF_CK_HEADER_FILES})
+    include_directories(include/srsran/jbpf)
+    set (ENABLE_JBPF CACHE ON BOOL "jbpf enabled")
+else (ENABLE_JBPF)
+    unset(JBPF_ENABLED CACHE)
+endif (ENABLE_JBPF)
+
 
 ########################################################################
 # ENABLE_EXPORT

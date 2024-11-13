@@ -1,0 +1,106 @@
+cu_cp:
+  amf:
+    addr: 192.168.101.14
+    bind_addr: 192.168.101.220
+    supported_tracking_areas:
+      - tac: 1
+        plmn_list:
+          - plmn: "00101"
+            tai_slice_support_list:
+              - sst: 1
+                sd: 162
+  mobility:
+    cells:
+      - nr_cell_id: 0x66C000          # For the default gnb_id=411 (gnb_id_bit_length=22), NR cell IDs start with 0x66C000 and increment for each cell of the DU.
+        periodic_report_cfg_id: 1     # This will configure a periodical report config for the serving cell.
+    report_configs:                                        # Define report configs for cell 1
+      - report_cfg_id: 1
+        report_type: periodical
+        report_interval_ms: 1024
+
+cu_up:
+  upf:
+    bind_addr: 192.168.110.220
+
+cell_cfg:
+  dl_arfcn: 630684
+  common_scs: 30
+  band: 78
+  plmn: "00101"
+  tac: 1
+  channel_bandwidth_MHz: 100
+  ssb:
+     ssb_block_power_dbm: -21
+  nof_antennas_dl: 4
+  nof_antennas_ul: 4
+  tdd_ul_dl_cfg:
+    nof_dl_symbols: 5
+    nof_dl_slots: 5
+    nof_ul_slots: 4
+  prach:
+    prach_config_index: 159
+    prach_root_sequence_index: 1
+    zero_correlation_zone: 0
+    prach_frequency_start: 12
+  pusch:
+    mcs_table: qam256
+
+jbpf:
+  jbpf_enable_ipc: 0
+  #thread_mode_io_out_port: 20788
+  #thread_mode_io_in_port: 1924
+  #thread_mode_io_out_ip: "127.0.0.1"
+  #thread_mode_io_cpu: 0x100000
+  #thread_mode_io_policy: 1
+  #thread_mode_io_priority: 99
+  #agent_port: 30590
+  #decima_ipc_mode_name: "decima_controller"
+  #io_mem_size_mb: 1024
+  #maint_cpu: 0x200000
+  #maint_policy: 0
+  #maint_priority: 2
+  #agent_cpu: 0x100000
+  #agent_policy: 1
+  #agent_priority: 30
+
+ru_ofh:
+  ru_bandwidth_MHz: 100
+  t1a_max_cp_dl: 470
+  t1a_min_cp_dl: 258
+  t1a_max_cp_ul: 429
+  t1a_min_cp_ul: 285
+  t1a_max_up: 196
+  t1a_min_up: 50
+  ta4_max: 75
+  ta4_min: 0
+  is_prach_cp_enabled: true
+  is_dl_broadcast_enabled: false
+  ignore_ecpri_payload_size: true
+  compr_method_ul: bfp
+  compr_bitwidth_ul: 9
+  compr_method_dl: bfp
+  compr_bitwidth_dl: 9
+  compr_method_prach: none
+  compr_bitwidth_prach: 16
+  enable_ul_static_compr_hdr: false
+  enable_dl_static_compr_hdr: false
+  iq_scaling: 2.0
+  cells:
+  - network_interface: 0000:6c:09.1    # PCI address of the NIC card in your server
+    ru_mac_addr: 6c:ad:ad:00:0a:a0
+    du_mac_addr: 00:11:22:33:0a:a0
+    vlan_tag_up: 3
+    vlan_tag_cp: 3
+    prach_port_id: [4, 5, 6, 7]
+    dl_port_id: [0, 1, 2, 3]
+    ul_port_id: [0, 1, 2, 3]
+
+hal:
+   eal_args: "--lcores (0-1)@(1-30) -a 0000:6c:09.1"
+
+log:
+  filename: ./gnb.log
+  ofh_level: warning
+  all_level: warning
+  gtpu_level: warning
+

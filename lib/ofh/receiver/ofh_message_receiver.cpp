@@ -24,6 +24,15 @@
 #include "ofh_rx_window_checker.h"
 #include "srsran/instrumentation/traces/ofh_traces.h"
 
+#ifdef JBPF_ENABLED
+#include "jbpf.h"
+#include "jbpf_hook.h"
+#include "jbpf_defs.h"
+#include "jbpf_srsran_hooks.h"
+
+DEFINE_JBPF_HOOK(capture_xran_packet);
+#endif
+
 using namespace srsran;
 using namespace ofh;
 
@@ -59,6 +68,10 @@ void message_receiver_impl::on_new_frame(ether::unique_rx_buffer buffer)
 void message_receiver_impl::process_new_frame(ether::unique_rx_buffer buffer)
 {
   span<const uint8_t> payload = buffer.data();
+
+#ifdef JBPF_ENABLED
+  hook_capture_xran_packet(payload.data(), payload.size(), 0, 1);
+#endif
 
   ether::vlan_frame_params eth_params;
   span<const uint8_t>      ecpri_pdu = vlan_decoder->decode(payload, eth_params);

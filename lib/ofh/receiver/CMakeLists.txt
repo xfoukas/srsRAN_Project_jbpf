@@ -35,3 +35,8 @@ set(SOURCES
 add_library(srsran_ofh_receiver STATIC ${SOURCES})
 target_link_libraries(srsran_ofh_receiver srsran_ran srsran_ofh_message_serdes srsran_ofh_compression
                       srsran_ofh_ethernet srsran_ofh_ecpri srslog srsran_instrumentation)
+
+if (ENABLE_JBPF)
+    add_definitions(-DJBPF_ENABLED)
+    target_link_libraries(srsran_ofh_receiver jbpf)
+endif (ENABLE_JBPF)

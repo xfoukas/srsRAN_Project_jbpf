@@ -62,6 +62,11 @@ if (DPDK_FOUND)
     endif (ENABLE_PDSCH_HWACC)
 endif (DPDK_FOUND)
 
+if (ENABLE_JBPF)
+        add_definitions(-DJBPF_ENABLED)
+        target_link_libraries(gnb jbpf)
+endif (ENABLE_JBPF)
+
 add_backward(gnb)
 
 target_include_directories(gnb PRIVATE ${CMAKE_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/external)

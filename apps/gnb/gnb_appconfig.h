@@ -30,6 +30,11 @@
 #include "srsran/support/executors/unique_thread.h"
 #include <string>
 
+#ifdef JBPF_ENABLED
+#include "jbpf.h"
+//#include "jbpf_lcm_ipc.h"
+#endif
+
 namespace srsran {
 
 struct cu_up_appconfig {
@@ -80,6 +85,52 @@ struct hal_appconfig {
   std::string eal_args;
 };
 
+#ifdef JBPF_ENABLED
+/// Janus configuration
+struct jbpf_appconfig {
+  /// jbpf run path
+  std::string jbpf_run_path = JBPF_DEFAULT_RUN_PATH;
+  /// jbpf namespace
+  std::string jbpf_namespace = JBPF_DEFAULT_NAMESPACE;
+  /// jbpf mode (0 standalone, 1 ipc)
+  unsigned jbpf_ipc_enabled = 0;
+  /// LCM IPC thread for codelet lifecycle management
+  bool jbpf_has_lcm_ipc_thread = true;
+  /// LCM IPC socket name
+  std::string jbpf_lcm_ipc_name = JBPF_DEFAULT_LCM_SOCKET;
+  /// jbpf ipc memory size
+  size_t jbpf_ipc_mem_size = JBPF_HUGEPAGE_SIZE_1GB;
+  /// jbpf ipc memory_name
+  std::string jbpf_ipc_mem_name = "srsran_ipc_app";
+  /// jbpf standalone output IP
+  std::string jbpf_standalone_io_out_ip = "127.0.0.1";
+  /// jbpf standalone destination UDP port to stream the data
+  unsigned jbpf_standalone_io_out_port = 20788;
+  /// jbpf standalone UDP Port to receive control inputs
+  unsigned jbpf_standalone_io_in_port = 1924;
+  /// Standalone IO thread CPU id
+  unsigned jbpf_standalone_io_cpu = 0;
+  /// Standalone IO thread CPU policy
+  unsigned jbpf_standalone_io_policy = 0;
+  /// Standalone IO thread CPU priority
+  unsigned jbpf_standalone_io_priority = 0;
+  /// Requested IO memory size
+  unsigned jbpf_io_mem_size_mb = 1024;
+  /// Agent thread CPU id
+  unsigned jbpf_agent_cpu = 0;
+  /// Agent thread CPU policy
+  unsigned jbpf_agent_policy = 0;
+  /// Agent thread CPU priority
+  unsigned jbpf_agent_priority = 0;
+  /// Maintenance thread CPU id
+  unsigned jbpf_maint_cpu = 0;
+  /// Maintenance thread CPU policy
+  unsigned jbpf_maint_policy = 0;
+  /// Maintenance thread CPU priority
+  unsigned jbpf_maint_priority = 0;
+};
+#endif
+
 /// Monolithic gnb application configuration.
 struct gnb_appconfig {
   /// Default constructor to update the log filename.
@@ -98,6 +149,10 @@ struct gnb_appconfig {
   buffer_pool_appconfig buffer_pool_config;
   /// Expert configuration.
   expert_execution_appconfig expert_execution_cfg;
+#ifdef JBPF_ENABLED
+  /// jbpf configuration.
+  jbpf_appconfig jbpf_cfg;
+#endif
   /// HAL configuration.
   std::optional<hal_appconfig> hal_config;
 };

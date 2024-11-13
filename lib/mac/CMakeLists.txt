@@ -51,3 +51,8 @@ target_link_libraries(srsran_mac
         srsran_pcap
         rrc_nr_asn1
         srsran_instrumentation)
+
+if (ENABLE_JBPF)
+    add_definitions(-DJBPF_ENABLED)
+    target_link_libraries(srsran_mac jbpf)
+endif (ENABLE_JBPF)
