@@ -82,16 +82,16 @@ void srsran::generate_jbpf_config(const gnb_appconfig& config, struct jbpf_confi
     jbpf_cfg->io_config.io_thread_config.has_sched_policy_io_thread = 1;
     jbpf_cfg->io_config.io_thread_config.io_thread_sched_policy = config.jbpf_cfg.jbpf_standalone_io_policy;
 
-    output_socket sock;
+    output_socket *sock = new output_socket();
     // Create a UDP socket to send messages out
-    sock.sockfd = socket(AF_INET, SOCK_DGRAM, 0);
-    memset(&sock.server_addr, 0, sizeof(sock.server_addr));
-    sock.server_addr.sin_family = AF_INET;
-    sock.server_addr.sin_port = htons(config.jbpf_cfg.jbpf_standalone_io_out_port);
-    sock.server_addr.sin_addr.s_addr = inet_addr(config.jbpf_cfg.jbpf_standalone_io_out_ip.c_str());
+    sock->sockfd = socket(AF_INET, SOCK_DGRAM, 0);
+    memset(&sock->server_addr, 0, sizeof(sock->server_addr));
+    sock->server_addr.sin_family = AF_INET;
+    sock->server_addr.sin_port = htons(config.jbpf_cfg.jbpf_standalone_io_out_port);
+    sock->server_addr.sin_addr.s_addr = inet_addr(config.jbpf_cfg.jbpf_standalone_io_out_ip.c_str());
     std::cout << "[JANUS_INFO] Creating UDP connection to " << config.jbpf_cfg.jbpf_standalone_io_out_ip.c_str() 
       << ":" << config.jbpf_cfg.jbpf_standalone_io_out_port << std::endl;
-    jbpf_cfg->io_config.io_thread_config.output_handler_ctx = &sock;
+    jbpf_cfg->io_config.io_thread_config.output_handler_ctx = sock;
   } else if (config.jbpf_cfg.jbpf_ipc_enabled == 1) {
     jbpf_cfg->io_config.io_type = JBPF_IO_IPC_CONFIG;
     strncpy(jbpf_cfg->io_config.io_ipc_config.ipc_name, config.jbpf_cfg.jbpf_ipc_mem_name.c_str(), MAX_IPC_NAME_LEN - 1);
