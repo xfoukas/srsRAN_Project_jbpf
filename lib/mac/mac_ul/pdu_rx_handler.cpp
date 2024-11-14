@@ -259,6 +259,23 @@ bool pdu_rx_handler::handle_mac_ce(const decoded_mac_rx_pdu& ctx, const mac_ul_s
         }
         bsr_ind.lcg_reports = lbsr_report.value().list;
       }
+#ifdef JBPF_ENABLED
+      struct jbpf_bsr_update bsr_update;
+      bool has_report = false;
+      bsr_update.num_bsr_report = 1;
+      bsr_update.bsr_report[0].rnti = to_value(bsr_ind.rnti);
+      bsr_update.bsr_report[0].ue_index = bsr_ind.ue_index;
+      bsr_update.bsr_report[0].lcg_bitmask = 0;
+      for (auto report : bsr_ind.lcg_reports) {
+        uint32_t nof_bytes = buff_size_field_to_bytes(report.buffer_size, bsr_ind.bsr_fmt);
+        if (nof_bytes == 0) continue;
+        bsr_update.bsr_report[0].lcg_bitmask |= (1 << report.lcg_id);
+        bsr_update.bsr_report[0].bsr_net[report.lcg_id] = nof_bytes;
+        has_report = true;
+      }
+      if (has_report)
+        hook_mac_bsr_update(&bsr_update, ctx.ue_index, ctx.slot_rx.sfn(), ctx.slot_rx.slot_index(), ctx.cell_index_rx);
+#endif
       sched.handle_ul_bsr_indication(bsr_ind);
     } break;
     case lcid_ul_sch_t::CRNTI: {

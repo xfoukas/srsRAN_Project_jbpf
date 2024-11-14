@@ -2,9 +2,18 @@
 #define JBPF_SRSRAN_DEFS_H_
 
 #include <stdint.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
 
 #define JBPF_NUM_OF_LCG       8
 #define JBPF_MAX_UE_SUPPORTED (16*5)
+
+struct output_socket
+{
+    int sockfd;
+    struct sockaddr_in server_addr;
+};
 
 // lc = logical channel id. 28.321 Dl: 6.2.1-1 and UL: 6.2.1-2
 // lcg = logical channel group.  Can be a max of 8 LCG.
@@ -28,7 +37,7 @@ struct jbpf_bsr_update
 };
 
 /* OFH context*/
-struct janus_ran_ofh_ctx {
+struct jbpf_ran_ofh_ctx {
   uint64_t data; /* Pointer to beginning of buffer with int16_t IQ samples */
   uint64_t data_end; /* Pointer to end+1 of packet */
   uint64_t meta_data; /* Used for the program to store metadata */
@@ -39,7 +48,7 @@ struct janus_ran_ofh_ctx {
 };
 
 /* L2 context*/
-struct janus_ran_layer2_ctx {
+struct jbpf_ran_layer2_ctx {
     uint64_t data; /* Pointer to beginning of variable-sized L2 struct */
     uint64_t data_end; /* Pointer to end+1 of variable-sized struct */
     uint64_t meta_data; /* Used for the program to store metadata */

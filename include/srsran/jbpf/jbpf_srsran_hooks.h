@@ -5,7 +5,7 @@
 #include "jbpf_srsran_defs.h"
 
 DECLARE_JBPF_HOOK(capture_xran_packet,
-		   struct janus_ran_ofh_ctx ctx,
+		   struct jbpf_ran_ofh_ctx ctx,
 		   ctx,
 		   HOOK_PROTO(
 			      const void* xran_packet,
@@ -22,10 +22,10 @@ DECLARE_JBPF_HOOK(capture_xran_packet,
 		   )
 
 DECLARE_JBPF_HOOK(mac_bsr_update,
-		   struct janus_ran_layer2_ctx ctx,
+		   struct jbpf_ran_layer2_ctx ctx,
 		   ctx,
 		   HOOK_PROTO(
-               struct janus_bsr_update *bsr,
+               struct jbpf_bsr_update *bsr,
                   uint16_t ctx_id,
                   uint16_t frame,
                   uint16_t slot,

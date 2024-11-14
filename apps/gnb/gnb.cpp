@@ -81,6 +81,29 @@
 
 #ifdef JBPF_ENABLED
 #include "jbpf.h"
+#include "jbpf_srsran_defs.h"
+
+static void
+io_channel_send_output(jbpf_io_stream_id_t* stream_id, void** bufs, int num_bufs, void* ctx)
+{
+    output_socket* s = (output_socket*)ctx;
+    if (stream_id && num_bufs > 0) {
+
+      // Fetch the data and print in JSON format
+      for (auto i = 0; i < num_bufs; i++) {
+          char buffer[2048];
+          int msg_size = jbpf_io_channel_pack_msg(jbpf_get_io_ctx(), bufs[i], buffer, 2048);
+
+          if (msg_size > 0) {
+            int sent_bytes =
+              sendto(s->sockfd, buffer, msg_size, 0, (struct sockaddr*)&s->server_addr, sizeof(s->server_addr));
+            if (sent_bytes <= 0) {
+              std::cout << "Unable to send message to collector" << std::endl;
+            }
+          } 
+        }
+    }
+}
 #endif
 
 using namespace srsran;
@@ -311,9 +334,16 @@ int main(int argc, char** argv)
   jbpf_set_default_config_options(jconfig);
 
   generate_jbpf_config(gnb_cfg, jconfig);
+
   if (jbpf_init(jconfig) < 0) {
     exit(-1);
   }
+
+  // Any thread that calls a hook must be registered
+  jbpf_register_thread();
+
+  // Register the callback to handle output messages from codelets
+  jbpf_register_io_output_cb(io_channel_send_output);
 #endif
 
   // Buffer pool service.
