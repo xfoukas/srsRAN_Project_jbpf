@@ -1,8 +1,14 @@
-#ifndef JBPF_HOOKS_
-#define JBPF_HOOKS_
+#ifndef JBPF_SRSRAN_HOOKS_
+#define JBPF_SRSRAN_HOOKS_
+
+#ifdef __cplusplus
+extern "C"
+{
+#endif
 
 #include "jbpf_hook.h"
 #include "jbpf_srsran_defs.h"
+#include "jbpf_srsran_contexts.h"
 
 DECLARE_JBPF_HOOK(capture_xran_packet,
 		   struct jbpf_ran_ofh_ctx ctx,
@@ -41,4 +47,9 @@ DECLARE_JBPF_HOOK(mac_bsr_update,
 			       )
 		   )
 
+#ifdef __cplusplus
+}
 #endif
+
+
+#endif // JBPF_SRSRAN_HOOKS_
