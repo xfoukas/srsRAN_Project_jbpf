@@ -70,7 +70,7 @@ void message_receiver_impl::process_new_frame(ether::unique_rx_buffer buffer)
   span<const uint8_t> payload = buffer.data();
 
 #ifdef JBPF_ENABLED
-  hook_capture_xran_packet(payload.data(), payload.size(), 0, 1);
+  hook_capture_xran_packet(payload.data(), payload.size(), 1, 1);
 #endif
 
   ether::vlan_frame_params eth_params;

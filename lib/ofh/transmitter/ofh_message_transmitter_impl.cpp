@@ -76,7 +76,7 @@ void message_transmitter_impl::enqueue_messages_into_burst(
 #ifdef JBPF_ENABLED
   for (unsigned idx = 0, end = frame_burst.size(); idx != end; ++idx) {
     const auto frame = frame_burst[idx];
-    hook_capture_xran_packet(frame.data(), frame.size(), 1, 0);
+    hook_capture_xran_packet(frame.data(), frame.size(), 0, 0);
   }
 #endif
 
