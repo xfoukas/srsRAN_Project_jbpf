@@ -26,6 +26,22 @@
 #include "../srs/srs_scheduler.h"
 #include "../uci_scheduling/uci_scheduler_impl.h"
 
+#ifdef JBPF_ENABLED
+#include "jbpf_srsran_hooks.h"
+DEFINE_JBPF_HOOK(mac_sched_ue_creation);
+DEFINE_JBPF_HOOK(mac_sched_ue_reconfig);
+DEFINE_JBPF_HOOK(mac_sched_ue_deletion);
+DEFINE_JBPF_HOOK(mac_sched_ue_config_applied);
+DEFINE_JBPF_HOOK(mac_sched_ul_bsr_indication);
+DEFINE_JBPF_HOOK(mac_sched_crc_indication);
+DEFINE_JBPF_HOOK(mac_sched_uci_indication);
+DEFINE_JBPF_HOOK(mac_sched_dl_mac_ce_indication);
+DEFINE_JBPF_HOOK(mac_sched_ul_phr_indication);
+DEFINE_JBPF_HOOK(mac_sched_dl_buffer_state_indication);
+DEFINE_JBPF_HOOK(mac_sched_srs_indication);
+#endif
+
+
 using namespace srsran;
 
 /// \brief More than one DL buffer occupancy update may be received per slot for the same UE and bearer. This class
@@ -151,6 +167,10 @@ void ue_event_manager::handle_ue_creation(ue_config_update_event ev)
       return;
     }
 
+#ifdef JBPF_ENABLED
+    hook_mac_sched_ue_creation((0), u->get_pcell().get_cell_cfg().pci, (uint16_t)u->crnti);
+#endif
+
     // Insert UE in UE repository.
     du_ue_index_t   ueidx       = u->ue_index;
     rnti_t          rnti        = u->crnti;
@@ -194,6 +214,10 @@ void ue_event_manager::handle_ue_reconfiguration(ue_config_update_event ev)
       return;
     }
     auto& u = ue_db[ue_idx];
+
+#ifdef JBPF_ENABLED
+    hook_mac_sched_ue_reconfig((0), u.get_pcell().get_cell_cfg().pci, (uint16_t)u.crnti);
+#endif
 
     // If a UE carrier has been removed, remove the UE from the respective slice scheduler.
     // Update UCI scheduler with cell changes.
@@ -260,6 +284,10 @@ void ue_event_manager::handle_ue_deletion(ue_config_delete_event ev)
     const rnti_t    rnti      = u.crnti;
     du_cell_index_t pcell_idx = u.get_pcell().cell_index;
 
+#ifdef JBPF_ENABLED
+    hook_mac_sched_ue_deletion((0), u.get_pcell().get_cell_cfg().pci, (uint16_t)u.crnti);
+#endif
+
     for (unsigned i = 0, e = u.nof_cells(); i != e; ++i) {
       // Update UCI scheduling by removing existing UE UCI resources.
       du_cells[u.get_cell(to_ue_cell_index(i)).cell_index].uci_sched->rem_ue(u.get_pcell().cfg());
@@ -291,6 +319,10 @@ void ue_event_manager::handle_ue_config_applied(du_ue_index_t ue_idx)
     ue&   u     = ue_db[ue_idx];
     auto& pcell = du_cells[u.get_pcell().cell_index];
 
+#ifdef JBPF_ENABLED
+    hook_mac_sched_ue_config_applied(0, u.get_pcell().get_cell_cfg().pci, (uint16_t)u.crnti);
+#endif
+
     // Log UE config applied event.
     pcell.ev_logger->enqueue(scheduler_event_logger::ue_cfg_applied_event{ue_idx, u.crnti});
 
@@ -317,6 +349,11 @@ void ue_event_manager::handle_ul_bsr_indication(const ul_bsr_indication_message&
     }
     auto&           u         = ue_db[bsr_ind.ue_index];
     du_cell_index_t pcell_idx = u.get_pcell().cell_index;
+
+#ifdef JBPF_ENABLED
+    hook_mac_sched_ul_bsr_indication(const_cast<void*>(static_cast<const void*>(&bsr_ind)),
+      0, u.get_pcell().get_cell_cfg().pci, (uint16_t)bsr_ind.crnti, sizeof(ul_bsr_indication_message));
+#endif
 
     // Handle event.
     u.handle_bsr_indication(bsr_ind);
@@ -356,6 +393,11 @@ void ue_event_manager::handle_ul_phr_indication(const ul_phr_indication_message&
                          [this, cell_phr, phr_ind](ue_cell& ue_cc) {
                            ue_cc.channel_state_manager().handle_phr(cell_phr);
 
+#ifdef JBPF_ENABLED
+                           hook_mac_sched_ul_phr_indication(const_cast<void*>(static_cast<const void*>(&phr_ind)),
+                              0, ue_cc.get_cell_cfg().pci, (uint16_t)phr_ind.rnti, sizeof(ul_phr_indication_message));
+#endif
+
                            // Log event.
                            scheduler_event_logger::phr_event event{};
                            event.ue_index   = phr_ind.ue_index;
@@ -385,6 +427,11 @@ void ue_event_manager::handle_crc_indication(const ul_crc_indication& crc_ind)
               const double delay_ms =
                   static_cast<double>(last_sl - sl_rx) *
                   (static_cast<double>(10) / static_cast<double>(du_cells[ue_cc.cell_index].cfg->nof_slots_per_frame));
+
+#ifdef JBPF_ENABLED
+              hook_mac_sched_crc_indication(const_cast<void*>(static_cast<const void*>(&crc)),
+                0, ue_cc.get_cell_cfg().pci, (uint16_t)crc.rnti, sizeof(ul_crc_pdu_indication));
+#endif
 
               const int tbs = ue_cc.handle_crc_pdu(sl_rx, crc);
               if (tbs < 0) {
@@ -459,6 +506,12 @@ void ue_event_manager::handle_uci_indication(const uci_indication& ind)
     if (not cell_specific_events[ind.cell_index].try_push(cell_event_t{
             uci.ue_index,
             [this, uci_sl = ind.slot_rx, uci_pdu = uci](ue_cell& ue_cc) {
+
+#ifdef JBPF_ENABLED
+              hook_mac_sched_uci_indication(const_cast<void*>(static_cast<const void*>(&uci_pdu)),
+                0, ue_cc.get_cell_cfg().pci, (uint16_t)uci_pdu.crnti, sizeof(uci_indication::uci_pdu));
+#endif
+
               if (const auto* pucch_f0f1 = std::get_if<uci_indication::uci_pdu::uci_pucch_f0_or_f1_pdu>(&uci_pdu.pdu)) {
                 // Process DL HARQ ACKs.
                 if (not pucch_f0f1->harqs.empty()) {
@@ -549,6 +602,14 @@ void ue_event_manager::handle_srs_indication(const srs_indication& ind)
   for (unsigned i = 0, e = ind.srss.size(); i != e; ++i) {
     const srs_indication::srs_indication_pdu& srs_pdu = ind.srss[i];
 
+#ifdef JBPF_ENABLED
+    ue* u = ue_db.find_by_rnti(srs_pdu.rnti);
+    if (u ) {
+      hook_mac_sched_srs_indication(const_cast<void*>(static_cast<const void*>(&srs_pdu)),
+        0, u->get_pcell().get_cell_cfg().pci, (uint16_t)srs_pdu.rnti, sizeof(srs_indication::srs_indication_pdu));
+    }
+#endif
+
     if (not cell_specific_events[ind.cell_index].try_push(cell_event_t{
             srs_pdu.ue_index,
             [this, channel_matrix = srs_pdu.channel_matrix, time_advance_offset = srs_pdu.time_advance_offset](
@@ -583,6 +644,12 @@ void ue_event_manager::handle_dl_mac_ce_indication(const dl_mac_ce_indication& c
       return;
     }
     auto& u = ue_db[ce.ue_index];
+
+#ifdef JBPF_ENABLED
+    hook_mac_sched_dl_mac_ce_indication(const_cast<void*>(static_cast<const void*>(&ce)),
+      0, u.get_pcell().get_cell_cfg().pci, (uint16_t)u.crnti, sizeof(dl_mac_ce_indication));
+#endif
+
     u.handle_dl_mac_ce_indication(ce);
 
     // Notify SRB fallback scheduler upon receiving ConRes CE indication.
@@ -601,6 +668,12 @@ void ue_event_manager::handle_dl_mac_ce_indication(const dl_mac_ce_indication& c
 
 void ue_event_manager::handle_dl_buffer_state_indication(const dl_buffer_state_indication_message& bs)
 {
+#ifdef JBPF_ENABLED
+  auto& u = ue_db[bs.ue_index];
+  hook_mac_sched_dl_buffer_state_indication(const_cast<void*>(static_cast<const void*>(&bs)),
+    0, u.get_pcell().get_cell_cfg().pci, (uint16_t)u.crnti, sizeof(dl_buffer_state_indication_message));
+#endif
+
   dl_bo_mng->handle_dl_buffer_state_indication(bs);
 }
 

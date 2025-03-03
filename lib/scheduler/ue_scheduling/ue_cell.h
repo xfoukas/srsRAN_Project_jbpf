@@ -75,6 +75,8 @@ public:
   /// \brief Determines whether the UE cell is currently active.
   bool is_active() const { return active; }
 
+  const cell_configuration& get_cell_cfg() const { return cell_cfg; }  
+
   const ue_cell_configuration& cfg() const { return *ue_cfg; }
 
   /// \brief Deactivates cell.
