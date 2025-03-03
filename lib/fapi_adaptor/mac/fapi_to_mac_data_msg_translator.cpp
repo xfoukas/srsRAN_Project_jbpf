@@ -20,9 +20,21 @@
  *
  */
 
+#include <iostream>
+
 #include "fapi_to_mac_data_msg_translator.h"
 #include "srsran/fapi/messages.h"
 #include "srsran/srslog/srslog.h"
+
+#ifdef JBPF_ENABLED
+#include "jbpf_srsran_hooks.h"
+DEFINE_JBPF_HOOK(fapi_rx_data_indication);
+DEFINE_JBPF_HOOK(fapi_crc_indication);
+DEFINE_JBPF_HOOK(fapi_uci_indication);
+DEFINE_JBPF_HOOK(fapi_srs_indication);
+DEFINE_JBPF_HOOK(fapi_rach_indication);
+#endif
+
 
 using namespace srsran;
 using namespace fapi_adaptor;
@@ -111,6 +123,10 @@ fapi_to_mac_data_msg_translator::fapi_to_mac_data_msg_translator(subcarrier_spac
 
 void fapi_to_mac_data_msg_translator::on_rx_data_indication(const fapi::rx_data_indication_message& msg)
 {
+#ifdef JBPF_ENABLED
+    hook_fapi_rx_data_indication(const_cast<void*>(static_cast<const void*>(&msg)), 0, 0, sizeof(fapi::rx_data_indication_message));
+#endif
+
   mac_rx_data_indication indication;
   indication.sl_rx      = slot_point(scs, msg.sfn, msg.slot);
   indication.cell_index = to_du_cell_index(0);
@@ -141,6 +157,10 @@ void fapi_to_mac_data_msg_translator::on_rx_data_indication(const fapi::rx_data_
 
 void fapi_to_mac_data_msg_translator::on_crc_indication(const fapi::crc_indication_message& msg)
 {
+#ifdef JBPF_ENABLED
+    hook_fapi_crc_indication(const_cast<void*>(static_cast<const void*>(&msg)), 0, 0, sizeof(fapi::crc_indication_message));
+#endif
+
   mac_crc_indication_message indication;
   indication.sl_rx = slot_point(scs, msg.sfn, msg.slot);
 
@@ -157,7 +177,7 @@ void fapi_to_mac_data_msg_translator::on_crc_indication(const fapi::crc_indicati
     }
   }
 
-  cell_control_handler.get().handle_crc(indication);
+  cell_control_handler.get().handle_crc(indication);  
 }
 
 /// Converts the given FAPI Timing Advance Offset in nanoseconds to Physical layer time unit.
@@ -278,6 +298,10 @@ static void convert_fapi_to_mac_pucch_f2_f3_f4_uci_ind(mac_uci_pdu::pucch_f2_or_
 
 void fapi_to_mac_data_msg_translator::on_uci_indication(const fapi::uci_indication_message& msg)
 {
+#ifdef JBPF_ENABLED
+    hook_fapi_uci_indication(const_cast<void*>(static_cast<const void*>(&msg)), 0, 0, sizeof(fapi::uci_indication_message));
+#endif
+
   mac_uci_indication_message mac_msg;
   mac_msg.sl_rx = slot_point(scs, msg.sfn, msg.slot);
   for (const auto& pdu : msg.pdus) {
@@ -314,6 +338,10 @@ void fapi_to_mac_data_msg_translator::on_uci_indication(const fapi::uci_indicati
 
 void fapi_to_mac_data_msg_translator::on_srs_indication(const fapi::srs_indication_message& msg)
 {
+#ifdef JBPF_ENABLED
+    hook_fapi_srs_indication(const_cast<void*>(static_cast<const void*>(&msg)), 0, 0, sizeof(fapi::srs_indication_message));
+#endif
+
   mac_srs_indication_message mac_msg;
   mac_msg.sl_rx = slot_point(scs, msg.sfn, msg.slot);
 
@@ -347,6 +375,11 @@ static float to_prach_preamble_snr_dB(int fapi_snr)
 
 void fapi_to_mac_data_msg_translator::on_rach_indication(const fapi::rach_indication_message& msg)
 {
+#ifdef JBPF_ENABLED
+    hook_fapi_rach_indication(const_cast<void*>(static_cast<const void*>(&msg)), 0, 0, sizeof(fapi::rach_indication_message));
+#endif
+
+
   mac_rach_indication indication;
   indication.slot_rx = slot_point(scs, msg.sfn, msg.slot);
   for (const auto& pdu : msg.pdus) {

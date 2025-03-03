@@ -5,7 +5,7 @@
 int
 main(int argc, char** argv)
 {
-    CLI::App app{"FlexRAN verifier"};
+    CLI::App app{"srsRAN verifier"};
     const char *asm_file, *section;
     jbpf_verifier_result_t result;
 

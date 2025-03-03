@@ -11,8 +11,9 @@ extern "C"
 #include "jbpf_helper_api_defs_ext.h"
 
 typedef enum {
-    JBPF_PROG_TYPE_SRSRAN_OFH = CUSTOM_PROGRAM_START_ID,
-    JBPF_PROG_TYPE_SRSRAN_LAYER2,
+    JBPF_PROG_TYPE_RAN_OFH = CUSTOM_PROGRAM_START_ID,
+    JBPF_PROG_TYPE_RAN_LAYER2,
+    JBPF_PROG_TYPE_RAN_MAC_SCHED
 } jbpf_srsran_index_e;
 
 /* OFH context*/
@@ -36,6 +37,19 @@ struct jbpf_ran_layer2_ctx {
     uint16_t slot; /* 3GPP slot number */
     uint16_t cell_id; /* Cell id */
 };
+
+/* MAC Scheduler context */
+struct jbpf_mac_sched_ctx {
+    uint64_t data; /* Pointer to beginning of variable-sized L2 struct */
+    uint64_t data_end; /* Pointer to end+1 of variable-sized struct */
+    uint64_t meta_data; /* Used for the program to store metadata */
+    uint16_t ctx_id; /* Context id (could be implementation specific) */
+    uint16_t cell_id; /* Cell id */
+    uint16_t rnti; /* UE RNTI */
+};
+
+
+
 
 #ifdef __cplusplus
 }

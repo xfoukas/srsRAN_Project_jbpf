@@ -10,8 +10,8 @@
 //   uint16_t ctx_id; /* Context id (could be implementation specific) */
 //   uint8_t direction; /* 0 DL, 1 UL */
 // };
-constexpr int jbpf_srsran_ofh_regions = 3 * 8 + 1 * 2 + 1;
-constexpr ebpf_context_descriptor_t jbpf_srsran_ofh_descr = {jbpf_srsran_ofh_regions, 0, 1 * 8, 2 * 8};
+constexpr int jbpf_ran_ofh_regions = 3 * 8 + 1 * 2 + 1;
+constexpr ebpf_context_descriptor_t jbpf_ran_ofh_descr = {jbpf_ran_ofh_regions, 0, 1 * 8, 2 * 8};
 
 /* L2 context*/
 // struct jbpf_ran_layer2_ctx {
@@ -23,5 +23,18 @@ constexpr ebpf_context_descriptor_t jbpf_srsran_ofh_descr = {jbpf_srsran_ofh_reg
 //     uint16_t slot; /* 3GPP slot number */
 //     uint16_t cell_id; /* Cell id */
 // };
-constexpr int jbpf_srsran_layer2_regions = 3 * 8 + 4 * 2;
-constexpr ebpf_context_descriptor_t jbpf_srsran_layer2_descr = {jbpf_srsran_layer2_regions, 0, 1 * 8, 2 * 8};
+constexpr int jbpf_ran_layer2_regions = 3 * 8 + 4 * 2;
+constexpr ebpf_context_descriptor_t jbpf_ran_layer2_descr = {jbpf_ran_layer2_regions, 0, 1 * 8, 2 * 8};
+
+
+/* MAC Scheduler context */
+// struct jbpf_mac_sched_ctx {
+//     uint64_t data; /* Pointer to beginning of variable-sized L2 struct */
+//     uint64_t data_end; /* Pointer to end+1 of variable-sized struct */
+//     uint64_t meta_data; /* Used for the program to store metadata */
+//     uint16_t ctx_id; /* Context id (could be implementation specific) */
+//     uint16_t cell_id; /* Cell id */
+//     uint16_t rnti; /* UE RNTI */
+// };
+constexpr int jbpf_ran_mac_sched_regions = 3 * 8 + 3 * 2;
+constexpr ebpf_context_descriptor_t jbpf_ran_mac_sched_descr = {jbpf_ran_mac_sched_regions, 0, 1 * 8, 2 * 8};

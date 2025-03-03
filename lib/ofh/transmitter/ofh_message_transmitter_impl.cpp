@@ -25,11 +25,7 @@
 #include "srsran/instrumentation/traces/ofh_traces.h"
 
 #ifdef JBPF_ENABLED
-#include "jbpf.h"
-#include "jbpf_hook.h"
-#include "jbpf_defs.h"
 #include "jbpf_srsran_hooks.h"
-
 #endif
 
 using namespace srsran;
