@@ -53,6 +53,19 @@ srsran_verify(const char* objfile, const char* section, const char* asmfile)
         jbpf_verifier_register_program_type(JBPF_PROG_TYPE_RAN_MAC_SCHED, new_program_type);
     }
 
-
+    // register jbpf_rlc_ctx program type
+    {
+        // Next, we define the new program type
+        EbpfProgramType new_program_type;
+        new_program_type.name = "jbpf_srsran_generic";
+        new_program_type.context_descriptor = &jbpf_srsran_generic_descr;
+        new_program_type.section_prefixes = {
+            "jbpf_srsran_generic"}; // The name(s) used to define the ELF section,
+                                // where the codelet function is stored for this program type
+        new_program_type.is_privileged = false;
+        jbpf_verifier_register_program_type(JBPF_PROG_TYPE_RAN_GENERIC, new_program_type);
+    }
+    
+    // Load the object file
     return jbpf_verify(objfile, section, asmfile);
 }

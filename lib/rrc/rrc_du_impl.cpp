@@ -27,6 +27,12 @@
 #include "srsran/asn1/rrc_nr/dl_ccch_msg.h"
 #include "srsran/cu_cp/cu_cp_types.h"
 
+#ifdef JBPF_ENABLED
+#include "jbpf_srsran_hooks.h"
+DEFINE_JBPF_HOOK(rrc_ue_add);
+DEFINE_JBPF_HOOK(rrc_ue_remove);
+#endif
+
 using namespace srsran;
 using namespace srs_cu_cp;
 using namespace asn1::rrc_nr;
@@ -154,6 +160,15 @@ rrc_ue_interface* rrc_du_impl::add_ue(const rrc_ue_creation_message& msg)
                                                          msg.rrc_context));
 
   if (res.second) {
+
+#ifdef JBPF_ENABLED 
+    {
+      struct jbpf_rrc_ctx_info ctx_info = {0, (uint64_t)ue_index};
+      hook_rrc_ue_add(&ctx_info, (uint16_t)msg.c_rnti, rrc_cell.pci, rrc_cell.tac,
+        rrc_cell.cgi.plmn_id.to_bcd(), rrc_cell.cgi.nci.value());
+    }
+#endif
+
     auto& u = ue_db.at(ue_index);
     return u.get();
   }
@@ -167,6 +182,13 @@ void rrc_du_impl::remove_ue(ue_index_t ue_index)
     logger.warning("ue={}: Can't remove UE. Cause: UE not found", ue_index);
     return;
   }
+
+#ifdef JBPF_ENABLED 
+  {
+    struct jbpf_rrc_ctx_info ctx_info = {0, (uint64_t)ue_index};
+    hook_rrc_ue_remove(&ctx_info);
+  }
+#endif
 
   // Delete RRC UE.
   ue_db.erase(ue_it);

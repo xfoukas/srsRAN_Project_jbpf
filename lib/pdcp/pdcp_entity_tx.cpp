@@ -27,6 +27,17 @@
 #include "srsran/support/bit_encoding.h"
 #include "srsran/support/srsran_assert.h"
 
+#ifdef JBPF_ENABLED
+#include "jbpf_srsran_hooks.h"
+DEFINE_JBPF_HOOK(pdcp_dl_new_sdu);
+DEFINE_JBPF_HOOK(pdcp_dl_tx_data_pdu);
+DEFINE_JBPF_HOOK(pdcp_dl_tx_control_pdu);
+DEFINE_JBPF_HOOK(pdcp_dl_handle_tx_notification);
+DEFINE_JBPF_HOOK(pdcp_dl_handle_delivery_notification);
+DEFINE_JBPF_HOOK(pdcp_dl_discard_pdu);
+DEFINE_JBPF_HOOK(pdcp_dl_reestablish);
+#endif
+
 using namespace srsran;
 
 /// \brief Receive an SDU from the upper layers, apply encryption
@@ -58,6 +69,7 @@ void pdcp_entity_tx::handle_sdu(byte_buffer buf)
   }
 
   metrics_add_sdus(1, buf.length());
+
   logger.log_debug(buf.begin(), buf.end(), "TX SDU. sdu_len={}", buf.length());
 
   // The PDCP is not allowed to use the same COUNT value more than once for a given security key,
@@ -94,6 +106,15 @@ void pdcp_entity_tx::handle_sdu(byte_buffer buf)
 
   // Perform header compression
   // TODO
+
+#ifdef JBPF_ENABLED 
+  {
+    int rb_id_value = rb_id.is_srb() ? srb_id_to_uint(rb_id.get_srb_id()) 
+                                  : drb_id_to_uint(rb_id.get_drb_id());
+    struct jbpf_pdcp_ctx_info bearer_info = {0, ue_index, rb_id.is_srb(), (uint8_t)rb_id_value, (uint8_t)rlc_mode};                                         
+    hook_pdcp_dl_new_sdu(&bearer_info, buf.length(), st.tx_next);
+  }
+#endif
 
   // Prepare header
   pdcp_data_pdu_header hdr = {};
@@ -159,6 +180,16 @@ void pdcp_entity_tx::handle_sdu(byte_buffer buf)
 void pdcp_entity_tx::reestablish(security::sec_128_as_config sec_cfg)
 {
   logger.log_debug("Reestablishing PDCP. st={}", st);
+
+#ifdef JBPF_ENABLED 
+  {
+    int rb_id_value = rb_id.is_srb() ? srb_id_to_uint(rb_id.get_srb_id()) 
+                                    : drb_id_to_uint(rb_id.get_drb_id());
+    struct jbpf_pdcp_ctx_info bearer_info = {0, ue_index, rb_id.is_srb(), (uint8_t)rb_id_value, (uint8_t)rlc_mode};                                         
+    hook_pdcp_dl_reestablish(&bearer_info);
+}
+#endif
+
   // - for UM DRBs and AM DRBs, reset the ROHC protocol for uplink and start with an IR state in U-mode (as
   //   defined in RFC 3095 [8] and RFC 4815 [9]) if drb-ContinueROHC is not configured in TS 38.331 [3];
   // - for UM DRBs and AM DRBs, reset the EHC protocol for uplink if drb-ContinueEHC-UL is not configured in
@@ -219,6 +250,16 @@ void pdcp_entity_tx::write_data_pdu_to_lower_layers(uint32_t count, byte_buffer 
                   count,
                   is_retx);
   metrics_add_pdus(1, buf.length());
+
+#ifdef JBPF_ENABLED 
+  {
+    int rb_id_value = rb_id.is_srb() ? srb_id_to_uint(rb_id.get_srb_id()) 
+                                : drb_id_to_uint(rb_id.get_drb_id());
+    struct jbpf_pdcp_ctx_info bearer_info = {0, ue_index, rb_id.is_srb(), (uint8_t)rb_id_value, (uint8_t)rlc_mode};                                         
+    hook_pdcp_dl_tx_data_pdu(&bearer_info, buf.length(), count, (uint8_t)is_retx, tx_window->size());
+  }
+#endif
+
   lower_dn.on_new_pdu(std::move(buf), is_retx);
 }
 
@@ -226,6 +267,16 @@ void pdcp_entity_tx::write_control_pdu_to_lower_layers(byte_buffer buf)
 {
   logger.log_info(buf.begin(), buf.end(), "TX PDU. type=ctrl pdu_len={}", buf.length());
   metrics_add_pdus(1, buf.length());
+
+#ifdef JBPF_ENABLED 
+  {
+    int rb_id_value = rb_id.is_srb() ? srb_id_to_uint(rb_id.get_srb_id()) 
+                                : drb_id_to_uint(rb_id.get_drb_id());
+    struct jbpf_pdcp_ctx_info bearer_info = {0, ue_index, rb_id.is_srb(), (uint8_t)rb_id_value, (uint8_t)rlc_mode};                                         
+    hook_pdcp_dl_tx_control_pdu(&bearer_info, buf.length(), tx_window->size());
+  }
+#endif
+
   lower_dn.on_new_pdu(std::move(buf), /* is_retx = */ false);
 }
 
@@ -504,6 +555,15 @@ void pdcp_entity_tx::handle_transmit_notification(uint32_t notif_sn)
   st.tx_trans = notif_count + 1;
   logger.log_debug("Updated tx_trans. {}", st);
 
+#ifdef JBPF_ENABLED 
+  {
+    int rb_id_value = rb_id.is_srb() ? srb_id_to_uint(rb_id.get_srb_id()) 
+                                : drb_id_to_uint(rb_id.get_drb_id());
+    struct jbpf_pdcp_ctx_info bearer_info = {0, ue_index, rb_id.is_srb(), (uint8_t)rb_id_value, (uint8_t)rlc_mode};                                         
+    hook_pdcp_dl_handle_tx_notification(&bearer_info, notif_count, tx_window->size());
+  }
+#endif
+
   // Stop discard timers if required
   if (!cfg.discard_timer.has_value()) {
     return;
@@ -534,6 +594,16 @@ void pdcp_entity_tx::handle_delivery_notification(uint32_t notif_sn)
 
   if (is_am()) {
     stop_discard_timer(notif_count);
+
+#ifdef JBPF_ENABLED 
+    {
+      int rb_id_value = rb_id.is_srb() ? srb_id_to_uint(rb_id.get_srb_id()) 
+                                  : drb_id_to_uint(rb_id.get_drb_id());
+      struct jbpf_pdcp_ctx_info bearer_info = {0, ue_index, rb_id.is_srb(), (uint8_t)rb_id_value, (uint8_t)rlc_mode};                                         
+      hook_pdcp_dl_handle_delivery_notification(&bearer_info, notif_count, tx_window->size());
+    }
+#endif
+
   } else {
     logger.log_error("Ignored unexpected PDU delivery notification in UM bearer. notif_sn={}", notif_sn);
   }
@@ -724,6 +794,15 @@ void pdcp_entity_tx::discard_pdu(uint32_t count)
   if (st.tx_trans < st.tx_next_ack) {
     st.tx_trans = st.tx_next_ack;
   }
+
+#ifdef JBPF_ENABLED 
+  {
+    int rb_id_value = rb_id.is_srb() ? srb_id_to_uint(rb_id.get_srb_id()) 
+                                : drb_id_to_uint(rb_id.get_drb_id());
+    struct jbpf_pdcp_ctx_info bearer_info = {0, ue_index, rb_id.is_srb(), (uint8_t)rb_id_value, (uint8_t)rlc_mode};                                         
+    hook_pdcp_dl_discard_pdu(&bearer_info, count, tx_window->size());
+  }
+#endif
 }
 
 std::unique_ptr<sdu_window<pdcp_entity_tx::pdcp_tx_sdu_info>> pdcp_entity_tx::create_tx_window(pdcp_sn_size sn_size_)

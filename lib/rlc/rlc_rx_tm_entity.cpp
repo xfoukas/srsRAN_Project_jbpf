@@ -22,20 +22,24 @@
 
 #include "rlc_rx_tm_entity.h"
 
+#ifdef JBPF_ENABLED
+#include "jbpf_srsran_hooks.h"
+#endif
+
 using namespace srsran;
 
-rlc_rx_tm_entity::rlc_rx_tm_entity(gnb_du_id_t                       gnb_du_id,
-                                   du_ue_index_t                     ue_index,
-                                   rb_id_t                           rb_id,
+rlc_rx_tm_entity::rlc_rx_tm_entity(gnb_du_id_t                       gnb_du_id_,
+                                   du_ue_index_t                     ue_index_,
+                                   rb_id_t                           rb_id_,
                                    const rlc_rx_tm_config&           config,
                                    rlc_rx_upper_layer_data_notifier& upper_dn_,
                                    rlc_metrics_aggregator&           metrics_agg_,
                                    rlc_pcap&                         pcap_,
                                    task_executor&                    ue_executor,
                                    timer_manager&                    timers) :
-  rlc_rx_entity(gnb_du_id, ue_index, rb_id, upper_dn_, metrics_agg_, pcap_, ue_executor, timers),
+  rlc_rx_entity(gnb_du_id_, ue_index_, rb_id_, upper_dn_, metrics_agg_, pcap_, ue_executor, timers),
   cfg(config),
-  pcap_context(ue_index, rb_id, /* is_uplink */ true)
+  pcap_context(ue_index, rb_id_, /* is_uplink */ true)
 {
   metrics.metrics_set_mode(rlc_mode::tm);
   logger.log_info("RLC TM created. {}", cfg);
@@ -54,6 +58,16 @@ void rlc_rx_tm_entity::handle_pdu(byte_buffer_slice buf)
     metrics.metrics_add_lost_pdus(1);
     return;
   }
+
+#ifdef JBPF_ENABLED
+      {
+        int rb_id_value = rb_id.is_srb() ? srb_id_to_uint(rb_id.get_srb_id()) 
+                                        : drb_id_to_uint(rb_id.get_drb_id());
+        struct jbpf_rlc_ctx_info ctx_info = {0, (uint64_t)gnb_du_id, ue_index, rb_id.is_srb(), 
+          (uint8_t)rb_id_value, JBPF_RLC_MODE_TM};
+        hook_rlc_ul_sdu_delivered(&ctx_info, 0, 0, sdu.value().length());
+      }
+#endif
 
   logger.log_info(sdu.value().begin(), sdu.value().end(), "RX SDU. sdu_len={}", sdu.value().length());
   metrics.metrics_add_sdus(1, sdu.value().length());

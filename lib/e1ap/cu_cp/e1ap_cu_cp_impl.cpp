@@ -30,6 +30,14 @@
 #include "srsran/asn1/e1ap/e1ap.h"
 #include "srsran/ran/cause/e1ap_cause.h"
 
+#ifdef JBPF_ENABLED
+#include "jbpf_srsran_hooks.h"
+DEFINE_JBPF_HOOK(e1_cucp_bearer_context_setup);
+DEFINE_JBPF_HOOK(e1_cucp_bearer_context_modification);
+DEFINE_JBPF_HOOK(e1_cucp_bearer_context_release);
+DEFINE_JBPF_HOOK(e1_cucp_bearer_context_inactivity);
+#endif
+
 using namespace srsran;
 using namespace asn1::e1ap;
 using namespace srs_cu_cp;
@@ -125,6 +133,12 @@ e1ap_cu_cp_impl::handle_bearer_context_setup_request(const e1ap_bearer_context_s
   fill_asn1_bearer_context_setup_request(bearer_context_setup_request, request);
   bearer_context_setup_request->gnb_cu_cp_ue_e1ap_id = gnb_cu_cp_ue_e1ap_id_to_uint(ue_ctxt.ue_ids.cu_cp_ue_e1ap_id);
 
+#ifdef JBPF_ENABLED 
+  struct jbpf_e1_ctx_info bearer_info = {0, (uint64_t)request.ue_index, 
+    bearer_context_setup_request->gnb_cu_cp_ue_e1ap_id, 0};
+  hook_e1_cucp_bearer_context_setup(&bearer_info);
+#endif
+
   return launch_async<bearer_context_setup_procedure>(
       e1ap_msg, ue_ctxt.bearer_ev_mng, ue_ctxt_list, pdu_notifier, ue_ctxt.logger);
 }
@@ -156,6 +170,12 @@ e1ap_cu_cp_impl::handle_bearer_context_modification_request(const e1ap_bearer_co
 
   fill_asn1_bearer_context_modification_request(bearer_context_mod_request, request);
 
+#ifdef JBPF_ENABLED 
+  struct jbpf_e1_ctx_info bearer_info = {0, (uint64_t)request.ue_index, 
+    bearer_context_mod_request->gnb_cu_cp_ue_e1ap_id, bearer_context_mod_request->gnb_cu_up_ue_e1ap_id};
+  hook_e1_cucp_bearer_context_modification(&bearer_info);
+#endif
+
   return launch_async<bearer_context_modification_procedure>(
       e1ap_msg, ue_ctxt.bearer_ev_mng, pdu_notifier, ue_ctxt.logger);
 }
@@ -182,6 +202,12 @@ e1ap_cu_cp_impl::handle_bearer_context_release_command(const e1ap_bearer_context
   bearer_context_release_cmd->gnb_cu_up_ue_e1ap_id = gnb_cu_up_ue_e1ap_id_to_uint(ue_ctxt.ue_ids.cu_up_ue_e1ap_id);
 
   fill_asn1_bearer_context_release_command(bearer_context_release_cmd, command);
+
+#ifdef JBPF_ENABLED 
+  struct jbpf_e1_ctx_info bearer_info = {0, (uint64_t)command.ue_index, 
+    bearer_context_release_cmd->gnb_cu_cp_ue_e1ap_id, bearer_context_release_cmd->gnb_cu_up_ue_e1ap_id};
+  hook_e1_cucp_bearer_context_release(&bearer_info);
+#endif
 
   return launch_async<bearer_context_release_procedure>(e1ap_msg, command.ue_index, ue_ctxt_list, pdu_notifier);
 }
@@ -246,6 +272,11 @@ void e1ap_cu_cp_impl::handle_bearer_context_inactivity_notification(
 
   cu_cp_inactivity_notification inactivity_notification;
   inactivity_notification.ue_index = ue_ctxt.ue_ids.ue_index;
+
+#ifdef JBPF_ENABLED 
+  struct jbpf_e1_ctx_info bearer_info = {0, (uint64_t)inactivity_notification.ue_index, 0, 0};
+  hook_e1_cucp_bearer_context_inactivity(&bearer_info);
+#endif
 
   switch (msg->activity_info.type()) {
     // DRB activity notification level

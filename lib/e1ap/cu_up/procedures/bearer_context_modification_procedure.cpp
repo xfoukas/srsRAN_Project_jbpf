@@ -26,6 +26,10 @@
 #include "srsran/e1ap/common/e1ap_message.h"
 #include "srsran/e1ap/cu_up/e1ap_cu_up_bearer_context_update.h"
 
+#ifdef JBPF_ENABLED
+#include "jbpf_srsran_hooks.h"
+#endif
+
 using namespace srsran;
 using namespace srsran::srs_cu_up;
 
@@ -60,6 +64,14 @@ void bearer_context_modification_procedure::operator()(coro_context<async_task<v
   // Could not find UE
   if (bearer_context_mod_response_msg.ue_index == INVALID_UE_INDEX) {
     ue_ctxt.logger.log_error("Sending BearerContextModificationFailure: Cause: Invalid UE index");
+
+#ifdef JBPF_ENABLED 
+  { 
+    struct jbpf_e1_ctx_info bearer_info = {0, bearer_context_mod.ue_index,request->gnb_cu_cp_ue_e1ap_id, request->gnb_cu_up_ue_e1ap_id};
+    hook_e1_cuup_bearer_context_modification(&bearer_info, /*success*/false);
+  }
+#endif
+
     pdu_notifier.on_new_message(e1ap_msg);
     CORO_EARLY_RETURN();
   }
@@ -69,6 +81,14 @@ void bearer_context_modification_procedure::operator()(coro_context<async_task<v
     e1ap_msg.pdu.unsuccessful_outcome().value.bearer_context_mod_fail()->cause =
         cause_to_asn1(bearer_context_mod_response_msg.cause.value());
     ue_ctxt.logger.log_warning("Sending BearerContextModificationFailure");
+
+#ifdef JBPF_ENABLED 
+  { 
+    struct jbpf_e1_ctx_info bearer_info = {0, bearer_context_mod.ue_index,request->gnb_cu_cp_ue_e1ap_id, request->gnb_cu_up_ue_e1ap_id};
+    hook_e1_cuup_bearer_context_modification(&bearer_info, /*success*/false);
+  }
+#endif
+  
     pdu_notifier.on_new_message(e1ap_msg);
     CORO_EARLY_RETURN();
   }
@@ -85,6 +105,14 @@ void bearer_context_modification_procedure::operator()(coro_context<async_task<v
       e1ap_msg.pdu.successful_outcome().value.bearer_context_mod_resp()->sys_bearer_context_mod_resp,
       bearer_context_mod_response_msg);
   ue_ctxt.logger.log_debug("Sending BearerContextModificationResponse");
+
+#ifdef JBPF_ENABLED 
+  { 
+    struct jbpf_e1_ctx_info bearer_info = {0, bearer_context_mod.ue_index,request->gnb_cu_cp_ue_e1ap_id, request->gnb_cu_up_ue_e1ap_id};
+    hook_e1_cuup_bearer_context_modification(&bearer_info, /*success*/true);
+  }
+#endif
+
   pdu_notifier.on_new_message(e1ap_msg);
   CORO_RETURN();
 }

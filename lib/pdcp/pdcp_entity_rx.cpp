@@ -26,9 +26,17 @@
 #include "srsran/instrumentation/traces/up_traces.h"
 #include "srsran/support/bit_encoding.h"
 
+#ifdef JBPF_ENABLED
+#include "jbpf_srsran_hooks.h"
+DEFINE_JBPF_HOOK(pdcp_ul_rx_data_pdu);
+DEFINE_JBPF_HOOK(pdcp_ul_rx_control_pdu);
+DEFINE_JBPF_HOOK(pdcp_ul_deliver_sdu);
+DEFINE_JBPF_HOOK(pdcp_ul_reestablish);
+#endif
+
 using namespace srsran;
 
-pdcp_entity_rx::pdcp_entity_rx(uint32_t                        ue_index,
+pdcp_entity_rx::pdcp_entity_rx(uint32_t                        ue_index_,
                                rb_id_t                         rb_id_,
                                pdcp_rx_config                  cfg_,
                                pdcp_rx_upper_data_notifier&    upper_dn_,
@@ -37,7 +45,9 @@ pdcp_entity_rx::pdcp_entity_rx(uint32_t                        ue_index,
                                task_executor&                  ue_ul_executor_,
                                task_executor&                  crypto_executor_) :
   pdcp_entity_tx_rx_base(rb_id_, cfg_.rb_type, cfg_.rlc_mode, cfg_.sn_size),
-  logger("PDCP", {ue_index, rb_id_, "UL"}),
+  ue_index(ue_index_),
+  rb_id(rb_id_),
+  logger("PDCP", {ue_index_, rb_id_, "UL"}),
   cfg(cfg_),
   rx_window(create_rx_window(cfg.sn_size)),
   upper_dn(upper_dn_),
@@ -99,6 +109,15 @@ void pdcp_entity_rx::reestablish(security::sec_128_as_config sec_cfg)
 {
   // - process the PDCP Data PDUs that are received from lower layers due to the re-establishment of the lower layers,
   //   as specified in the clause 5.2.2.1;
+
+#ifdef JBPF_ENABLED 
+  {
+    int rb_id_value = rb_id.is_srb() ? srb_id_to_uint(rb_id.get_srb_id()) 
+                                    : drb_id_to_uint(rb_id.get_drb_id());
+    struct jbpf_pdcp_ctx_info bearer_info = {0, ue_index, rb_id.is_srb(), (uint8_t)rb_id_value, (uint8_t)rlc_mode};                                         
+    hook_pdcp_ul_reestablish(&bearer_info);
+  }
+#endif
 
   // - for SRBs, discard all stored PDCP SDUs and PDCP PDUs;
   if (is_srb()) {
@@ -253,6 +272,15 @@ void pdcp_entity_rx::handle_data_pdu(byte_buffer pdu)
     st.rx_next = rcvd_count + 1;
   }
 
+#ifdef JBPF_ENABLED 
+  {
+    int rb_id_value = rb_id.is_srb() ? srb_id_to_uint(rb_id.get_srb_id()) 
+                                    : drb_id_to_uint(rb_id.get_drb_id());
+    struct jbpf_pdcp_ctx_info bearer_info = {0, ue_index, rb_id.is_srb(), (uint8_t)rb_id_value, (uint8_t)rlc_mode};                                         
+    hook_pdcp_ul_rx_data_pdu(&bearer_info, sdu_info.sdu.length(), hdr_len_bytes, rcvd_count, rx_window->size());
+  }
+#endif
+
   // TODO if out-of-order configured, submit to upper layer
   // /!\ Caution: reorder_queue is used to build status report:
   //     For out-of-order:
@@ -295,6 +323,15 @@ void pdcp_entity_rx::handle_control_pdu(byte_buffer_chain pdu)
   pdcp_dc_field dc = pdcp_pdu_get_dc(hdr_byte);
   srsran_assert(dc == pdcp_dc_field::control, "Invalid D/C field in control PDU. dc={}", dc);
 
+#ifdef JBPF_ENABLED 
+  {
+    int rb_id_value = rb_id.is_srb() ? srb_id_to_uint(rb_id.get_srb_id()) 
+                                    : drb_id_to_uint(rb_id.get_drb_id());
+    struct jbpf_pdcp_ctx_info bearer_info = {0, ue_index, rb_id.is_srb(), (uint8_t)rb_id_value, (uint8_t)rlc_mode};                                         
+    hook_pdcp_ul_rx_control_pdu(&bearer_info, pdu.length(), rx_window->size());
+  }
+#endif
+
   // Switch control PDU type (CPT)
   pdcp_control_pdu_header control_hdr = {};
   control_hdr.cpt                     = pdcp_control_pdu_get_cpt(hdr_byte);
@@ -317,6 +354,16 @@ void pdcp_entity_rx::deliver_all_consecutive_counts()
 
     // Pass PDCP SDU to the upper layers
     metrics_add_sdus(1, sdu_info.sdu.length());
+
+#ifdef JBPF_ENABLED
+    {
+      int rb_id_value = rb_id.is_srb() ? srb_id_to_uint(rb_id.get_srb_id()) 
+                                      : drb_id_to_uint(rb_id.get_drb_id());
+      struct jbpf_pdcp_ctx_info bearer_info = {0, ue_index, rb_id.is_srb(), (uint8_t)rb_id_value, (uint8_t)rlc_mode};                                         
+      hook_pdcp_ul_deliver_sdu(&bearer_info, sdu_info.sdu.length(), rx_window->size());
+    }
+#endif
+
     upper_dn.on_new_sdu(std::move(sdu_info.sdu));
     rx_window->remove_sn(st.rx_deliv);
 
@@ -337,7 +384,18 @@ void pdcp_entity_rx::deliver_all_sdus()
 
       // Pass PDCP SDU to the upper layers
       metrics_add_sdus(1, sdu_info.sdu.length());
+
+#ifdef JBPF_ENABLED
+    {
+      int rb_id_value = rb_id.is_srb() ? srb_id_to_uint(rb_id.get_srb_id()) 
+                                      : drb_id_to_uint(rb_id.get_drb_id());
+      struct jbpf_pdcp_ctx_info bearer_info = {0, ue_index, rb_id.is_srb(), (uint8_t)rb_id_value, (uint8_t)rlc_mode};
+      hook_pdcp_ul_deliver_sdu(&bearer_info, sdu_info.sdu.length(), rx_window->size());
+    }
+#endif
+
       upper_dn.on_new_sdu(std::move(sdu_info.sdu));
+        
       rx_window->remove_sn(count);
     }
   }
@@ -538,6 +596,16 @@ void pdcp_entity_rx::handle_t_reordering_expire()
 
       // Pass PDCP SDU to the upper layers
       metrics_add_sdus(1, sdu_info.sdu.length());
+
+#ifdef JBPF_ENABLED
+    {
+      int rb_id_value = rb_id.is_srb() ? srb_id_to_uint(rb_id.get_srb_id()) 
+                                      : drb_id_to_uint(rb_id.get_drb_id());
+      struct jbpf_pdcp_ctx_info bearer_info = {0, ue_index, rb_id.is_srb(), (uint8_t)rb_id_value, (uint8_t)rlc_mode};                                         
+      hook_pdcp_ul_deliver_sdu(&bearer_info, sdu_info.sdu.length(), rx_window->size());
+    }
+#endif
+
       upper_dn.on_new_sdu(std::move(sdu_info.sdu));
       rx_window->remove_sn(st.rx_deliv);
     }

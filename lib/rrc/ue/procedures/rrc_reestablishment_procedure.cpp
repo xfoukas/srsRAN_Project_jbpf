@@ -27,6 +27,11 @@
 #include "srsran/cu_cp/cu_cp_types.h"
 #include "srsran/security/integrity.h"
 
+#ifdef JBPF_ENABLED
+#include "jbpf_srsran_hooks.h"
+DEFINE_JBPF_HOOK(rrc_ue_update_context);
+#endif
+
 using namespace srsran;
 using namespace srsran::srs_cu_cp;
 
@@ -60,6 +65,13 @@ void rrc_reestablishment_procedure::operator()(coro_context<async_task<void>>& c
 {
   CORO_BEGIN(ctx);
 
+#ifdef JBPF_ENABLED 
+  {
+    struct jbpf_rrc_ctx_info ctx_info = {0, (uint64_t)context.ue_index};
+    hook_rrc_ue_procedure_started(&ctx_info, RRC_REESTABLISHMENT, (uint64_t)old_ue_reest_context.ue_index);
+  }
+#endif
+  
   logger.log_debug("\"{}\" for old c-rnti={}, pci={} initialized",
                    name(),
                    to_rnti(reestablishment_request.rrc_reest_request.ue_id.c_rnti),
@@ -69,6 +81,14 @@ void rrc_reestablishment_procedure::operator()(coro_context<async_task<void>>& c
   if (not is_reestablishment_accepted()) {
     CORO_AWAIT(handle_rrc_reestablishment_fallback());
     logger.log_debug("\"{}\" finalized", name());
+
+#ifdef JBPF_ENABLED 
+    {
+      struct jbpf_rrc_ctx_info ctx_info = {0, (uint64_t)context.ue_index};
+      hook_rrc_ue_procedure_completed(&ctx_info, RRC_REESTABLISHMENT, false, (uint64_t)old_ue_reest_context.ue_index);
+    }
+#endif
+
     CORO_EARLY_RETURN();
   }
 
@@ -77,8 +97,25 @@ void rrc_reestablishment_procedure::operator()(coro_context<async_task<void>>& c
   if (not context_transfer_success) {
     CORO_AWAIT(handle_rrc_reestablishment_fallback());
     logger.log_debug("\"{}\" for old_ue={} finalized", name(), old_ue_reest_context.ue_index);
+
+#ifdef JBPF_ENABLED 
+    {
+      struct jbpf_rrc_ctx_info ctx_info = {0, (uint64_t)context.ue_index};
+      hook_rrc_ue_procedure_completed(&ctx_info, RRC_REESTABLISHMENT, false, (uint64_t)old_ue_reest_context.ue_index);
+    }
+#endif
+  
     CORO_EARLY_RETURN();
   }
+  
+#ifdef JBPF_ENABLED 
+  {
+    struct jbpf_rrc_ctx_info ctx_info = {0, (uint64_t)context.ue_index};
+    hook_rrc_ue_update_context(&ctx_info, (uint64_t)old_ue_reest_context.ue_index,
+      (uint16_t)context.c_rnti, context.cell.pci, context.cell.tac,
+      context.cell.cgi.plmn_id.to_bcd(), context.cell.cgi.nci.value());
+  }
+#endif
 
   // Accept RRC Reestablishment Request by sending RRC Reestablishment
   // Note: From this point we should guarantee that a Reestablishment will be performed.
@@ -130,6 +167,13 @@ void rrc_reestablishment_procedure::operator()(coro_context<async_task<void>>& c
   cu_cp_notifier.on_rrc_reestablishment_complete(old_ue_reest_context.ue_index);
 
   // Note: From this point the UE is removed and only the stored context can be accessed.
+
+#ifdef JBPF_ENABLED 
+  {
+    struct jbpf_rrc_ctx_info ctx_info = {0, (uint64_t)context.ue_index};
+    hook_rrc_ue_procedure_completed(&ctx_info, RRC_REESTABLISHMENT, true, (uint64_t)old_ue_reest_context.ue_index);
+  }
+#endif
 
   CORO_RETURN();
 }

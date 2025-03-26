@@ -25,6 +25,10 @@
 #include "srsran/e1ap/common/e1ap_message.h"
 #include "srsran/e1ap/cu_up/e1ap_cu_up_bearer_context_update.h"
 
+#ifdef JBPF_ENABLED
+#include "jbpf_srsran_hooks.h"
+#endif
+
 using namespace srsran;
 using namespace srsran::srs_cu_up;
 
@@ -59,6 +63,14 @@ void bearer_context_release_procedure::operator()(coro_context<async_task<void>>
                bearer_context_release_cmd.ue_index,
                cmd->gnb_cu_up_ue_e1ap_id,
                cmd->gnb_cu_cp_ue_e1ap_id);
+
+#ifdef JBPF_ENABLED 
+  { 
+    struct jbpf_e1_ctx_info bearer_info = {0, bearer_context_release_cmd.ue_index,cmd->gnb_cu_cp_ue_e1ap_id, cmd->gnb_cu_up_ue_e1ap_id};
+    hook_e1_cuup_bearer_context_release(&bearer_info, /*success*/true);
+  }
+#endif
+
   pdu_notifier.on_new_message(e1ap_msg);
   CORO_RETURN();
 }
