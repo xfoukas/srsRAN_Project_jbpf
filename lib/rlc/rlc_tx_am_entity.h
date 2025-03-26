@@ -140,8 +140,8 @@ private:
   bool stopped = false;
 
 public:
-  rlc_tx_am_entity(gnb_du_id_t                          gnb_du_id,
-                   du_ue_index_t                        ue_index,
+  rlc_tx_am_entity(gnb_du_id_t                          gnb_du_id_,
+                   du_ue_index_t                        ue_index_,
                    rb_id_t                              rb_id_,
                    const rlc_tx_am_config&              config,
                    rlc_tx_upper_layer_data_notifier&    upper_dn_,

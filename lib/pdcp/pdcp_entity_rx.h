@@ -65,7 +65,7 @@ class pdcp_entity_rx final : public pdcp_entity_tx_rx_base,
                              public pdcp_rx_metrics
 {
 public:
-  pdcp_entity_rx(uint32_t                        ue_index,
+  pdcp_entity_rx(uint32_t                        ue_index_,
                  rb_id_t                         rb_id_,
                  pdcp_rx_config                  cfg_,
                  pdcp_rx_upper_data_notifier&    upper_dn_,
@@ -114,6 +114,9 @@ public:
   bool          is_reordering_timer_running() const { return reordering_timer.is_running(); }
 
 private:
+  uint32_t ue_index;
+  rb_id_t  rb_id;
+
   pdcp_bearer_logger   logger;
   const pdcp_rx_config cfg;
 

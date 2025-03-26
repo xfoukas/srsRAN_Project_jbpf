@@ -32,6 +32,13 @@
 #include "srsran/support/timers.h"
 #include <memory>
 
+#ifdef JBPF_ENABLED
+#include "jbpf_srsran_hooks.h"
+DEFINE_JBPF_HOOK(e1_cuup_bearer_context_setup);
+DEFINE_JBPF_HOOK(e1_cuup_bearer_context_modification);
+DEFINE_JBPF_HOOK(e1_cuup_bearer_context_release);
+#endif
+
 using namespace srsran;
 using namespace asn1::e1ap;
 using namespace srs_cu_up;
@@ -187,6 +194,13 @@ void e1ap_cu_up_impl::handle_bearer_context_setup_request(const asn1::e1ap::bear
   gnb_cu_up_ue_e1ap_id_t cu_up_ue_e1ap_id = ue_ctxt_list.next_gnb_cu_up_ue_e1ap_id();
   if (cu_up_ue_e1ap_id == gnb_cu_up_ue_e1ap_id_t::invalid) {
     logger.error("Sending BearerContextSetupFailure. Cause: No CU-UP-UE-E1AP-ID available");
+    
+#ifdef JBPF_ENABLED 
+  {
+    struct jbpf_e1_ctx_info bearer_info = {0, 0, msg->gnb_cu_cp_ue_e1ap_id, 0};
+    hook_e1_cuup_bearer_context_setup(&bearer_info, /*success*/false);
+  }
+#endif
 
     // send response
     pdu_notifier->on_new_message(e1ap_msg);
@@ -206,6 +220,13 @@ void e1ap_cu_up_impl::handle_bearer_context_setup_request(const asn1::e1ap::bear
 
   if (bearer_context_setup_response_msg.ue_index == INVALID_UE_INDEX) {
     logger.error("Sending BearerContextSetupFailure. Cause: Invalid UE index");
+
+#ifdef JBPF_ENABLED 
+  {
+    struct jbpf_e1_ctx_info bearer_info = {0, 0, msg->gnb_cu_cp_ue_e1ap_id, 0};
+    hook_e1_cuup_bearer_context_setup(&bearer_info, /*success*/false);
+  }
+#endif
 
     // send response
     pdu_notifier->on_new_message(e1ap_msg);
@@ -233,11 +254,25 @@ void e1ap_cu_up_impl::handle_bearer_context_setup_request(const asn1::e1ap::bear
         e1ap_msg.pdu.successful_outcome().value.bearer_context_setup_resp()->sys_bearer_context_setup_resp,
         bearer_context_setup_response_msg);
 
+#ifdef JBPF_ENABLED 
+    {
+      struct jbpf_e1_ctx_info bearer_info = {0, bearer_context_setup_response_msg.ue_index, msg->gnb_cu_cp_ue_e1ap_id, gnb_cu_up_ue_e1ap_id_to_uint(cu_up_ue_e1ap_id)};
+      hook_e1_cuup_bearer_context_setup(&bearer_info, /*success*/true);
+    }
+#endif
+      
     // send response
     pdu_notifier->on_new_message(e1ap_msg);
   } else {
     e1ap_msg.pdu.unsuccessful_outcome().value.bearer_context_setup_fail()->cause =
         cause_to_asn1(bearer_context_setup_response_msg.cause.value());
+
+#ifdef JBPF_ENABLED 
+    { 
+      struct jbpf_e1_ctx_info bearer_info = {0, 0, msg->gnb_cu_cp_ue_e1ap_id, 0};
+      hook_e1_cuup_bearer_context_setup(&bearer_info, /*success*/false);
+    }
+#endif
 
     // send response
     pdu_notifier->on_new_message(e1ap_msg);
@@ -256,6 +291,14 @@ void e1ap_cu_up_impl::handle_bearer_context_modification_request(const asn1::e1a
 
   if (!ue_ctxt_list.contains(int_to_gnb_cu_up_ue_e1ap_id(msg->gnb_cu_up_ue_e1ap_id))) {
     logger.warning("Sending BearerContextModificationFailure. UE context not available");
+
+#ifdef JBPF_ENABLED 
+    { 
+      struct jbpf_e1_ctx_info bearer_info = {0, 0, msg->gnb_cu_cp_ue_e1ap_id, msg->gnb_cu_up_ue_e1ap_id};
+      hook_e1_cuup_bearer_context_modification(&bearer_info, /*success*/false);
+    }
+#endif
+
     pdu_notifier->on_new_message(e1ap_msg);
     return;
   }
@@ -275,6 +318,13 @@ void e1ap_cu_up_impl::handle_bearer_context_release_command(const asn1::e1ap::be
     e1ap_msg.pdu.set_unsuccessful_outcome();
     e1ap_msg.pdu.unsuccessful_outcome().load_info_obj(ASN1_E1AP_ID_BEARER_CONTEXT_RELEASE);
     // TODO fill other values
+
+#ifdef JBPF_ENABLED 
+    { 
+      struct jbpf_e1_ctx_info bearer_info = {0, 0, msg->gnb_cu_cp_ue_e1ap_id, msg->gnb_cu_up_ue_e1ap_id};
+      hook_e1_cuup_bearer_context_release(&bearer_info, /*success*/false);
+    }
+#endif
 
     logger.error("No UE context for the received gnb_cu_up_ue_e1ap_id={} available", msg->gnb_cu_up_ue_e1ap_id);
     pdu_notifier->on_new_message(e1ap_msg);

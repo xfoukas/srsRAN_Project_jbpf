@@ -46,8 +46,8 @@ private:
   std::atomic_flag pending_buffer_state = ATOMIC_FLAG_INIT;
 
 public:
-  rlc_tx_tm_entity(gnb_du_id_t                          du_id,
-                   du_ue_index_t                        ue_index,
+  rlc_tx_tm_entity(gnb_du_id_t                          du_id_,
+                   du_ue_index_t                        ue_index_,
                    rb_id_t                              rb_id_,
                    const rlc_tx_tm_config&              config,
                    rlc_tx_upper_layer_data_notifier&    upper_dn_,

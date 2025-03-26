@@ -25,22 +25,26 @@
 
 using namespace srsran;
 
-rlc_rx_um_entity::rlc_rx_um_entity(gnb_du_id_t                       gnb_du_id,
-                                   du_ue_index_t                     ue_index,
-                                   rb_id_t                           rb_id,
+#ifdef JBPF_ENABLED
+#include "jbpf_srsran_hooks.h"
+#endif
+
+rlc_rx_um_entity::rlc_rx_um_entity(gnb_du_id_t                       gnb_du_id_,
+                                   du_ue_index_t                     ue_index_,
+                                   rb_id_t                           rb_id_,
                                    const rlc_rx_um_config&           config,
                                    rlc_rx_upper_layer_data_notifier& upper_dn_,
                                    rlc_metrics_aggregator&           metrics_agg_,
                                    rlc_pcap&                         pcap_,
                                    task_executor&                    ue_executor,
                                    timer_manager&                    timers) :
-  rlc_rx_entity(gnb_du_id, ue_index, rb_id, upper_dn_, metrics_agg_, pcap_, ue_executor, timers),
+  rlc_rx_entity(gnb_du_id_, ue_index_, rb_id_, upper_dn_, metrics_agg_, pcap_, ue_executor, timers),
   cfg(config),
   mod(cardinality(to_number(cfg.sn_field_length))),
   um_window_size(window_size(to_number(cfg.sn_field_length))),
   rx_window(create_rx_window(cfg.sn_field_length)),
   reassembly_timer(ue_timer_factory.create_timer()),
-  pcap_context(ue_index, rb_id, config)
+  pcap_context(ue_index_, rb_id_, config)
 {
   metrics.metrics_set_mode(rlc_mode::um_bidir);
 
@@ -94,6 +98,17 @@ void rlc_rx_um_entity::handle_pdu(byte_buffer_slice buf)
     logger.log_info("RX SDU. sdu_len={}", sdu.value().length());
     metrics.metrics_add_sdus(1, sdu.value().length());
     auto latency = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - start);
+
+#ifdef JBPF_ENABLED
+    {
+      int rb_id_value = rb_id.is_srb() ? srb_id_to_uint(rb_id.get_srb_id()) 
+                                      : drb_id_to_uint(rb_id.get_drb_id());
+      struct jbpf_rlc_ctx_info ctx_info = {0, (uint64_t)gnb_du_id, ue_index, rb_id.is_srb(), 
+        (uint8_t)rb_id_value, JBPF_RLC_MODE_UM};
+      hook_rlc_ul_sdu_delivered(&ctx_info, header.sn, rx_window->size(), sdu.value().length());
+    }
+#endif
+
     metrics.metrics_add_sdu_latency(latency.count() / 1000);
     upper_dn.on_new_sdu(std::move(sdu.value()));
     // Nothing else to do here ...
@@ -130,7 +145,17 @@ void rlc_rx_um_entity::handle_pdu(byte_buffer_slice buf)
     } else {
       logger.log_info("RX SDU. sn={} sdu_len={}", header.sn, sdu.value().length());
       auto latency = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() -
-                                                                          sdu_info.time_of_arrival);
+                                                                          sdu_info.time_of_arrival);                                                     
+#ifdef JBPF_ENABLED
+      {
+        int rb_id_value = rb_id.is_srb() ? srb_id_to_uint(rb_id.get_srb_id()) 
+                                        : drb_id_to_uint(rb_id.get_drb_id());
+        struct jbpf_rlc_ctx_info ctx_info = {0, (uint64_t)gnb_du_id, ue_index, rb_id.is_srb(), 
+          (uint8_t)rb_id_value, JBPF_RLC_MODE_UM};
+        hook_rlc_ul_sdu_delivered(&ctx_info, header.sn, rx_window->size(), sdu.value().length());
+      }
+#endif
+                                                                                                                                            
       metrics.metrics_add_sdu_latency(latency.count() / 1000);
       metrics.metrics_add_sdus(1, sdu.value().length());
       upper_dn.on_new_sdu(std::move(sdu.value()));
@@ -278,6 +303,16 @@ void rlc_rx_um_entity::handle_pdu(byte_buffer_slice buf)
           "Started reassembly_timer at sn={}, updated rx_timer_trigger={}.", header.sn, st.rx_timer_trigger);
     }
   }
+
+#ifdef JBPF_ENABLED
+  {
+    int rb_id_value = rb_id.is_srb() ? srb_id_to_uint(rb_id.get_srb_id()) 
+                                    : drb_id_to_uint(rb_id.get_drb_id());
+    struct jbpf_rlc_ctx_info ctx_info = {0, (uint64_t)gnb_du_id, ue_index, rb_id.is_srb(), 
+      (uint8_t)rb_id_value, JBPF_RLC_MODE_UM};
+    hook_rlc_ul_rx_pdu(&ctx_info, JBPF_RLC_PDUTYPE_DATA, (uint32_t)buf.length(), rx_window->size());
+  }
+#endif
 }
 
 bool rlc_rx_um_entity::handle_segment_data_sdu(const rlc_um_pdu_header& header, byte_buffer_slice payload)
@@ -296,6 +331,18 @@ bool rlc_rx_um_entity::handle_segment_data_sdu(const rlc_um_pdu_header& header, 
     sdu.time_of_arrival     = std::chrono::steady_clock::now();
     return sdu;
   })();
+
+#ifdef JBPF_ENABLED
+  {
+    int rb_id_value = rb_id.is_srb() ? srb_id_to_uint(rb_id.get_srb_id()) 
+                                    : drb_id_to_uint(rb_id.get_drb_id());
+    struct jbpf_rlc_ctx_info ctx_info = {0, (uint64_t)gnb_du_id, ue_index, rb_id.is_srb(), 
+      (uint8_t)rb_id_value, JBPF_RLC_MODE_UM};
+    hook_rlc_ul_sdu_recv_started(&ctx_info, header.sn, rx_window->size());
+  }
+#endif
+
+
   // Create SDU segment, to be stored later
   rlc_rx_um_sdu_segment segment = {};
   segment.si                    = header.si;

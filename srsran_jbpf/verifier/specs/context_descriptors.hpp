@@ -38,3 +38,14 @@ constexpr ebpf_context_descriptor_t jbpf_ran_layer2_descr = {jbpf_ran_layer2_reg
 // };
 constexpr int jbpf_ran_mac_sched_regions = 3 * 8 + 3 * 2;
 constexpr ebpf_context_descriptor_t jbpf_ran_mac_sched_descr = {jbpf_ran_mac_sched_regions, 0, 1 * 8, 2 * 8};
+
+// struct jbpf_ran_generic_ctx {
+//     uint64_t data; /* Pointer to beginning of buffer with int16_t IQ samples */
+//     uint64_t data_end; /* Pointer to end+1 of packet */
+//     uint64_t meta_data1; /* Used for the program to store metadata */
+//     uint64_t meta_data2; /* Used for the program to store metadata */
+//     uint64_t meta_data3; /* Used for the program to store metadata */
+//     uint64_t meta_data4; /* Used for the program to store metadata */
+// };
+constexpr int jbpf_srsran_generic_regions = 6 * 8 ;
+constexpr ebpf_context_descriptor_t jbpf_srsran_generic_descr = {jbpf_srsran_generic_regions, 0, 1 * 8, 2 * 8};

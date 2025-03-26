@@ -73,7 +73,7 @@ class pdcp_entity_tx final : public pdcp_entity_tx_rx_base,
                              public pdcp_tx_metrics
 {
 public:
-  pdcp_entity_tx(uint32_t                        ue_index,
+  pdcp_entity_tx(uint32_t                        ue_index_,
                  rb_id_t                         rb_id_,
                  pdcp_tx_config                  cfg_,
                  pdcp_tx_lower_notifier&         lower_dn_,
@@ -82,7 +82,9 @@ public:
                  task_executor&                  ue_dl_executor_,
                  task_executor&                  crypto_executor_) :
     pdcp_entity_tx_rx_base(rb_id_, cfg_.rb_type, cfg_.rlc_mode, cfg_.sn_size),
-    logger("PDCP", {ue_index, rb_id_, "DL"}),
+    ue_index(ue_index_),
+    rb_id(rb_id_),
+    logger("PDCP", {ue_index_, rb_id_, "DL"}),
     cfg(cfg_),
     lower_dn(lower_dn_),
     upper_cn(upper_cn_),
@@ -180,6 +182,10 @@ public:
   void retransmit_all_pdus();
 
 private:
+
+  uint32_t ue_index;
+  rb_id_t rb_id;
+
   pdcp_bearer_logger   logger;
   const pdcp_tx_config cfg;
 
