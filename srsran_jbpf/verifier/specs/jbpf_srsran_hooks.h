@@ -115,6 +115,8 @@ DECLARE_MAC_SCHED_HOOK(mac_sched_srs_indication);
 
 // PDCP
 
+
+// trigger: when new SDU is received from higher layers
 DECLARE_JBPF_HOOK(pdcp_dl_new_sdu,
     struct jbpf_ran_generic_ctx ctx,
     ctx,
@@ -125,10 +127,11 @@ DECLARE_JBPF_HOOK(pdcp_dl_new_sdu,
     HOOK_ASSIGN(
         ctx.data = (uint64_t)bearer;
         ctx.data_end = (uint64_t) ((uint8_t*)bearer + sizeof(struct jbpf_pdcp_ctx_info));
-        ctx.meta_data1 = (uint64_t)sdu_length << 32 | count;
+        ctx.srs_meta_data1 = (uint64_t)sdu_length << 32 | count;
     )
 )
 
+// trigger: when a PDU is sent to lower layers
 DECLARE_JBPF_HOOK(pdcp_dl_tx_data_pdu,
     struct jbpf_ran_generic_ctx ctx,
     ctx,
@@ -141,11 +144,12 @@ DECLARE_JBPF_HOOK(pdcp_dl_tx_data_pdu,
     HOOK_ASSIGN(
         ctx.data = (uint64_t)bearer;
         ctx.data_end = (uint64_t) ((uint8_t*)bearer + sizeof(struct jbpf_pdcp_ctx_info));
-        ctx.meta_data1 = (uint64_t)sdu_length << 32 | count;
-        ctx.meta_data2 = (uint64_t)is_retx << 32 | window_size;
+        ctx.srs_meta_data1 = (uint64_t)sdu_length << 32 | count;
+        ctx.srs_meta_data2 = (uint64_t)is_retx << 32 | window_size;
     )
 )
 
+// trigger: when a control PDU is sent to lower layers
 DECLARE_JBPF_HOOK(pdcp_dl_tx_control_pdu,
     struct jbpf_ran_generic_ctx ctx,
     ctx,
@@ -156,10 +160,11 @@ DECLARE_JBPF_HOOK(pdcp_dl_tx_control_pdu,
     HOOK_ASSIGN(
         ctx.data = (uint64_t)bearer;
         ctx.data_end = (uint64_t) ((uint8_t*)bearer + sizeof(struct jbpf_pdcp_ctx_info));
-        ctx.meta_data1 = (uint64_t)sdu_length << 32 | window_size;
+        ctx.srs_meta_data1 = (uint64_t)sdu_length << 32 | window_size;
     )
 )
 
+// trigger: when the first byte of an SDU is sent to lower layers
 DECLARE_JBPF_HOOK(pdcp_dl_handle_tx_notification,
     struct jbpf_ran_generic_ctx ctx,
     ctx,
@@ -170,10 +175,13 @@ DECLARE_JBPF_HOOK(pdcp_dl_handle_tx_notification,
     HOOK_ASSIGN(
         ctx.data = (uint64_t)bearer;
         ctx.data_end = (uint64_t) ((uint8_t*)bearer + sizeof(struct jbpf_pdcp_ctx_info));
-        ctx.meta_data1 = (uint64_t)notif_count << 32 | window_size;
+        ctx.srs_meta_data1 = (uint64_t)notif_count << 32 | window_size;
     )
 )
 
+// RLC TM/UM mode, trigger: when the SDU is completely sent to lower layers.
+// RLM AM mode, trigger: when all of the PDU used to transmit an SDU have 
+// been acknowledged by the UE.
 DECLARE_JBPF_HOOK(pdcp_dl_handle_delivery_notification,
     struct jbpf_ran_generic_ctx ctx,
     ctx,
@@ -184,10 +192,11 @@ DECLARE_JBPF_HOOK(pdcp_dl_handle_delivery_notification,
     HOOK_ASSIGN(
         ctx.data = (uint64_t)bearer;
         ctx.data_end = (uint64_t) ((uint8_t*)bearer + sizeof(struct jbpf_pdcp_ctx_info));
-        ctx.meta_data1 = (uint64_t)notif_count << 32 | window_size;
+        ctx.srs_meta_data1 = (uint64_t)notif_count << 32 | window_size;
     )
 )
 
+// trigger: when an SDU is discarded by the PDCP layer
 DECLARE_JBPF_HOOK(pdcp_dl_discard_pdu,
     struct jbpf_ran_generic_ctx ctx,
     ctx,
@@ -198,10 +207,11 @@ DECLARE_JBPF_HOOK(pdcp_dl_discard_pdu,
     HOOK_ASSIGN(
         ctx.data = (uint64_t)bearer;
         ctx.data_end = (uint64_t) ((uint8_t*)bearer + sizeof(struct jbpf_pdcp_ctx_info));
-        ctx.meta_data1 = (uint64_t)count << 32 | window_size;
+        ctx.srs_meta_data1 = (uint64_t)count << 32 | window_size;
     )
 )
 
+// trigger: when a PDCP bearer is re-established
 DECLARE_JBPF_HOOK(pdcp_dl_reestablish,
     struct jbpf_ran_generic_ctx ctx,
     ctx,
@@ -213,6 +223,7 @@ DECLARE_JBPF_HOOK(pdcp_dl_reestablish,
     )
 )
 
+// trigger: when a PDU is received from lower layers
 DECLARE_JBPF_HOOK(pdcp_ul_rx_data_pdu,
     struct jbpf_ran_generic_ctx ctx,
     ctx,
@@ -225,11 +236,12 @@ DECLARE_JBPF_HOOK(pdcp_ul_rx_data_pdu,
     HOOK_ASSIGN(
         ctx.data = (uint64_t)bearer;
         ctx.data_end = (uint64_t) ((uint8_t*)bearer + sizeof(struct jbpf_pdcp_ctx_info));
-        ctx.meta_data1 = (uint64_t)sdu_length << 32 | header_length;
-        ctx.meta_data2 = (uint64_t)count << 32 | window_size;
+        ctx.srs_meta_data1 = (uint64_t)sdu_length << 32 | header_length;
+        ctx.srs_meta_data2 = (uint64_t)count << 32 | window_size;
     )
 )
 
+// trigger: when a control PDU is received from lower layers
 DECLARE_JBPF_HOOK(pdcp_ul_rx_control_pdu,
     struct jbpf_ran_generic_ctx ctx,
     ctx,
@@ -240,10 +252,11 @@ DECLARE_JBPF_HOOK(pdcp_ul_rx_control_pdu,
     HOOK_ASSIGN(
         ctx.data = (uint64_t)bearer;
         ctx.data_end = (uint64_t) ((uint8_t*)bearer + sizeof(struct jbpf_pdcp_ctx_info));
-        ctx.meta_data1 = (uint64_t)pdu_length << 32 | window_size;
+        ctx.srs_meta_data1 = (uint64_t)pdu_length << 32 | window_size;
     )
 )
 
+// trigger: when an SDU is delivered to higher layers
 DECLARE_JBPF_HOOK(pdcp_ul_deliver_sdu,
     struct jbpf_ran_generic_ctx ctx,
     ctx,
@@ -254,10 +267,11 @@ DECLARE_JBPF_HOOK(pdcp_ul_deliver_sdu,
     HOOK_ASSIGN(
         ctx.data = (uint64_t)bearer;
         ctx.data_end = (uint64_t) ((uint8_t*)bearer + sizeof(struct jbpf_pdcp_ctx_info));
-        ctx.meta_data1 = (uint64_t)sdu_length << 32 | window_size;
+        ctx.srs_meta_data1 = (uint64_t)sdu_length << 32 | window_size;
     )
 )
 
+// trigger: when a PDCP bearer is re-established
 DECLARE_JBPF_HOOK(pdcp_ul_reestablish,
     struct jbpf_ran_generic_ctx ctx,
     ctx,
@@ -325,7 +339,7 @@ DECLARE_JBPF_HOOK(e1_cuup_bearer_context_setup,
     HOOK_ASSIGN(
         ctx.data = (uint64_t)info;
         ctx.data_end = (uint64_t) ((uint8_t*)info + sizeof(struct jbpf_e1_ctx_info));
-        ctx.meta_data1 = success;
+        ctx.srs_meta_data1 = success;
     )
 )
 
@@ -338,7 +352,7 @@ DECLARE_JBPF_HOOK(e1_cuup_bearer_context_modification,
     HOOK_ASSIGN(
         ctx.data = (uint64_t)info;
         ctx.data_end = (uint64_t) ((uint8_t*)info + sizeof(struct jbpf_e1_ctx_info));
-        ctx.meta_data1 = success;
+        ctx.srs_meta_data1 = success;
     )
 )
 
@@ -351,7 +365,7 @@ DECLARE_JBPF_HOOK(e1_cuup_bearer_context_release,
     HOOK_ASSIGN(
         ctx.data = (uint64_t)info;
         ctx.data_end = (uint64_t) ((uint8_t*)info + sizeof(struct jbpf_e1_ctx_info));
-        ctx.meta_data1 = success;
+        ctx.srs_meta_data1 = success;
     )
 )
 
@@ -370,8 +384,8 @@ DECLARE_JBPF_HOOK(cucp_uemgr_ue_add,
     HOOK_ASSIGN(
         ctx.data = (uint64_t)info;
         ctx.data_end = (uint64_t) ((uint8_t*)info + sizeof(struct jbpf_cucp_uemgr_ctx_info));
-        ctx.meta_data1 = ((uint64_t)pci_set) << 16 | pci;
-        ctx.meta_data2 = (uint64_t)rnti_set << 16 | rnti;
+        ctx.srs_meta_data1 = ((uint64_t)pci_set) << 16 | pci;
+        ctx.srs_meta_data2 = (uint64_t)rnti_set << 16 | rnti;
     )
 )
 
@@ -385,8 +399,8 @@ DECLARE_JBPF_HOOK(cucp_uemgr_ue_update,
     HOOK_ASSIGN(
         ctx.data = (uint64_t)info;
         ctx.data_end = (uint64_t) ((uint8_t*)info + sizeof(struct jbpf_cucp_uemgr_ctx_info));
-        ctx.meta_data1 = pci;
-        ctx.meta_data2 = rnti;
+        ctx.srs_meta_data1 = pci;
+        ctx.srs_meta_data2 = rnti;
     )
 )
 
@@ -417,9 +431,9 @@ DECLARE_JBPF_HOOK(rrc_ue_add,
     HOOK_ASSIGN(
         ctx.data = (uint64_t)info;
         ctx.data_end = (uint64_t) ((uint8_t*)info + sizeof(struct jbpf_rrc_ctx_info));
-        ctx.meta_data1 = ((uint64_t)c_rnti << 48) | ((uint64_t)pci << 32) | tac;
-        ctx.meta_data2 = plmn;
-        ctx.meta_data3 = nci;
+        ctx.srs_meta_data1 = ((uint64_t)c_rnti << 48) | ((uint64_t)pci << 32) | tac;
+        ctx.srs_meta_data2 = plmn;
+        ctx.srs_meta_data3 = nci;
     )
 )
 
@@ -437,10 +451,10 @@ DECLARE_JBPF_HOOK(rrc_ue_update_context,
     HOOK_ASSIGN(
         ctx.data = (uint64_t)info;
         ctx.data_end = (uint64_t) ((uint8_t*)info + sizeof(struct jbpf_rrc_ctx_info));
-        ctx.meta_data1 = old_ue_index;
-        ctx.meta_data2 = ((uint64_t)c_rnti << 48) | ((uint64_t)pci << 32) | tac;
-        ctx.meta_data3 = plmn;
-        ctx.meta_data4 = nci;
+        ctx.srs_meta_data1 = old_ue_index;
+        ctx.srs_meta_data2 = ((uint64_t)c_rnti << 48) | ((uint64_t)pci << 32) | tac;
+        ctx.srs_meta_data3 = plmn;
+        ctx.srs_meta_data4 = nci;
     )
 )
 
@@ -453,7 +467,7 @@ DECLARE_JBPF_HOOK(rrc_ue_update_id,
     HOOK_ASSIGN(
         ctx.data = (uint64_t)info;
         ctx.data_end = (uint64_t) ((uint8_t*)info + sizeof(struct jbpf_rrc_ctx_info));
-        ctx.meta_data1 =_5gtimsi;
+        ctx.srs_meta_data1 =_5gtimsi;
     )
 )
 
@@ -486,8 +500,8 @@ DECLARE_JBPF_HOOK(rrc_ue_procedure_started,
     HOOK_ASSIGN(
         ctx.data = (uint64_t)info;
         ctx.data_end = (uint64_t) ((uint8_t*)info + sizeof(struct jbpf_rrc_ctx_info));
-        ctx.meta_data1 = procedure;
-        ctx.meta_data2 = meta;
+        ctx.srs_meta_data1 = procedure;
+        ctx.srs_meta_data2 = meta;
     )
 )
 
@@ -502,8 +516,8 @@ DECLARE_JBPF_HOOK(rrc_ue_procedure_completed,
     HOOK_ASSIGN(
         ctx.data = (uint64_t)info;
         ctx.data_end = (uint64_t) ((uint8_t*)info + sizeof(struct jbpf_rrc_ctx_info));
-        ctx.meta_data1 = ((uint64_t)success << 32) | procedure;
-        ctx.meta_data2 = meta;
+        ctx.srs_meta_data1 = ((uint64_t)success << 32) | procedure;
+        ctx.srs_meta_data2 = meta;
     )
 )
 
@@ -516,6 +530,7 @@ typedef enum {
     JBPF_RLC_PDUTYPE_MAX
 } JbpfRlcPdu_t;
 
+
 // trigger: new SDU received from upper layer
 DECLARE_JBPF_HOOK(rlc_dl_new_sdu,
     struct jbpf_ran_generic_ctx ctx,
@@ -527,7 +542,7 @@ DECLARE_JBPF_HOOK(rlc_dl_new_sdu,
     HOOK_ASSIGN(
         ctx.data = (uint64_t)info;
         ctx.data_end = (uint64_t) ((uint8_t*)info + sizeof(struct jbpf_rlc_ctx_info));
-        ctx.meta_data1 = (uint64_t)sdu_length << 32 | pdcp_sn;
+        ctx.srs_meta_data1 = (uint64_t)sdu_length << 32 | pdcp_sn;
     )
 )
 
@@ -541,11 +556,11 @@ DECLARE_JBPF_HOOK(rlc_dl_discard_sdu,
     HOOK_ASSIGN(
         ctx.data = (uint64_t)info;
         ctx.data_end = (uint64_t) ((uint8_t*)info + sizeof(struct jbpf_rlc_ctx_info));
-        ctx.meta_data1 = pdcp_sn;
+        ctx.srs_meta_data1 = pdcp_sn;
     )
 )
 
-// trigger: transmission of the SDU started
+// trigger: transmission of the SDU starts
 DECLARE_JBPF_HOOK(rlc_dl_sdu_send_started,
     struct jbpf_ran_generic_ctx ctx,
     ctx,
@@ -556,7 +571,7 @@ DECLARE_JBPF_HOOK(rlc_dl_sdu_send_started,
     HOOK_ASSIGN(
         ctx.data = (uint64_t)info;
         ctx.data_end = (uint64_t) ((uint8_t*)info + sizeof(struct jbpf_rlc_ctx_info));
-        ctx.meta_data1 = (uint64_t)pdcp_sn << 32 | is_retx;
+        ctx.srs_meta_data1 = (uint64_t)pdcp_sn << 32 | is_retx;
     )
 )
 
@@ -571,7 +586,7 @@ DECLARE_JBPF_HOOK(rlc_dl_sdu_send_completed,
     HOOK_ASSIGN(
         ctx.data = (uint64_t)info;
         ctx.data_end = (uint64_t) ((uint8_t*)info + sizeof(struct jbpf_rlc_ctx_info));
-        ctx.meta_data1 = (uint64_t)pdcp_sn << 32 | is_retx;
+        ctx.srs_meta_data1 = (uint64_t)pdcp_sn << 32 | is_retx;
     )
 )
 
@@ -586,10 +601,11 @@ DECLARE_JBPF_HOOK(rlc_dl_sdu_delivered,
     HOOK_ASSIGN(
         ctx.data = (uint64_t)info;
         ctx.data_end = (uint64_t) ((uint8_t*)info + sizeof(struct jbpf_rlc_ctx_info));
-        ctx.meta_data1 = (uint64_t)pdcp_sn << 32 | is_retx;
+        ctx.srs_meta_data1 = (uint64_t)pdcp_sn << 32 | is_retx;
     )
 )
 
+// trigger: when a PDU is delivered to lower layers for transmission
 DECLARE_JBPF_HOOK(rlc_dl_tx_pdu,
     struct jbpf_ran_generic_ctx ctx,
     ctx,
@@ -601,11 +617,12 @@ DECLARE_JBPF_HOOK(rlc_dl_tx_pdu,
     HOOK_ASSIGN(
         ctx.data = (uint64_t)info;
         ctx.data_end = (uint64_t) ((uint8_t*)info + sizeof(struct jbpf_rlc_ctx_info));
-        ctx.meta_data1 = (uint64_t)pdu_type << 32 | pdu_len;
-        ctx.meta_data2 = window_size;
+        ctx.srs_meta_data1 = (uint64_t)pdu_type << 32 | pdu_len;
+        ctx.srs_meta_data2 = window_size;
     )
 )
 
+// trigger: when a STATUS PDU is received from lower layers
 DECLARE_JBPF_HOOK(rlc_dl_rx_status,
     struct jbpf_ran_generic_ctx ctx,
     ctx,
@@ -615,10 +632,11 @@ DECLARE_JBPF_HOOK(rlc_dl_rx_status,
     HOOK_ASSIGN(
         ctx.data = (uint64_t)info;
         ctx.data_end = (uint64_t) ((uint8_t*)info + sizeof(struct jbpf_rlc_ctx_info));
-        ctx.meta_data1 = window_size;
+        ctx.srs_meta_data1 = window_size;
     )
 )
 
+// trigger: when a PDU is received from lower layers
 DECLARE_JBPF_HOOK(rlc_ul_rx_pdu,
     struct jbpf_ran_generic_ctx ctx,
     ctx,
@@ -630,11 +648,12 @@ DECLARE_JBPF_HOOK(rlc_ul_rx_pdu,
     HOOK_ASSIGN(
         ctx.data = (uint64_t)info;
         ctx.data_end = (uint64_t) ((uint8_t*)info + sizeof(struct jbpf_rlc_ctx_info));
-        ctx.meta_data1 = (uint64_t)pdu_type << 32 | pdu_len;
-        ctx.meta_data2 = window_size;
+        ctx.srs_meta_data1 = (uint64_t)pdu_type << 32 | pdu_len;
+        ctx.srs_meta_data2 = window_size;
     )
 )
 
+// trigger: when a PDU is received for an SDU for which no bytes have previously been received.
 DECLARE_JBPF_HOOK(rlc_ul_sdu_recv_started,
     struct jbpf_ran_generic_ctx ctx,
     ctx,
@@ -645,10 +664,11 @@ DECLARE_JBPF_HOOK(rlc_ul_sdu_recv_started,
     HOOK_ASSIGN(
         ctx.data = (uint64_t)info;
         ctx.data_end = (uint64_t) ((uint8_t*)info + sizeof(struct jbpf_rlc_ctx_info));
-        ctx.meta_data1 = (uint64_t)sn << 32 | window_size;
+        ctx.srs_meta_data1 = (uint64_t)sn << 32 | window_size;
     )
 )
 
+// trigger: when an SDU is delivered to higher layers
 DECLARE_JBPF_HOOK(rlc_ul_sdu_delivered,
     struct jbpf_ran_generic_ctx ctx,
     ctx,
@@ -660,8 +680,8 @@ DECLARE_JBPF_HOOK(rlc_ul_sdu_delivered,
     HOOK_ASSIGN(
         ctx.data = (uint64_t)info;
         ctx.data_end = (uint64_t) ((uint8_t*)info + sizeof(struct jbpf_rlc_ctx_info));
-        ctx.meta_data1 = (uint64_t)sn << 32 | window_size;
-        ctx.meta_data2 = sdu_length;
+        ctx.srs_meta_data1 = (uint64_t)sn << 32 | window_size;
+        ctx.srs_meta_data2 = sdu_length;
     )
 )
 
