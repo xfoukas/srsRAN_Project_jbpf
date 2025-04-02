@@ -21,7 +21,7 @@ typedef enum {
 struct jbpf_ran_ofh_ctx {
   uint64_t data; /* Pointer to beginning of buffer with int16_t IQ samples */
   uint64_t data_end; /* Pointer to end+1 of packet */
-  uint64_t meta_data; /* Used for the program to store metadata */
+  uint64_t meta_data; /* Used by ebpf */
   /* Combination of frame, slot and cell_id, provide a unique
      context for an execution pipeline */
   uint16_t ctx_id; /* Context id (could be implementation specific) */
@@ -43,7 +43,8 @@ struct jbpf_ran_layer2_ctx {
 struct jbpf_mac_sched_ctx {
     uint64_t data; /* Pointer to beginning of variable-sized L2 struct */
     uint64_t data_end; /* Pointer to end+1 of variable-sized struct */
-    uint64_t meta_data; /* Used for the program to store metadata */
+    uint64_t meta_data; /* Used by ebpf */
+    uint64_t srs_meta_data1; /* Used for the program to store metadata */
     uint16_t ctx_id; /* Context id (could be implementation specific) */
     uint16_t cell_id; /* Cell id */
     uint16_t rnti; /* UE RNTI */
@@ -104,10 +105,11 @@ struct jbpf_rlc_ctx_info {
 struct jbpf_ran_generic_ctx {
     uint64_t data; /* Pointer to beginning of buffer with int16_t IQ samples */
     uint64_t data_end; /* Pointer to end+1 of packet */
-    uint64_t meta_data1; /* Used for the program to store metadata */
-    uint64_t meta_data2; /* Used for the program to store metadata */
-    uint64_t meta_data3; /* Used for the program to store metadata */
-    uint64_t meta_data4; /* Used for the program to store metadata */
+    uint64_t meta_data; /* Used by ebpf */
+    uint64_t srs_meta_data1; /* Used for the program to store metadata */
+    uint64_t srs_meta_data2; /* Used for the program to store metadata */
+    uint64_t srs_meta_data3; /* Used for the program to store metadata */
+    uint64_t srs_meta_data4; /* Used for the program to store metadata */
 };
   
 
