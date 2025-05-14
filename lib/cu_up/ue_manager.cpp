@@ -79,6 +79,8 @@ ue_context* ue_manager::add_ue(const ue_context_cfg& ue_cfg)
     return nullptr;
   }
 
+  printf("MJB cu_up::ue_manager::add_ue  ue_index %d \n", (uint16_t)new_idx);
+
   // Create UE executors
   // TODO, these should be created within the same function, so that UL, DL and CTRL executors
   // can point to the same executor.
@@ -118,6 +120,8 @@ async_task<void> ue_manager::remove_ue(ue_index_t ue_index)
   logger.debug("ue={}: Scheduling UE deletion", ue_index);
   srsran_assert(ue_db.find(ue_index) != ue_db.end(), "Remove UE called for nonexistent ue_index={}", ue_index);
 
+  printf("MJB cu_up::ue_manager::remove_ue 100   ue_index %d \n", (uint16_t)ue_index);
+
   // Move UE context out from ue_db and erase the slot (from CU-UP shared ctrl executor)
   std::unique_ptr<ue_context> ue_ctxt = std::move(ue_db[ue_index]);
   ue_db.erase(ue_index);
@@ -136,6 +140,8 @@ async_task<void> ue_manager::remove_ue(ue_index_t ue_index)
 
     // Continuation in the original executor.
     CORO_AWAIT(execute_on_blocking(ctrl_executor, timers));
+
+    printf("MJB cu_up::ue_manager::remove_ue 101   ue_index %d \n", (uint16_t)ue_index);
 
     CORO_RETURN();
   });

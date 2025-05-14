@@ -28,7 +28,8 @@
 #include "srsran/support/srsran_assert.h"
 
 #ifdef JBPF_ENABLED
-#include "jbpf_srsran_hooks.h"
+DEFINE_JBPF_HOOK(pdcp_dl_creation);
+DEFINE_JBPF_HOOK(pdcp_dl_deletion);
 DEFINE_JBPF_HOOK(pdcp_dl_new_sdu);
 DEFINE_JBPF_HOOK(pdcp_dl_tx_data_pdu);
 DEFINE_JBPF_HOOK(pdcp_dl_tx_control_pdu);
@@ -112,7 +113,7 @@ void pdcp_entity_tx::handle_sdu(byte_buffer buf)
     int rb_id_value = rb_id.is_srb() ? srb_id_to_uint(rb_id.get_srb_id()) 
                                   : drb_id_to_uint(rb_id.get_drb_id());
     struct jbpf_pdcp_ctx_info bearer_info = {0, ue_index, rb_id.is_srb(), (uint8_t)rb_id_value, (uint8_t)rlc_mode};                                         
-    hook_pdcp_dl_new_sdu(&bearer_info, buf.length(), st.tx_next);
+    hook_pdcp_dl_new_sdu(&bearer_info, buf.length(), st.tx_next, tx_window->size());
   }
 #endif
 

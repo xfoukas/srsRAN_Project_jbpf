@@ -25,6 +25,10 @@
 #include "rlc_rx_entity.h"
 #include "srsran/rlc/rlc_metrics.h"
 
+#ifdef JBPF_ENABLED
+#include "jbpf_srsran_hooks.h"
+#endif
+
 namespace srsran {
 
 class rlc_rx_tm_entity : public rlc_rx_entity
@@ -39,6 +43,18 @@ public:
                    rlc_pcap&                         pcap_,
                    task_executor&                    ue_executor,
                    timer_manager&                    timers);
+
+#ifdef JBPF_ENABLED
+  ~rlc_rx_tm_entity() override {
+    {
+      int rb_id_value = rb_id.is_srb() ? srb_id_to_uint(rb_id.get_srb_id()) 
+                                      : drb_id_to_uint(rb_id.get_drb_id());
+      struct jbpf_rlc_ctx_info ctx_info = {0, (uint64_t)gnb_du_id, ue_index, rb_id.is_srb(), 
+        (uint8_t)rb_id_value, JBPF_RLC_MODE_TM};
+      hook_rlc_ul_deletion(&ctx_info);
+    }
+  }
+#endif
 
   void stop() final
   {

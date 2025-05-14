@@ -62,6 +62,7 @@ void rrc_setup_procedure::operator()(coro_context<async_task<void>>& ctx)
   #ifdef JBPF_ENABLED 
   {
     struct jbpf_rrc_ctx_info ctx_info = {0, (uint64_t)context.ue_index};
+    printf("MJB hook_rrc_ue_procedure_started: ue_index %ld, RRC_SETUP \n", (uint64_t)context.ue_index);
     hook_rrc_ue_procedure_started(&ctx_info, RRC_SETUP, 0);
   }
 #endif
@@ -91,6 +92,7 @@ void rrc_setup_procedure::operator()(coro_context<async_task<void>>& ctx)
 #ifdef JBPF_ENABLED 
     {
       struct jbpf_rrc_ctx_info ctx_info = {0, (uint64_t)context.ue_index};
+      printf("MJB hook_rrc_ue_procedure_completed: ue_index %ld, RRC_SETUP \n", (uint64_t)context.ue_index);
       hook_rrc_ue_procedure_completed(&ctx_info, RRC_SETUP, false, 0);
     }
 #endif
@@ -107,6 +109,7 @@ void rrc_setup_procedure::operator()(coro_context<async_task<void>>& ctx)
 #ifdef JBPF_ENABLED 
   {
     struct jbpf_rrc_ctx_info ctx_info = {0, (uint64_t)context.ue_index};
+    printf("MJB hook_rrc_ue_procedure_completed: ue_index %ld, RRC_SETUP \n", (uint64_t)context.ue_index);
     hook_rrc_ue_procedure_completed(&ctx_info, RRC_SETUP, true, 0);
   }
 #endif
@@ -168,6 +171,7 @@ void rrc_setup_procedure::send_initial_ue_msg(const asn1::rrc_nr::rrc_setup_comp
 #ifdef JBPF_ENABLED 
     {
       struct jbpf_rrc_ctx_info ctx_info = {0, (uint64_t)context.ue_index};
+      printf("MJB hook_rrc_ue_update_id: ue_index %ld \n", (uint64_t)context.ue_index);
       hook_rrc_ue_update_id(&ctx_info, context.five_g_s_tmsi->to_number());
     }
 #endif

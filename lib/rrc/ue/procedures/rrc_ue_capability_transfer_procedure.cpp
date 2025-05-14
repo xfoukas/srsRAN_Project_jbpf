@@ -48,6 +48,7 @@ void rrc_ue_capability_transfer_procedure::operator()(coro_context<async_task<bo
 #ifdef JBPF_ENABLED 
   {
     struct jbpf_rrc_ctx_info ctx_info = {0, (uint64_t)context.ue_index};
+    printf("MJB hook_rrc_ue_procedure_started: ue_index %ld, RRC_UE_CAPABILITY \n", (uint64_t)context.ue_index);
     hook_rrc_ue_procedure_started(&ctx_info, RRC_UE_CAPABILITY, 0);
   }
 #endif
@@ -58,6 +59,7 @@ void rrc_ue_capability_transfer_procedure::operator()(coro_context<async_task<bo
 #ifdef JBPF_ENABLED 
     {
       struct jbpf_rrc_ctx_info ctx_info = {0, (uint64_t)context.ue_index};
+      printf("MJB hook_rrc_ue_procedure_completed: ue_index %ld, RRC_UE_CAPABILITY \n", (uint64_t)context.ue_index);
       hook_rrc_ue_procedure_completed(&ctx_info, RRC_UE_CAPABILITY, false, 0);
     }
 #endif
@@ -109,6 +111,7 @@ void rrc_ue_capability_transfer_procedure::operator()(coro_context<async_task<bo
 #ifdef JBPF_ENABLED 
   {
     struct jbpf_rrc_ctx_info ctx_info = {0, (uint64_t)context.ue_index};
+    printf("MJB hook_rrc_ue_procedure_completed: ue_index %ld, RRC_UE_CAPABILITY \n", (uint64_t)context.ue_index);
     hook_rrc_ue_procedure_completed(&ctx_info, RRC_UE_CAPABILITY, procedure_result, 0);
   }
 #endif

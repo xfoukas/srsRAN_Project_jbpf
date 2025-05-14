@@ -27,6 +27,10 @@
 #include "srsran/support/executors/task_executor.h"
 #include "fmt/format.h"
 
+#ifdef JBPF_ENABLED
+#include "jbpf_srsran_hooks.h"
+#endif
+
 namespace srsran {
 
 ///
@@ -92,6 +96,18 @@ public:
                    task_executor&                       pcell_executor_,
                    task_executor&                       ue_executor_,
                    timer_manager&                       timers);
+
+#ifdef JBPF_ENABLED
+  ~rlc_tx_um_entity() override {
+    {
+      int rb_id_value = rb_id.is_srb() ? srb_id_to_uint(rb_id.get_srb_id()) 
+                                      : drb_id_to_uint(rb_id.get_drb_id());
+      struct jbpf_rlc_ctx_info ctx_info = {0, (uint64_t)gnb_du_id, ue_index, rb_id.is_srb(), 
+        (uint8_t)rb_id_value, JBPF_RLC_MODE_UM};
+      hook_rlc_dl_deletion(&ctx_info);
+    }
+  }
+#endif           
 
   void stop() final
   {

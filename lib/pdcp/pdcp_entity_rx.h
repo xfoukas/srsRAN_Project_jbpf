@@ -36,6 +36,10 @@
 #include "srsran/support/timers.h"
 #include "fmt/format.h"
 
+#ifdef JBPF_ENABLED
+#include "jbpf_srsran_hooks.h"
+#endif
+
 namespace srsran {
 
 /// PDCP RX state variables,
@@ -73,6 +77,18 @@ public:
                  timer_factory                   ue_ul_timer_factory_,
                  task_executor&                  ue_ul_executor_,
                  task_executor&                  crypto_executor_);
+
+#ifdef JBPF_ENABLED 
+  ~pdcp_entity_rx() override {
+      {
+        int rb_id_value = rb_id.is_srb() ? srb_id_to_uint(rb_id.get_srb_id()) 
+                                    : drb_id_to_uint(rb_id.get_drb_id());
+        struct jbpf_pdcp_ctx_info bearer_info = {0, ue_index, rb_id.is_srb(), (uint8_t)rb_id_value, (uint8_t)rlc_mode};                                         
+        printf("MJB hook_pdcp_ul_deletion: ue_index %d %s=%d rlc_mode %d \n", ue_index, rb_id.is_srb()?"srb":"drb", (uint8_t)rb_id_value, (uint8_t)rlc_mode);
+        hook_pdcp_ul_deletion(&bearer_info);
+      }
+  }
+#endif
 
   void handle_pdu(byte_buffer_chain buf) override;
 

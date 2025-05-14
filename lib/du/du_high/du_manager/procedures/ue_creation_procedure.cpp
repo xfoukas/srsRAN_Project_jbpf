@@ -27,6 +27,11 @@
 #include "srsran/rlc/rlc_rx.h"
 #include "srsran/rlc/rlc_srb_config_factory.h"
 
+#ifdef JBPF_ENABLED
+#include "jbpf_srsran_hooks.h"
+DEFINE_JBPF_HOOK(du_ue_ctx_creation);
+#endif
+
 using namespace srsran;
 using namespace srs_du;
 
@@ -47,6 +52,23 @@ void ue_creation_procedure::operator()(coro_context<async_task<void>>& ctx)
   CORO_BEGIN(ctx);
 
   proc_logger.log_proc_started();
+
+#ifdef JBPF_ENABLED 
+  {
+    const auto& cell_cfg = du_params.ran.cells[req.pcell_index];
+    struct jbpf_du_ue_ctx_info ue_info = {
+      0, /*ctx_id*/
+      (uint16_t)req.ue_index,
+      cell_cfg.tac,
+      cell_cfg.nr_cgi.plmn_id.to_bcd(),
+      cell_cfg.nr_cgi.nci.value(),
+      cell_cfg.pci,
+      (uint16_t)req.tc_rnti};
+    printf("MJB hook_du_ue_ctx_creation: ue_index %d tac %d nrcgi=[ plmn=%d nci=%ld ] pci %d tc_rnti %d \n", 
+      ue_info.du_ue_index, ue_info.tac, ue_info.plmn, ue_info.nci, ue_info.pci, ue_info.crnti);
+    hook_du_ue_ctx_creation(&ue_info);
+  }
+#endif
 
   // > Check if UE context was created in the DU manager.
   ue_ctx_creation_outcome = create_du_ue_context();

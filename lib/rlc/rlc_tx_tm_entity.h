@@ -26,6 +26,10 @@
 #include "rlc_tx_entity.h"
 #include "srsran/support/executors/task_executor.h"
 
+#ifdef JBPF_ENABLED
+#include "jbpf_srsran_hooks.h"
+#endif
+
 namespace srsran {
 
 class rlc_tx_tm_entity : public rlc_tx_entity
@@ -59,7 +63,19 @@ public:
                    task_executor&                       ue_executor_,
                    timer_manager&                       timers);
 
-  ~rlc_tx_tm_entity() override { stop(); }
+  ~rlc_tx_tm_entity() override { 
+#ifdef JBPF_ENABLED
+    {
+      int rb_id_value = rb_id.is_srb() ? srb_id_to_uint(rb_id.get_srb_id()) 
+                                      : drb_id_to_uint(rb_id.get_drb_id());
+      struct jbpf_rlc_ctx_info ctx_info = {0, (uint64_t)gnb_du_id, ue_index, rb_id.is_srb(), 
+        (uint8_t)rb_id_value, JBPF_RLC_MODE_TM};
+      hook_rlc_dl_deletion(&ctx_info);
+    }
+#endif
+    stop();
+  }
+  
 
   void stop() final
   {

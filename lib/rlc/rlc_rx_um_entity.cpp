@@ -57,6 +57,17 @@ rlc_rx_um_entity::rlc_rx_um_entity(gnb_du_id_t                       gnb_du_id_,
                          [this](timer_id_t tid) { on_expired_reassembly_timer(); });
   }
   logger.log_info("RLC UM configured. {}", cfg);
+
+#ifdef JBPF_ENABLED
+  {
+    int rb_id_value = rb_id.is_srb() ? srb_id_to_uint(rb_id.get_srb_id()) 
+                                    : drb_id_to_uint(rb_id.get_drb_id());
+    struct jbpf_rlc_ctx_info ctx_info = {0, (uint64_t)gnb_du_id, ue_index, rb_id.is_srb(), 
+      (uint8_t)rb_id_value, JBPF_RLC_MODE_UM};
+    hook_rlc_ul_creation(&ctx_info);
+  }
+#endif
+
 }
 
 // TS 38.322 v16.2.0 Sec. 5.2.3.2.2

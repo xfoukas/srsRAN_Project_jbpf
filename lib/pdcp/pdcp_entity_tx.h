@@ -37,6 +37,10 @@
 #include "srsran/support/sdu_window.h"
 #include "srsran/support/timers.h"
 
+#ifdef JBPF_ENABLED
+#include "jbpf_srsran_hooks.h"
+#endif
+
 namespace srsran {
 
 /// PDCP TX state variables,
@@ -109,10 +113,32 @@ public:
 
     logger.log_info("PDCP configured. {}", cfg);
 
+#ifdef JBPF_ENABLED 
+    {
+      int rb_id_value = rb_id.is_srb() ? srb_id_to_uint(rb_id.get_srb_id()) 
+                                  : drb_id_to_uint(rb_id.get_drb_id());
+      struct jbpf_pdcp_ctx_info bearer_info = {0, ue_index, rb_id.is_srb(), (uint8_t)rb_id_value, (uint8_t)rlc_mode};                                         
+      printf("MJB hook_pdcp_dl_creation: ue_index %d %s=%d rlc_mode %d \n", ue_index, rb_id.is_srb()?"srb":"drb", (uint8_t)rb_id_value, (uint8_t)rlc_mode);
+      hook_pdcp_dl_creation(&bearer_info);
+    }
+#endif
+
     // TODO: implement usage of crypto_executor
     (void)ue_dl_executor;
     (void)crypto_executor;
   }
+
+#ifdef JBPF_ENABLED 
+  ~pdcp_entity_tx() override {
+    {
+      int rb_id_value = rb_id.is_srb() ? srb_id_to_uint(rb_id.get_srb_id()) 
+                                  : drb_id_to_uint(rb_id.get_drb_id());
+      struct jbpf_pdcp_ctx_info bearer_info = {0, ue_index, rb_id.is_srb(), (uint8_t)rb_id_value, (uint8_t)rlc_mode};                                         
+      printf("MJB hook_pdcp_dl_deletion: ue_index %d %s=%d rlc_mode %d \n", ue_index, rb_id.is_srb()?"srb":"drb", (uint8_t)rb_id_value, (uint8_t)rlc_mode);
+      hook_pdcp_dl_deletion(&bearer_info);
+    }
+  }
+#endif
 
   /// \brief Triggers re-establishment as specified in TS 38.323, section 5.1.2
   void reestablish(security::sec_128_as_config sec_cfg) override;

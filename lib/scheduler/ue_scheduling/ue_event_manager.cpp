@@ -166,9 +166,10 @@ void ue_event_manager::handle_ue_creation(ue_config_update_event ev)
                    u->crnti);
       return;
     }
-
+        
 #ifdef JBPF_ENABLED
-    hook_mac_sched_ue_creation((0), u->get_pcell().get_cell_cfg().pci, (uint16_t)u->crnti);
+    printf("MJB hook_mac_sched_ue_creation: ue_index %d pci %d crnti %d \n", u->ue_index, u->get_pcell().get_cell_cfg().pci, (uint16_t)u->crnti);
+    hook_mac_sched_ue_creation((0), u->ue_index, u->get_pcell().get_cell_cfg().pci, (uint16_t)u->crnti);
 #endif
 
     // Insert UE in UE repository.
@@ -216,7 +217,8 @@ void ue_event_manager::handle_ue_reconfiguration(ue_config_update_event ev)
     auto& u = ue_db[ue_idx];
 
 #ifdef JBPF_ENABLED
-    hook_mac_sched_ue_reconfig((0), u.get_pcell().get_cell_cfg().pci, (uint16_t)u.crnti);
+    printf("MJB hook_mac_sched_ue_reconfig: ue_index %d pci %d crnti %d \n", ue_idx, u.get_pcell().get_cell_cfg().pci, (uint16_t)u.crnti);
+    hook_mac_sched_ue_reconfig((0), ue_idx, u.get_pcell().get_cell_cfg().pci, (uint16_t)u.crnti);
 #endif
 
     // If a UE carrier has been removed, remove the UE from the respective slice scheduler.
@@ -285,7 +287,8 @@ void ue_event_manager::handle_ue_deletion(ue_config_delete_event ev)
     du_cell_index_t pcell_idx = u.get_pcell().cell_index;
 
 #ifdef JBPF_ENABLED
-    hook_mac_sched_ue_deletion((0), u.get_pcell().get_cell_cfg().pci, (uint16_t)u.crnti);
+    printf("MJB hook_mac_sched_ue_deletion: ue_index %d pci %d crnti %d \n", ue_idx, u.get_pcell().get_cell_cfg().pci, (uint16_t)u.crnti);
+    hook_mac_sched_ue_deletion((0), ue_idx, u.get_pcell().get_cell_cfg().pci, (uint16_t)u.crnti);
 #endif
 
     for (unsigned i = 0, e = u.nof_cells(); i != e; ++i) {
@@ -320,7 +323,8 @@ void ue_event_manager::handle_ue_config_applied(du_ue_index_t ue_idx)
     auto& pcell = du_cells[u.get_pcell().cell_index];
 
 #ifdef JBPF_ENABLED
-    hook_mac_sched_ue_config_applied(0, u.get_pcell().get_cell_cfg().pci, (uint16_t)u.crnti);
+    printf("MJB hook_mac_sched_ue_config_applied: ue_index %d pci %d crnti %d \n", ue_idx, u.get_pcell().get_cell_cfg().pci, (uint16_t)u.crnti);
+    hook_mac_sched_ue_config_applied(0, ue_idx, u.get_pcell().get_cell_cfg().pci, (uint16_t)u.crnti);
 #endif
 
     // Log UE config applied event.
@@ -352,7 +356,7 @@ void ue_event_manager::handle_ul_bsr_indication(const ul_bsr_indication_message&
 
 #ifdef JBPF_ENABLED
     hook_mac_sched_ul_bsr_indication(const_cast<void*>(static_cast<const void*>(&bsr_ind)),
-      0, u.get_pcell().get_cell_cfg().pci, (uint16_t)bsr_ind.crnti, sizeof(ul_bsr_indication_message));
+      0, bsr_ind.ue_index, u.get_pcell().get_cell_cfg().pci, (uint16_t)bsr_ind.crnti, sizeof(ul_bsr_indication_message));
 #endif
 
     // Handle event.
@@ -395,7 +399,7 @@ void ue_event_manager::handle_ul_phr_indication(const ul_phr_indication_message&
 
 #ifdef JBPF_ENABLED
                            hook_mac_sched_ul_phr_indication(const_cast<void*>(static_cast<const void*>(&phr_ind)),
-                              0, ue_cc.get_cell_cfg().pci, (uint16_t)phr_ind.rnti, sizeof(ul_phr_indication_message));
+                              0, phr_ind.ue_index, ue_cc.get_cell_cfg().pci, (uint16_t)phr_ind.rnti, sizeof(ul_phr_indication_message));
 #endif
 
                            // Log event.
@@ -430,7 +434,7 @@ void ue_event_manager::handle_crc_indication(const ul_crc_indication& crc_ind)
 
 #ifdef JBPF_ENABLED
               hook_mac_sched_crc_indication(const_cast<void*>(static_cast<const void*>(&crc)),
-                0, ue_cc.get_cell_cfg().pci, (uint16_t)crc.rnti, sizeof(ul_crc_pdu_indication));
+                0, ue_cc.ue_index, ue_cc.get_cell_cfg().pci, (uint16_t)crc.rnti, sizeof(ul_crc_pdu_indication));
 #endif
 
               const int tbs = ue_cc.handle_crc_pdu(sl_rx, crc);
@@ -509,7 +513,7 @@ void ue_event_manager::handle_uci_indication(const uci_indication& ind)
 
 #ifdef JBPF_ENABLED
               hook_mac_sched_uci_indication(const_cast<void*>(static_cast<const void*>(&uci_pdu)),
-                0, ue_cc.get_cell_cfg().pci, (uint16_t)uci_pdu.crnti, sizeof(uci_indication::uci_pdu));
+                0, ue_cc.ue_index, ue_cc.get_cell_cfg().pci, (uint16_t)uci_pdu.crnti, sizeof(uci_indication::uci_pdu));
 #endif
 
               if (const auto* pucch_f0f1 = std::get_if<uci_indication::uci_pdu::uci_pucch_f0_or_f1_pdu>(&uci_pdu.pdu)) {
@@ -606,7 +610,7 @@ void ue_event_manager::handle_srs_indication(const srs_indication& ind)
     ue* u = ue_db.find_by_rnti(srs_pdu.rnti);
     if (u ) {
       hook_mac_sched_srs_indication(const_cast<void*>(static_cast<const void*>(&srs_pdu)),
-        0, u->get_pcell().get_cell_cfg().pci, (uint16_t)srs_pdu.rnti, sizeof(srs_indication::srs_indication_pdu));
+        0, u->ue_index, u->get_pcell().get_cell_cfg().pci, (uint16_t)srs_pdu.rnti, sizeof(srs_indication::srs_indication_pdu));
     }
 #endif
 
@@ -647,7 +651,7 @@ void ue_event_manager::handle_dl_mac_ce_indication(const dl_mac_ce_indication& c
 
 #ifdef JBPF_ENABLED
     hook_mac_sched_dl_mac_ce_indication(const_cast<void*>(static_cast<const void*>(&ce)),
-      0, u.get_pcell().get_cell_cfg().pci, (uint16_t)u.crnti, sizeof(dl_mac_ce_indication));
+      0, ce.ue_index, u.get_pcell().get_cell_cfg().pci, (uint16_t)u.crnti, sizeof(dl_mac_ce_indication));
 #endif
 
     u.handle_dl_mac_ce_indication(ce);
@@ -671,7 +675,7 @@ void ue_event_manager::handle_dl_buffer_state_indication(const dl_buffer_state_i
 #ifdef JBPF_ENABLED
   auto& u = ue_db[bs.ue_index];
   hook_mac_sched_dl_buffer_state_indication(const_cast<void*>(static_cast<const void*>(&bs)),
-    0, u.get_pcell().get_cell_cfg().pci, (uint16_t)u.crnti, sizeof(dl_buffer_state_indication_message));
+    0, bs.ue_index, u.get_pcell().get_cell_cfg().pci, (uint16_t)u.crnti, sizeof(dl_buffer_state_indication_message));
 #endif
 
   dl_bo_mng->handle_dl_buffer_state_indication(bs);

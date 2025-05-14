@@ -29,6 +29,12 @@
 #include "srsran/support/async/async_no_op_task.h"
 #include "srsran/support/async/execute_on.h"
 
+#ifdef JBPF_ENABLED 
+#include "jbpf_srsran_hooks.h"
+DEFINE_JBPF_HOOK(du_ue_ctx_deletion);
+DEFINE_JBPF_HOOK(du_ue_ctx_update_crnti);
+#endif    
+
 using namespace srsran;
 using namespace srs_du;
 
@@ -257,7 +263,17 @@ void du_ue_manager::remove_ue(du_ue_index_t ue_index)
     rnti_to_ue_index.erase(ue_db[ue_index].rnti);
     ue_db.erase(ue_index);
     ue_ctrl_loop[ue_index].clear_pending_tasks();
+ 
+#ifdef JBPF_ENABLED 
+    {
+      struct jbpf_du_ue_ctx_info ue_info = {0 /*ctx_id*/, (uint16_t)ue_index, 0, 0, 0, 0, 0};
+      printf("MJB hook_du_ue_ctx_deletion: ue_index %d\n", ue_info.du_ue_index);
+      hook_du_ue_ctx_deletion(&ue_info);
+    }
+#endif    
+
     logger.debug("ue={}: Freeing UE context", ue_index);
+    
     CORO_RETURN();
   });
 }
@@ -280,4 +296,12 @@ void du_ue_manager::update_crnti(du_ue_index_t ue_index, rnti_t crnti)
 
   // Update UE context with new C-RNTI.
   u.rnti = crnti;
+
+#ifdef JBPF_ENABLED 
+  {
+    struct jbpf_du_ue_ctx_info ue_info = {0 /*ctx_id*/, (uint16_t)ue_index, 0, 0, 0, 0, (uint16_t)crnti};
+    printf("MJB hook_du_ue_ctx_update_crnti: ue_index %d rnti %d\n", ue_info.du_ue_index, ue_info.crnti);
+    hook_du_ue_ctx_update_crnti(&ue_info);
+  }
+#endif    
 }

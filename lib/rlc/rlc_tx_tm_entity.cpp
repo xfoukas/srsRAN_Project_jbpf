@@ -57,6 +57,17 @@ rlc_tx_tm_entity::rlc_tx_tm_entity(gnb_du_id_t                          du_id_,
 {
   metrics_low.metrics_set_mode(rlc_mode::tm);
   logger.log_info("RLC TM created. {}", cfg);
+
+#ifdef JBPF_ENABLED
+  {
+    int rb_id_value = rb_id.is_srb() ? srb_id_to_uint(rb_id.get_srb_id()) 
+                                    : drb_id_to_uint(rb_id.get_drb_id());
+    struct jbpf_rlc_ctx_info ctx_info = {0, (uint64_t)gnb_du_id, ue_index, rb_id.is_srb(), 
+      (uint8_t)rb_id_value, JBPF_RLC_MODE_TM, {sdu_queue.get_state().n_sdus, sdu_queue.get_state().n_bytes}};
+    hook_rlc_dl_creation(&ctx_info);
+  }
+#endif
+
 }
 
 // TS 38.322 v16.2.0 Sec. 5.2.1.1
@@ -71,17 +82,6 @@ void rlc_tx_tm_entity::handle_sdu(byte_buffer sdu_buf, bool is_retx)
     logger.log_error("Ignored unexpected PDCP retransmission flag in RLC TM SDU");
   }
 
-#ifdef JBPF_ENABLED
-  {
-    int rb_id_value = rb_id.is_srb() ? srb_id_to_uint(rb_id.get_srb_id()) 
-                                    : drb_id_to_uint(rb_id.get_drb_id());
-    struct jbpf_rlc_ctx_info ctx_info = {0, (uint64_t)gnb_du_id, ue_index, rb_id.is_srb(), 
-      (uint8_t)rb_id_value, JBPF_RLC_MODE_TM};
-    hook_rlc_dl_new_sdu(&ctx_info, sdu_.buf.length(), 
-      sdu_.pdcp_sn.has_value() ? sdu_.pdcp_sn.value() : 0);
-  }
-#endif
-
   size_t sdu_len = sdu_.buf.length();
   if (sdu_queue.write(sdu_)) {
     logger.log_info(sdu_.buf.begin(), sdu_.buf.end(), "TX SDU. sdu_len={} {}", sdu_len, sdu_queue.get_state());
@@ -91,6 +91,18 @@ void rlc_tx_tm_entity::handle_sdu(byte_buffer sdu_buf, bool is_retx)
     logger.log_info("Dropped SDU. sdu_len={} {}", sdu_len, sdu_queue.get_state());
     metrics_high.metrics_add_lost_sdus(1);
   }
+
+#ifdef JBPF_ENABLED
+  {
+    int rb_id_value = rb_id.is_srb() ? srb_id_to_uint(rb_id.get_srb_id()) 
+                                    : drb_id_to_uint(rb_id.get_drb_id());
+    struct jbpf_rlc_ctx_info ctx_info = {0, (uint64_t)gnb_du_id, ue_index, rb_id.is_srb(), 
+      (uint8_t)rb_id_value, JBPF_RLC_MODE_TM, {sdu_queue.get_state().n_sdus, sdu_queue.get_state().n_bytes}};
+    hook_rlc_dl_new_sdu(&ctx_info, sdu_.buf.length(), 
+      sdu_.pdcp_sn.has_value() ? sdu_.pdcp_sn.value() : 0);
+  }
+#endif
+
 }
 
 // TS 38.322 v16.2.0 Sec. 5.4
@@ -101,7 +113,7 @@ void rlc_tx_tm_entity::discard_sdu(uint32_t pdcp_sn)
     int rb_id_value = rb_id.is_srb() ? srb_id_to_uint(rb_id.get_srb_id()) 
                                     : drb_id_to_uint(rb_id.get_drb_id());
     struct jbpf_rlc_ctx_info ctx_info = {0, (uint64_t)gnb_du_id, ue_index, rb_id.is_srb(), 
-      (uint8_t)rb_id_value, JBPF_RLC_MODE_TM};
+      (uint8_t)rb_id_value, JBPF_RLC_MODE_TM, {sdu_queue.get_state().n_sdus, sdu_queue.get_state().n_bytes}};
     hook_rlc_dl_discard_sdu(&ctx_info, pdcp_sn);
   }
 #endif
@@ -144,7 +156,7 @@ size_t rlc_tx_tm_entity::pull_pdu(span<uint8_t> mac_sdu_buf)
       int rb_id_value = rb_id.is_srb() ? srb_id_to_uint(rb_id.get_srb_id()) 
                                       : drb_id_to_uint(rb_id.get_drb_id());
       struct jbpf_rlc_ctx_info ctx_info = {0, (uint64_t)gnb_du_id, ue_index, rb_id.is_srb(), 
-        (uint8_t)rb_id_value, JBPF_RLC_MODE_TM};
+        (uint8_t)rb_id_value, JBPF_RLC_MODE_TM, {sdu_queue.get_state().n_sdus, sdu_queue.get_state().n_bytes}};
       hook_rlc_dl_sdu_send_started(&ctx_info, sdu.pdcp_sn.value(), false);
     }
 #endif
@@ -180,7 +192,7 @@ size_t rlc_tx_tm_entity::pull_pdu(span<uint8_t> mac_sdu_buf)
       int rb_id_value = rb_id.is_srb() ? srb_id_to_uint(rb_id.get_srb_id()) 
                                       : drb_id_to_uint(rb_id.get_drb_id());
       struct jbpf_rlc_ctx_info ctx_info = {0, (uint64_t)gnb_du_id, ue_index, rb_id.is_srb(), 
-        (uint8_t)rb_id_value, JBPF_RLC_MODE_TM};
+        (uint8_t)rb_id_value, JBPF_RLC_MODE_TM, {sdu_queue.get_state().n_sdus, sdu_queue.get_state().n_bytes}};
       hook_rlc_dl_sdu_send_completed(&ctx_info, sdu.pdcp_sn.has_value() ? sdu.pdcp_sn.value() : 0, false);
     }
 #endif
@@ -190,7 +202,7 @@ size_t rlc_tx_tm_entity::pull_pdu(span<uint8_t> mac_sdu_buf)
     int rb_id_value = rb_id.is_srb() ? srb_id_to_uint(rb_id.get_srb_id()) 
                                     : drb_id_to_uint(rb_id.get_drb_id());
     struct jbpf_rlc_ctx_info ctx_info = {0, (uint64_t)gnb_du_id, ue_index, rb_id.is_srb(), 
-      (uint8_t)rb_id_value, JBPF_RLC_MODE_TM};
+      (uint8_t)rb_id_value, JBPF_RLC_MODE_TM, {sdu_queue.get_state().n_sdus, sdu_queue.get_state().n_bytes}};
     hook_rlc_dl_tx_pdu(&ctx_info, JBPF_RLC_PDUTYPE_STATUS, (uint32_t)pdu_len, 0);
   }
 #endif  
