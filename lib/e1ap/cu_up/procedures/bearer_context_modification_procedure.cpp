@@ -68,8 +68,6 @@ void bearer_context_modification_procedure::operator()(coro_context<async_task<v
 #ifdef JBPF_ENABLED 
   { 
     struct jbpf_cuup_e1_ctx_info bearer_info = {0, bearer_context_mod.ue_index,request->gnb_cu_cp_ue_e1ap_id, request->gnb_cu_up_ue_e1ap_id};
-    printf("MJB hook_e1_cuup_bearer_context_modification failure index=%ld gnb_cu_cp_ue_e1ap_id=%ld gnb_cu_up_ue_e1ap_id=%ld\n", 
-      bearer_info.cu_up_ue_index, bearer_info.gnb_cu_cp_ue_e1ap_id, bearer_info.gnb_cu_up_ue_e1ap_id);     
     hook_e1_cuup_bearer_context_modification(&bearer_info, /*success*/false);
   }
 #endif
@@ -87,8 +85,6 @@ void bearer_context_modification_procedure::operator()(coro_context<async_task<v
 #ifdef JBPF_ENABLED 
   { 
     struct jbpf_cuup_e1_ctx_info bearer_info = {0, bearer_context_mod.ue_index,request->gnb_cu_cp_ue_e1ap_id, request->gnb_cu_up_ue_e1ap_id};
-    printf("MJB hook_e1_cuup_bearer_context_modification failure index=%ld gnb_cu_cp_ue_e1ap_id=%ld gnb_cu_up_ue_e1ap_id=%ld\n", 
-      bearer_info.cu_up_ue_index, bearer_info.gnb_cu_cp_ue_e1ap_id, bearer_info.gnb_cu_up_ue_e1ap_id);     
     hook_e1_cuup_bearer_context_modification(&bearer_info, /*success*/false);
   }
 #endif
@@ -113,8 +109,6 @@ void bearer_context_modification_procedure::operator()(coro_context<async_task<v
 #ifdef JBPF_ENABLED 
   { 
     struct jbpf_cuup_e1_ctx_info bearer_info = {0, bearer_context_mod.ue_index,request->gnb_cu_cp_ue_e1ap_id, request->gnb_cu_up_ue_e1ap_id};
-    printf("MJB hook_e1_cuup_bearer_context_modification success index=%ld gnb_cu_cp_ue_e1ap_id=%ld gnb_cu_up_ue_e1ap_id=%ld\n", 
-      bearer_info.cu_up_ue_index, bearer_info.gnb_cu_cp_ue_e1ap_id, bearer_info.gnb_cu_up_ue_e1ap_id);     
     hook_e1_cuup_bearer_context_modification(&bearer_info, /*success*/true);
   }
 #endif

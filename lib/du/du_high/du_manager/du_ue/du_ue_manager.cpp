@@ -267,7 +267,6 @@ void du_ue_manager::remove_ue(du_ue_index_t ue_index)
 #ifdef JBPF_ENABLED 
     {
       struct jbpf_du_ue_ctx_info ue_info = {0 /*ctx_id*/, (uint16_t)ue_index, 0, 0, 0, 0, 0};
-      printf("MJB hook_du_ue_ctx_deletion: ue_index %d\n", ue_info.du_ue_index);
       hook_du_ue_ctx_deletion(&ue_info);
     }
 #endif    
@@ -300,7 +299,6 @@ void du_ue_manager::update_crnti(du_ue_index_t ue_index, rnti_t crnti)
 #ifdef JBPF_ENABLED 
   {
     struct jbpf_du_ue_ctx_info ue_info = {0 /*ctx_id*/, (uint16_t)ue_index, 0, 0, 0, 0, (uint16_t)crnti};
-    printf("MJB hook_du_ue_ctx_update_crnti: ue_index %d rnti %d\n", ue_info.du_ue_index, ue_info.crnti);
     hook_du_ue_ctx_update_crnti(&ue_info);
   }
 #endif    

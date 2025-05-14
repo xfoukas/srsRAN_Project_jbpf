@@ -67,8 +67,6 @@ void bearer_context_release_procedure::operator()(coro_context<async_task<void>>
 #ifdef JBPF_ENABLED 
   { 
     struct jbpf_cuup_e1_ctx_info bearer_info = {0, bearer_context_release_cmd.ue_index, cmd->gnb_cu_cp_ue_e1ap_id, cmd->gnb_cu_up_ue_e1ap_id};
-    printf("MJB hook_e1_cuup_bearer_context_release success index=%ld gnb_cu_cp_ue_e1ap_id=%ld gnb_cu_up_ue_e1ap_id=%ld\n", 
-      bearer_info.cu_up_ue_index, bearer_info.gnb_cu_cp_ue_e1ap_id, bearer_info.gnb_cu_up_ue_e1ap_id);     
     hook_e1_cuup_bearer_context_release(&bearer_info, /*success*/true);
   }
 #endif

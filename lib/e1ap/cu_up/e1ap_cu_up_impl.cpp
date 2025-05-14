@@ -173,11 +173,6 @@ void e1ap_cu_up_impl::handle_initiating_message(const asn1::e1ap::init_msg_s& ms
 
 void e1ap_cu_up_impl::handle_bearer_context_setup_request(const asn1::e1ap::bearer_context_setup_request_s& msg)
 {
-  printf("MJB e1ap_cu_up_impl::handle_bearer_context_setup_request gnb_cu_cp_ue_e1ap_id %ld\n", 
-          msg->gnb_cu_cp_ue_e1ap_id);
-
-
-
   // create failure message for early returns
   e1ap_message e1ap_msg;
   e1ap_msg.pdu.set_unsuccessful_outcome();
@@ -203,8 +198,6 @@ void e1ap_cu_up_impl::handle_bearer_context_setup_request(const asn1::e1ap::bear
 #ifdef JBPF_ENABLED 
     {
       struct jbpf_cuup_e1_ctx_info bearer_info = {0, 0, msg->gnb_cu_cp_ue_e1ap_id, 0};
-      printf("MJB hook_e1_cuup_bearer_context_setup failure gnb_cu_cp_ue_e1ap_id=%ld\n", 
-        bearer_info.gnb_cu_cp_ue_e1ap_id);     
       hook_e1_cuup_bearer_context_setup(&bearer_info, /*success*/false);
     }
   #endif
@@ -231,8 +224,6 @@ void e1ap_cu_up_impl::handle_bearer_context_setup_request(const asn1::e1ap::bear
 #ifdef JBPF_ENABLED 
     {
       struct jbpf_cuup_e1_ctx_info bearer_info = {0, 0, msg->gnb_cu_cp_ue_e1ap_id, 0};
-      printf("MJB hook_e1_cuup_bearer_context_setup failure gnb_cu_cp_ue_e1ap_id=%ld\n", 
-        bearer_info.gnb_cu_cp_ue_e1ap_id);     
       hook_e1_cuup_bearer_context_setup(&bearer_info, /*success*/false);
     }
 #endif
@@ -266,8 +257,6 @@ void e1ap_cu_up_impl::handle_bearer_context_setup_request(const asn1::e1ap::bear
 #ifdef JBPF_ENABLED 
     {
       struct jbpf_cuup_e1_ctx_info bearer_info = {0, bearer_context_setup_response_msg.ue_index, msg->gnb_cu_cp_ue_e1ap_id, gnb_cu_up_ue_e1ap_id_to_uint(cu_up_ue_e1ap_id)};
-      printf("MJB hook_e1_cuup_bearer_context_setup success, ue_index %ld  gnb_cu_cp_ue_e1ap_id=%ld gnb_cu_up_ue_e1ap_id=%ld\n", 
-        bearer_info.cu_up_ue_index, bearer_info.gnb_cu_cp_ue_e1ap_id, bearer_info.gnb_cu_up_ue_e1ap_id);
       hook_e1_cuup_bearer_context_setup(&bearer_info, /*success*/true);
     }
 #endif
@@ -281,8 +270,6 @@ void e1ap_cu_up_impl::handle_bearer_context_setup_request(const asn1::e1ap::bear
 #ifdef JBPF_ENABLED 
     { 
       struct jbpf_cuup_e1_ctx_info bearer_info = {0, 0, msg->gnb_cu_cp_ue_e1ap_id, 0};
-      printf("MJB hook_e1_cuup_bearer_context_setup failure gnb_cu_cp_ue_e1ap_id=%ld\n", 
-        bearer_info.gnb_cu_cp_ue_e1ap_id);     
       hook_e1_cuup_bearer_context_setup(&bearer_info, /*success*/false);
     }
 #endif
@@ -308,8 +295,6 @@ void e1ap_cu_up_impl::handle_bearer_context_modification_request(const asn1::e1a
 #ifdef JBPF_ENABLED 
     { 
       struct jbpf_cuup_e1_ctx_info bearer_info = {0, 0, msg->gnb_cu_cp_ue_e1ap_id, msg->gnb_cu_up_ue_e1ap_id};
-      printf("MJB hook_e1_cuup_bearer_context_modification failure gnb_cu_cp_ue_e1ap_id=%ld gnb_cu_up_ue_e1ap_id=%ld\n", 
-        bearer_info.gnb_cu_cp_ue_e1ap_id, bearer_info.gnb_cu_up_ue_e1ap_id);     
       hook_e1_cuup_bearer_context_modification(&bearer_info, /*success*/false);
     }
 #endif
@@ -337,8 +322,6 @@ void e1ap_cu_up_impl::handle_bearer_context_release_command(const asn1::e1ap::be
 #ifdef JBPF_ENABLED 
     { 
       struct jbpf_cuup_e1_ctx_info bearer_info = {0, 0, msg->gnb_cu_cp_ue_e1ap_id, msg->gnb_cu_up_ue_e1ap_id};
-      printf("MJB hook_e1_cuup_bearer_context_release failure gnb_cu_cp_ue_e1ap_id=%ld gnb_cu_up_ue_e1ap_id=%ld\n", 
-        bearer_info.gnb_cu_cp_ue_e1ap_id, bearer_info.gnb_cu_up_ue_e1ap_id);     
       hook_e1_cuup_bearer_context_release(&bearer_info, /*success*/false);
     }
 #endif

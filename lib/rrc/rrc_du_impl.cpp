@@ -164,7 +164,6 @@ rrc_ue_interface* rrc_du_impl::add_ue(const rrc_ue_creation_message& msg)
 #ifdef JBPF_ENABLED 
     {
       struct jbpf_rrc_ctx_info ctx_info = {0, (uint64_t)ue_index};
-      printf("MJB hook_rrc_ue_add: ue_index %ld \n", (uint64_t)ue_index);
       hook_rrc_ue_add(&ctx_info, (uint16_t)msg.c_rnti, rrc_cell.pci, rrc_cell.tac,
         rrc_cell.cgi.plmn_id.to_bcd(), rrc_cell.cgi.nci.value());
     }
@@ -187,7 +186,6 @@ void rrc_du_impl::remove_ue(ue_index_t ue_index)
 #ifdef JBPF_ENABLED 
   {
     struct jbpf_rrc_ctx_info ctx_info = {0, (uint64_t)ue_index};
-    printf("MJB hook_rrc_ue_remove: ue_index %ld \n", (uint64_t)ue_index);
     hook_rrc_ue_remove(&ctx_info);
   }
 #endif

@@ -75,8 +75,6 @@ cu_up_manager_impl::handle_bearer_context_setup_request(const e1ap_bearer_contex
   response.ue_index                           = INVALID_UE_INDEX;
   response.success                            = false;
 
-  printf("MJB cu_up_manager_impl::handle_bearer_context_setup_request 100 \n");
-
   // 1. Create new UE context
   ue_context_cfg ue_cfg = {};
   fill_sec_as_config(ue_cfg.security_info, msg.security_info);
@@ -109,17 +107,12 @@ cu_up_manager_impl::handle_bearer_context_setup_request(const e1ap_bearer_contex
   response.ue_index = ue_ctxt->get_index();
   response.success  = true;
 
-  printf("MJB cu_up_manager_impl::handle_bearer_context_setup_request 101 ue_index %d \n", 
-      (uint16_t) response.ue_index);
-
   return response;
 }
 
 async_task<e1ap_bearer_context_modification_response>
 cu_up_manager_impl::handle_bearer_context_modification_request(const e1ap_bearer_context_modification_request& msg)
 {
-  printf("MJB cu_up_manager_impl::handle_bearer_context_modification_request ue_index %d \n", (uint16_t)msg.ue_index);
-
   ue_context* ue_ctxt = ue_mng->find_ue(msg.ue_index);
   if (ue_ctxt == nullptr) {
     logger.error("Could not find UE context");
@@ -196,8 +189,6 @@ cu_up_manager_impl::handle_bearer_context_modification_request_impl(ue_context& 
 async_task<void>
 cu_up_manager_impl::handle_bearer_context_release_command(const e1ap_bearer_context_release_command& msg)
 {
-  printf("MJB cu_up_manager_impl::handle_bearer_context_release_command ue_index %d \n", (uint16_t)msg.ue_index);
-
   ue_context* ue_ctxt = ue_mng->find_ue(msg.ue_index);
   if (ue_ctxt == nullptr) {
     logger.error("ue={}: Discarding E1 Bearer Context Release Command. UE context not found", msg.ue_index);

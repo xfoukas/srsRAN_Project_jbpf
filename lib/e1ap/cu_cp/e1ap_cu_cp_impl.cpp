@@ -136,8 +136,6 @@ e1ap_cu_cp_impl::handle_bearer_context_setup_request(const e1ap_bearer_context_s
 #ifdef JBPF_ENABLED 
   struct jbpf_cucp_e1_ctx_info bearer_info = {0, (uint64_t)request.ue_index, 
     bearer_context_setup_request->gnb_cu_cp_ue_e1ap_id, 0};
-  printf("MJB  hook_e1_cucp_bearer_context_setup, ue_index=%ld gnb_cu_cp_ue_e1ap_id=%ld \n",
-    bearer_info.cu_cp_ue_index, bearer_info.gnb_cu_cp_ue_e1ap_id);
   hook_e1_cucp_bearer_context_setup(&bearer_info);
 #endif
 
@@ -175,10 +173,6 @@ e1ap_cu_cp_impl::handle_bearer_context_modification_request(const e1ap_bearer_co
 #ifdef JBPF_ENABLED 
   struct jbpf_cucp_e1_ctx_info bearer_info = {0, (uint64_t)request.ue_index, 
     bearer_context_mod_request->gnb_cu_cp_ue_e1ap_id, bearer_context_mod_request->gnb_cu_up_ue_e1ap_id};
-  printf("MJB  hook_e1_cucp_bearer_context_modification, ue_index=%ld gnb_cu_cp_ue_e1ap_id=%ld gnb_cu_up_ue_e1ap_id=%ld \n",
-      (uint64_t)bearer_info.cu_cp_ue_index, 
-      (uint64_t)bearer_info.gnb_cu_cp_ue_e1ap_id,
-      (uint64_t)bearer_info.gnb_cu_up_ue_e1ap_id);
   hook_e1_cucp_bearer_context_modification(&bearer_info);
 #endif
 
@@ -212,10 +206,6 @@ e1ap_cu_cp_impl::handle_bearer_context_release_command(const e1ap_bearer_context
 #ifdef JBPF_ENABLED 
   struct jbpf_cucp_e1_ctx_info bearer_info = {0, (uint64_t)command.ue_index, 
     bearer_context_release_cmd->gnb_cu_cp_ue_e1ap_id, bearer_context_release_cmd->gnb_cu_up_ue_e1ap_id};
-    printf("MJB  hook_e1_cucp_bearer_context_release, ue_index=%ld gnb_cu_cp_ue_e1ap_id=%ld gnb_cu_up_ue_e1ap_id=%ld \n",
-      bearer_info.cu_cp_ue_index, 
-      bearer_info.gnb_cu_cp_ue_e1ap_id,
-      bearer_info.gnb_cu_up_ue_e1ap_id);
     hook_e1_cucp_bearer_context_release(&bearer_info);
 #endif
 

@@ -64,8 +64,6 @@ void ue_creation_procedure::operator()(coro_context<async_task<void>>& ctx)
       cell_cfg.nr_cgi.nci.value(),
       cell_cfg.pci,
       (uint16_t)req.tc_rnti};
-    printf("MJB hook_du_ue_ctx_creation: ue_index %d tac %d nrcgi=[ plmn=%d nci=%ld ] pci %d tc_rnti %d \n", 
-      ue_info.du_ue_index, ue_info.tac, ue_info.plmn, ue_info.nci, ue_info.pci, ue_info.crnti);
     hook_du_ue_ctx_creation(&ue_info);
   }
 #endif

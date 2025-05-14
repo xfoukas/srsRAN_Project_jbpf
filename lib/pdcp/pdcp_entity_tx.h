@@ -118,7 +118,6 @@ public:
       int rb_id_value = rb_id.is_srb() ? srb_id_to_uint(rb_id.get_srb_id()) 
                                   : drb_id_to_uint(rb_id.get_drb_id());
       struct jbpf_pdcp_ctx_info bearer_info = {0, ue_index, rb_id.is_srb(), (uint8_t)rb_id_value, (uint8_t)rlc_mode};                                         
-      printf("MJB hook_pdcp_dl_creation: ue_index %d %s=%d rlc_mode %d \n", ue_index, rb_id.is_srb()?"srb":"drb", (uint8_t)rb_id_value, (uint8_t)rlc_mode);
       hook_pdcp_dl_creation(&bearer_info);
     }
 #endif
@@ -134,7 +133,6 @@ public:
       int rb_id_value = rb_id.is_srb() ? srb_id_to_uint(rb_id.get_srb_id()) 
                                   : drb_id_to_uint(rb_id.get_drb_id());
       struct jbpf_pdcp_ctx_info bearer_info = {0, ue_index, rb_id.is_srb(), (uint8_t)rb_id_value, (uint8_t)rlc_mode};                                         
-      printf("MJB hook_pdcp_dl_deletion: ue_index %d %s=%d rlc_mode %d \n", ue_index, rb_id.is_srb()?"srb":"drb", (uint8_t)rb_id_value, (uint8_t)rlc_mode);
       hook_pdcp_dl_deletion(&bearer_info);
     }
   }

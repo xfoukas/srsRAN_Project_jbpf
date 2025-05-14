@@ -168,7 +168,6 @@ void ue_event_manager::handle_ue_creation(ue_config_update_event ev)
     }
         
 #ifdef JBPF_ENABLED
-    printf("MJB hook_mac_sched_ue_creation: ue_index %d pci %d crnti %d \n", u->ue_index, u->get_pcell().get_cell_cfg().pci, (uint16_t)u->crnti);
     hook_mac_sched_ue_creation((0), u->ue_index, u->get_pcell().get_cell_cfg().pci, (uint16_t)u->crnti);
 #endif
 
@@ -217,7 +216,6 @@ void ue_event_manager::handle_ue_reconfiguration(ue_config_update_event ev)
     auto& u = ue_db[ue_idx];
 
 #ifdef JBPF_ENABLED
-    printf("MJB hook_mac_sched_ue_reconfig: ue_index %d pci %d crnti %d \n", ue_idx, u.get_pcell().get_cell_cfg().pci, (uint16_t)u.crnti);
     hook_mac_sched_ue_reconfig((0), ue_idx, u.get_pcell().get_cell_cfg().pci, (uint16_t)u.crnti);
 #endif
 
@@ -287,7 +285,6 @@ void ue_event_manager::handle_ue_deletion(ue_config_delete_event ev)
     du_cell_index_t pcell_idx = u.get_pcell().cell_index;
 
 #ifdef JBPF_ENABLED
-    printf("MJB hook_mac_sched_ue_deletion: ue_index %d pci %d crnti %d \n", ue_idx, u.get_pcell().get_cell_cfg().pci, (uint16_t)u.crnti);
     hook_mac_sched_ue_deletion((0), ue_idx, u.get_pcell().get_cell_cfg().pci, (uint16_t)u.crnti);
 #endif
 
@@ -323,7 +320,6 @@ void ue_event_manager::handle_ue_config_applied(du_ue_index_t ue_idx)
     auto& pcell = du_cells[u.get_pcell().cell_index];
 
 #ifdef JBPF_ENABLED
-    printf("MJB hook_mac_sched_ue_config_applied: ue_index %d pci %d crnti %d \n", ue_idx, u.get_pcell().get_cell_cfg().pci, (uint16_t)u.crnti);
     hook_mac_sched_ue_config_applied(0, ue_idx, u.get_pcell().get_cell_cfg().pci, (uint16_t)u.crnti);
 #endif
 

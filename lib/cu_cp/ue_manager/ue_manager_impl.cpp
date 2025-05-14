@@ -128,11 +128,6 @@ ue_index_t ue_manager::add_ue(du_index_t                     du_index,
 #ifdef JBPF_ENABLED 
   {
     struct jbpf_cucp_uemgr_ctx_info ctx_info = {0, (uint16_t)du_index, plmn.to_bcd(), (uint64_t)new_ue_index};
-    printf("MJB hook_cucp_uemgr_ue_add ue_index %ld plmn %s pci=%d rnti=%d \n", 
-      (uint64_t)new_ue_index, 
-      plmn.to_string().c_str(),
-      pci.has_value()?pci.value():0 , 
-      rnti.has_value() ? (uint16_t)to_value(rnti.value()) : 0);
     hook_cucp_uemgr_ue_add(&ctx_info, pci.has_value(), pci.value(), rnti.has_value(), to_value(rnti.value()));
   }
 #endif
@@ -168,7 +163,6 @@ void ue_manager::remove_ue(ue_index_t ue_index)
 #ifdef JBPF_ENABLED 
   {
     struct jbpf_cucp_uemgr_ctx_info ctx_info = {0, 0, 0, (uint64_t)ue_index};
-    printf("MJB hook_cucp_uemgr_ue_remove: ue_index %ld \n", (uint64_t)ue_index);
     hook_cucp_uemgr_ue_remove(&ctx_info);
   }
 #endif
@@ -228,7 +222,6 @@ cu_cp_ue* ue_manager::set_ue_du_context(ue_index_t      ue_index,
 #ifdef JBPF_ENABLED 
   {
     struct jbpf_cucp_uemgr_ctx_info ctx_info = {0, 0, 0, (uint64_t)ue_index};
-    printf("MJB hook_cucp_uemgr_ue_update: ue_index %ld \n", (uint64_t)ue_index);
     hook_cucp_uemgr_ue_update(&ctx_info, pci, to_value(rnti));
   }
 #endif
