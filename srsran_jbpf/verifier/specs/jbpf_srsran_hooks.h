@@ -270,20 +270,20 @@ DECLARE_JBPF_HOOK(pdcp_dl_new_sdu,
     )
 )
 
-// trigger: when a PDU is sent to lower layers
+// trigger: when a PDCP PDU is sent to lower layers
 DECLARE_JBPF_HOOK(pdcp_dl_tx_data_pdu,
     struct jbpf_ran_generic_ctx ctx,
     ctx,
     HOOK_PROTO(
         struct jbpf_pdcp_ctx_info *bearer,
-        uint32_t sdu_length,
+        uint32_t pdu_length,
         uint32_t count,
         uint8_t is_retx,
         uint32_t window_size),
     HOOK_ASSIGN(
         ctx.data = (uint64_t)bearer;
         ctx.data_end = (uint64_t) ((uint8_t*)bearer + sizeof(struct jbpf_pdcp_ctx_info));
-        ctx.srs_meta_data1 = (uint64_t)sdu_length << 32 | count;
+        ctx.srs_meta_data1 = (uint64_t)pdu_length << 32 | count;
         ctx.srs_meta_data2 = (uint64_t)is_retx << 32 | window_size;
     )
 )
@@ -304,6 +304,11 @@ DECLARE_JBPF_HOOK(pdcp_dl_tx_control_pdu,
 )
 
 // trigger: when the first byte of an SDU is sent to lower layers
+// Note that the notif_count means "up to and including" that count. i.e. in the following example
+//             pdcp_dl_handle_tx_notification notif_count=0
+//             pdcp_dl_handle_tx_notification notif_count=1
+//             pdcp_dl_handle_tx_notification notif_count=5
+// the last message means that counts 2-5 are all being notified.
 DECLARE_JBPF_HOOK(pdcp_dl_handle_tx_notification,
     struct jbpf_ran_generic_ctx ctx,
     ctx,
@@ -321,6 +326,11 @@ DECLARE_JBPF_HOOK(pdcp_dl_handle_tx_notification,
 // RLC TM/UM mode, trigger: when the SDU is completely sent to lower layers.
 // RLM AM mode, trigger: when all of the PDU used to transmit an SDU have 
 // been acknowledged by the UE.
+// Note that the notif_count means "up to and including" that count. i.e. in the following example
+//             pdcp_dl_handle_delivery_notification notif_count=0
+//             pdcp_dl_handle_delivery_notification notif_count=1
+//             pdcp_dl_handle_delivery_notification notif_count=5
+// the last message means that counts 2-5 are all being notified.
 DECLARE_JBPF_HOOK(pdcp_dl_handle_delivery_notification,
     struct jbpf_ran_generic_ctx ctx,
     ctx,
