@@ -101,6 +101,14 @@ struct jbpf_rrc_ctx_info {
     uint64_t cu_cp_ue_index; 
 };
 
+typedef enum {
+    RRC_SETUP = 1,
+    RRC_RECONFIGURATION,
+    RRC_REESTABLISHMENT,
+    RRC_UE_CAPABILITY,
+    RRC_PROCEDURE_MAX
+} JbpfRrcProcedure_t;
+
 /* RLC context info */
 
 typedef enum {
@@ -109,6 +117,13 @@ typedef enum {
     JBPF_RLC_MODE_AM,
     JBPF_RLC_MODE_MAX
 } JbpfRlcMode_t;
+
+typedef enum {
+    JBPF_RLC_PDUTYPE_STATUS = 1,
+    JBPF_RLC_PDUTYPE_DATA,
+    JBPF_RLC_PDUTYPE_DATA_RETX,
+    JBPF_RLC_PDUTYPE_MAX
+} JbpfRlcPdu_t;
 
 struct jbpf_rlc_ctx_info {
     uint16_t ctx_id;    /* Context id (could be implementation specific) */

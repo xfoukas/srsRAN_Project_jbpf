@@ -655,14 +655,6 @@ DECLARE_JBPF_HOOK(rrc_ue_remove,
    )
 )
 
-typedef enum {
-    RRC_SETUP = 1,
-    RRC_RECONFIGURATION,
-    RRC_REESTABLISHMENT,
-    RRC_UE_CAPABILITY,
-    RRC_PROCEDURE_MAX
-} JbpfRrcProcedure_t;
-
 DECLARE_JBPF_HOOK(rrc_ue_procedure_started,
     struct jbpf_ran_generic_ctx ctx,
     ctx,
@@ -693,15 +685,6 @@ DECLARE_JBPF_HOOK(rrc_ue_procedure_completed,
         ctx.srs_meta_data2 = meta;
     )
 )
-
-// RLC
-
-typedef enum {
-    JBPF_RLC_PDUTYPE_STATUS = 1,
-    JBPF_RLC_PDUTYPE_DATA,
-    JBPF_RLC_PDUTYPE_DATA_RETX,
-    JBPF_RLC_PDUTYPE_MAX
-} JbpfRlcPdu_t;
 
 // trigger: when RLC DL entity is created
 DECLARE_JBPF_HOOK(rlc_dl_creation,
