@@ -23,6 +23,11 @@
 #include "rrc_ue_capability_transfer_procedure.h"
 #include "../rrc_asn1_helpers.h"
 
+
+#ifdef JBPF_ENABLED
+#include "jbpf_srsran_hooks.h"
+#endif
+
 using namespace srsran;
 using namespace srsran::srs_cu_cp;
 using namespace asn1::rrc_nr;
@@ -40,8 +45,23 @@ void rrc_ue_capability_transfer_procedure::operator()(coro_context<async_task<bo
 {
   CORO_BEGIN(ctx);
 
+#ifdef JBPF_ENABLED 
+  {
+    struct jbpf_rrc_ctx_info ctx_info = {0, (uint64_t)context.ue_index};
+    hook_rrc_ue_procedure_started(&ctx_info, RRC_UE_CAPABILITY, 0);
+  }
+#endif
+
   if (context.capabilities_list.has_value()) {
     logger.log_debug("\"{}\" skipped. Capabilities already present", name());
+
+#ifdef JBPF_ENABLED 
+    {
+      struct jbpf_rrc_ctx_info ctx_info = {0, (uint64_t)context.ue_index};
+      hook_rrc_ue_procedure_completed(&ctx_info, RRC_UE_CAPABILITY, false, 0);
+    }
+#endif
+  
     CORO_EARLY_RETURN(true);
   }
 
@@ -85,6 +105,13 @@ void rrc_ue_capability_transfer_procedure::operator()(coro_context<async_task<bo
   } else {
     logger.log_warning("\"{}\" timed out after {}ms", name(), context.cfg.rrc_procedure_timeout_ms.count());
   }
+
+#ifdef JBPF_ENABLED 
+  {
+    struct jbpf_rrc_ctx_info ctx_info = {0, (uint64_t)context.ue_index};
+    hook_rrc_ue_procedure_completed(&ctx_info, RRC_UE_CAPABILITY, procedure_result, 0);
+  }
+#endif
 
   logger.log_debug("\"{}\" finalized", name());
   CORO_RETURN(procedure_result);

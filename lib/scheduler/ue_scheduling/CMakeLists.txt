@@ -33,3 +33,4 @@ set(SOURCES
         ue_repository.cpp)
 
 add_library(ue_sched OBJECT ${SOURCES})
+target_link_libraries(ue_sched srsran_support)

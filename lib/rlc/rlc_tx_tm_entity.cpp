@@ -22,10 +22,14 @@
 
 #include "rlc_tx_tm_entity.h"
 
+#ifdef JBPF_ENABLED
+#include "jbpf_srsran_hooks.h"
+#endif
+
 using namespace srsran;
 
-rlc_tx_tm_entity::rlc_tx_tm_entity(gnb_du_id_t                          du_id,
-                                   du_ue_index_t                        ue_index,
+rlc_tx_tm_entity::rlc_tx_tm_entity(gnb_du_id_t                          du_id_,
+                                   du_ue_index_t                        ue_index_,
                                    rb_id_t                              rb_id_,
                                    const rlc_tx_tm_config&              config,
                                    rlc_tx_upper_layer_data_notifier&    upper_dn_,
@@ -36,8 +40,8 @@ rlc_tx_tm_entity::rlc_tx_tm_entity(gnb_du_id_t                          du_id,
                                    task_executor&                       pcell_executor_,
                                    task_executor&                       ue_executor_,
                                    timer_manager&                       timers) :
-  rlc_tx_entity(du_id,
-                ue_index,
+  rlc_tx_entity(du_id_,
+                ue_index_,
                 rb_id_,
                 upper_dn_,
                 upper_cn_,
@@ -49,10 +53,21 @@ rlc_tx_tm_entity::rlc_tx_tm_entity(gnb_du_id_t                          du_id,
                 timers),
   cfg(config),
   sdu_queue(cfg.queue_size, cfg.queue_size_bytes, logger),
-  pcap_context(ue_index, rb_id_, /* is_uplink */ false)
+  pcap_context(ue_index_, rb_id_, /* is_uplink */ false)
 {
   metrics_low.metrics_set_mode(rlc_mode::tm);
   logger.log_info("RLC TM created. {}", cfg);
+
+#ifdef JBPF_ENABLED
+  {
+    int rb_id_value = rb_id.is_srb() ? srb_id_to_uint(rb_id.get_srb_id()) 
+                                    : drb_id_to_uint(rb_id.get_drb_id());
+    struct jbpf_rlc_ctx_info ctx_info = {0, (uint64_t)gnb_du_id, ue_index, rb_id.is_srb(), 
+      (uint8_t)rb_id_value, JBPF_RLC_MODE_TM, {sdu_queue.get_state().n_sdus, sdu_queue.get_state().n_bytes}};
+    hook_rlc_dl_creation(&ctx_info);
+  }
+#endif
+
 }
 
 // TS 38.322 v16.2.0 Sec. 5.2.1.1
@@ -76,11 +91,33 @@ void rlc_tx_tm_entity::handle_sdu(byte_buffer sdu_buf, bool is_retx)
     logger.log_info("Dropped SDU. sdu_len={} {}", sdu_len, sdu_queue.get_state());
     metrics_high.metrics_add_lost_sdus(1);
   }
+
+#ifdef JBPF_ENABLED
+  {
+    int rb_id_value = rb_id.is_srb() ? srb_id_to_uint(rb_id.get_srb_id()) 
+                                    : drb_id_to_uint(rb_id.get_drb_id());
+    struct jbpf_rlc_ctx_info ctx_info = {0, (uint64_t)gnb_du_id, ue_index, rb_id.is_srb(), 
+      (uint8_t)rb_id_value, JBPF_RLC_MODE_TM, {sdu_queue.get_state().n_sdus, sdu_queue.get_state().n_bytes}};
+    hook_rlc_dl_new_sdu(&ctx_info, sdu_.buf.length(), 
+      sdu_.pdcp_sn.has_value() ? sdu_.pdcp_sn.value() : 0);
+  }
+#endif
+
 }
 
 // TS 38.322 v16.2.0 Sec. 5.4
 void rlc_tx_tm_entity::discard_sdu(uint32_t pdcp_sn)
 {
+#ifdef JBPF_ENABLED
+  {
+    int rb_id_value = rb_id.is_srb() ? srb_id_to_uint(rb_id.get_srb_id()) 
+                                    : drb_id_to_uint(rb_id.get_drb_id());
+    struct jbpf_rlc_ctx_info ctx_info = {0, (uint64_t)gnb_du_id, ue_index, rb_id.is_srb(), 
+      (uint8_t)rb_id_value, JBPF_RLC_MODE_TM, {sdu_queue.get_state().n_sdus, sdu_queue.get_state().n_bytes}};
+    hook_rlc_dl_discard_sdu(&ctx_info, pdcp_sn);
+  }
+#endif
+
   logger.log_warning("Ignoring invalid attempt to discard SDU in TM. pdcp_sn={}", pdcp_sn);
   metrics_high.metrics_add_discard_failure(1);
 }
@@ -113,6 +150,17 @@ size_t rlc_tx_tm_entity::pull_pdu(span<uint8_t> mac_sdu_buf)
 
   // Notify the upper layer about the beginning of the transfer of the current SDU
   if (sdu.pdcp_sn.has_value()) {
+
+#ifdef JBPF_ENABLED
+    {
+      int rb_id_value = rb_id.is_srb() ? srb_id_to_uint(rb_id.get_srb_id()) 
+                                      : drb_id_to_uint(rb_id.get_drb_id());
+      struct jbpf_rlc_ctx_info ctx_info = {0, (uint64_t)gnb_du_id, ue_index, rb_id.is_srb(), 
+        (uint8_t)rb_id_value, JBPF_RLC_MODE_TM, {sdu_queue.get_state().n_sdus, sdu_queue.get_state().n_bytes}};
+      hook_rlc_dl_sdu_send_started(&ctx_info, sdu.pdcp_sn.value(), false);
+    }
+#endif
+
     // The desired_buf_size is irrelevant for TM. Nevertheless we put the size of the SDU queue here.
     upper_dn.on_transmitted_sdu(sdu.pdcp_sn.value(), cfg.queue_size_bytes);
   }
@@ -138,6 +186,26 @@ size_t rlc_tx_tm_entity::pull_pdu(span<uint8_t> mac_sdu_buf)
     auto                    pull_delta = std::chrono::duration_cast<std::chrono::nanoseconds>(pull_end - pull_begin);
     metrics_low.metrics_add_pdu_latency_ns(pull_delta.count());
   }
+
+#ifdef JBPF_ENABLED
+    {
+      int rb_id_value = rb_id.is_srb() ? srb_id_to_uint(rb_id.get_srb_id()) 
+                                      : drb_id_to_uint(rb_id.get_drb_id());
+      struct jbpf_rlc_ctx_info ctx_info = {0, (uint64_t)gnb_du_id, ue_index, rb_id.is_srb(), 
+        (uint8_t)rb_id_value, JBPF_RLC_MODE_TM, {sdu_queue.get_state().n_sdus, sdu_queue.get_state().n_bytes}};
+      hook_rlc_dl_sdu_send_completed(&ctx_info, sdu.pdcp_sn.has_value() ? sdu.pdcp_sn.value() : 0, false);
+    }
+#endif
+
+#ifdef JBPF_ENABLED
+  {
+    int rb_id_value = rb_id.is_srb() ? srb_id_to_uint(rb_id.get_srb_id()) 
+                                    : drb_id_to_uint(rb_id.get_drb_id());
+    struct jbpf_rlc_ctx_info ctx_info = {0, (uint64_t)gnb_du_id, ue_index, rb_id.is_srb(), 
+      (uint8_t)rb_id_value, JBPF_RLC_MODE_TM, {sdu_queue.get_state().n_sdus, sdu_queue.get_state().n_bytes}};
+    hook_rlc_dl_tx_pdu(&ctx_info, JBPF_RLC_PDUTYPE_STATUS, (uint32_t)pdu_len, 0);
+  }
+#endif  
 
   return pdu_len;
 }

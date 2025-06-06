@@ -114,6 +114,7 @@ rnti_t mac_controller::add_ue(du_ue_index_t ue_index, du_cell_index_t cell_index
     rnti_table.rem_ue(u.rnti);
     return rnti_t::INVALID_RNTI;
   }
+
   return u.rnti;
 }
 

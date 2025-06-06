@@ -103,7 +103,7 @@ static void configure_cli11_jbpf_args(CLI::App& app, jbpf_appconfig& config)
       ->capture_default_str();
   app.add_option("--jbpf_run_path", config.jbpf_run_path, "jbpf run path")
       ->capture_default_str();
-  app.add_option("--jbpf_namespae", config.jbpf_namespace, "jbpf namespace")
+  app.add_option("--jbpf_namespace", config.jbpf_namespace, "jbpf namespace")
       ->capture_default_str();
   app.add_option("--jbpf_agent_cpu", config.jbpf_agent_cpu, "Agent thread CPU id")
       ->capture_default_str();

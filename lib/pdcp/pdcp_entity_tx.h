@@ -37,6 +37,10 @@
 #include "srsran/support/sdu_window.h"
 #include "srsran/support/timers.h"
 
+#ifdef JBPF_ENABLED
+#include "jbpf_srsran_hooks.h"
+#endif
+
 namespace srsran {
 
 /// PDCP TX state variables,
@@ -73,7 +77,7 @@ class pdcp_entity_tx final : public pdcp_entity_tx_rx_base,
                              public pdcp_tx_metrics
 {
 public:
-  pdcp_entity_tx(uint32_t                        ue_index,
+  pdcp_entity_tx(uint32_t                        ue_index_,
                  rb_id_t                         rb_id_,
                  pdcp_tx_config                  cfg_,
                  pdcp_tx_lower_notifier&         lower_dn_,
@@ -82,7 +86,9 @@ public:
                  task_executor&                  ue_dl_executor_,
                  task_executor&                  crypto_executor_) :
     pdcp_entity_tx_rx_base(rb_id_, cfg_.rb_type, cfg_.rlc_mode, cfg_.sn_size),
-    logger("PDCP", {ue_index, rb_id_, "DL"}),
+    ue_index(ue_index_),
+    rb_id(rb_id_),
+    logger("PDCP", {ue_index_, rb_id_, "DL"}),
     cfg(cfg_),
     lower_dn(lower_dn_),
     upper_cn(upper_cn_),
@@ -107,10 +113,30 @@ public:
 
     logger.log_info("PDCP configured. {}", cfg);
 
+#ifdef JBPF_ENABLED 
+    {
+      int rb_id_value = rb_id.is_srb() ? srb_id_to_uint(rb_id.get_srb_id()) 
+                                  : drb_id_to_uint(rb_id.get_drb_id());
+      struct jbpf_pdcp_ctx_info bearer_info = {0, ue_index, rb_id.is_srb(), (uint8_t)rb_id_value, (uint8_t)rlc_mode};                                         
+      hook_pdcp_dl_creation(&bearer_info);
+    }
+#endif
+
     // TODO: implement usage of crypto_executor
     (void)ue_dl_executor;
     (void)crypto_executor;
   }
+
+#ifdef JBPF_ENABLED 
+  ~pdcp_entity_tx() override {
+    {
+      int rb_id_value = rb_id.is_srb() ? srb_id_to_uint(rb_id.get_srb_id()) 
+                                  : drb_id_to_uint(rb_id.get_drb_id());
+      struct jbpf_pdcp_ctx_info bearer_info = {0, ue_index, rb_id.is_srb(), (uint8_t)rb_id_value, (uint8_t)rlc_mode};                                         
+      hook_pdcp_dl_deletion(&bearer_info);
+    }
+  }
+#endif
 
   /// \brief Triggers re-establishment as specified in TS 38.323, section 5.1.2
   void reestablish(security::sec_128_as_config sec_cfg) override;
@@ -180,6 +206,10 @@ public:
   void retransmit_all_pdus();
 
 private:
+
+  uint32_t ue_index;
+  rb_id_t rb_id;
+
   pdcp_bearer_logger   logger;
   const pdcp_tx_config cfg;
 

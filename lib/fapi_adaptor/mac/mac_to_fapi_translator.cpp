@@ -32,6 +32,14 @@
 #include "srsran/fapi_adaptor/mac/messages/srs.h"
 #include "srsran/fapi_adaptor/mac/messages/ssb.h"
 
+#ifdef JBPF_ENABLED
+#include "jbpf_srsran_hooks.h"
+DEFINE_JBPF_HOOK(fapi_dl_tti_request);
+DEFINE_JBPF_HOOK(fapi_ul_tti_request);
+DEFINE_JBPF_HOOK(fapi_ul_dci_request);
+DEFINE_JBPF_HOOK(fapi_tx_data_request);
+#endif
+
 using namespace srsran;
 using namespace fapi_adaptor;
 
@@ -212,6 +220,10 @@ void mac_to_fapi_translator::on_new_downlink_scheduler_results(const mac_dl_sche
     clear_dl_tti_pdus(msg);
   }
 
+#ifdef JBPF_ENABLED
+    hook_fapi_dl_tti_request(const_cast<void*>(static_cast<const void*>(&msg)), 0, 0, sizeof(fapi::dl_tti_request_message));
+#endif
+
   // Send the message.
   msg_gw.dl_tti_request(msg);
 
@@ -266,6 +278,10 @@ void mac_to_fapi_translator::on_new_downlink_data(const mac_dl_data_result& dl_d
     }
   }
 
+#ifdef JBPF_ENABLED
+    hook_fapi_tx_data_request(const_cast<void*>(static_cast<const void*>(&msg)), 0, 0, sizeof(fapi::tx_data_request_message));
+#endif
+
   // Send the message.
   msg_gw.tx_data_request(msg);
 }
@@ -316,6 +332,10 @@ void mac_to_fapi_translator::on_new_uplink_scheduler_results(const mac_ul_sched_
     clear_ul_tti_pdus(msg);
   }
 
+#ifdef JBPF_ENABLED
+    hook_fapi_ul_tti_request(const_cast<void*>(static_cast<const void*>(&msg)), 0, 0, sizeof(fapi::ul_tti_request_message));
+#endif
+
   // Send the message.
   msg_gw.ul_tti_request(msg);
 }
@@ -347,6 +367,10 @@ void mac_to_fapi_translator::handle_ul_dci_request(span<const pdcch_ul_informati
 
     return;
   }
+
+#ifdef JBPF_ENABLED
+    hook_fapi_ul_dci_request(const_cast<void*>(static_cast<const void*>(&msg)), 0, 0, sizeof(fapi::ul_dci_request_message));
+#endif
 
   // Send the message.
   msg_gw.ul_dci_request(msg);

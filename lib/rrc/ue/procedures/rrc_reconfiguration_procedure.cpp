@@ -24,6 +24,10 @@
 #include "../rrc_asn1_helpers.h"
 #include "srsran/ran/cause/ngap_cause.h"
 
+#ifdef JBPF_ENABLED
+#include "jbpf_srsran_hooks.h"
+#endif
+
 using namespace srsran;
 using namespace srsran::srs_cu_cp;
 using namespace asn1::rrc_nr;
@@ -47,7 +51,22 @@ void rrc_reconfiguration_procedure::operator()(coro_context<async_task<bool>>& c
 {
   CORO_BEGIN(ctx);
 
+#ifdef JBPF_ENABLED 
+  {
+    struct jbpf_rrc_ctx_info ctx_info = {0, (uint64_t)context.ue_index};
+    hook_rrc_ue_procedure_started(&ctx_info, RRC_RECONFIGURATION, 0);
+  }
+#endif
+
   if (context.state != rrc_state::connected) {
+
+#ifdef JBPF_ENABLED 
+    {
+      struct jbpf_rrc_ctx_info ctx_info = {0, (uint64_t)context.ue_index};
+      hook_rrc_ue_procedure_completed(&ctx_info, RRC_RECONFIGURATION, false, 0);
+    }
+#endif
+
     logger.log_error("\"{}\" failed. UE is not RRC connected", name());
     CORO_EARLY_RETURN(false);
   }
@@ -75,6 +94,13 @@ void rrc_reconfiguration_procedure::operator()(coro_context<async_task<bool>>& c
   } else {
     logger.log_warning("\"{}\" timed out after {}ms", name(), context.cfg.rrc_procedure_timeout_ms.count());
   }
+
+#ifdef JBPF_ENABLED 
+  {
+    struct jbpf_rrc_ctx_info ctx_info = {0, (uint64_t)context.ue_index};
+    hook_rrc_ue_procedure_completed(&ctx_info, RRC_RECONFIGURATION, procedure_result, 0);
+  }
+#endif
 
   CORO_RETURN(procedure_result);
 }

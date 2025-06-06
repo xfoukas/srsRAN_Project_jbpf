@@ -39,8 +39,8 @@ class rlc_tx_entity : public rlc_tx_upper_layer_data_interface,
                       public rlc_tx_metrics
 {
 protected:
-  rlc_tx_entity(gnb_du_id_t                          gnb_du_id,
-                du_ue_index_t                        ue_index,
+  rlc_tx_entity(gnb_du_id_t                          gnb_du_id_,
+                du_ue_index_t                        ue_index_,
                 rb_id_t                              rb_id_,
                 rlc_tx_upper_layer_data_notifier&    upper_dn_,
                 rlc_tx_upper_layer_control_notifier& upper_cn_,
@@ -50,9 +50,11 @@ protected:
                 task_executor&                       pcell_executor_,
                 task_executor&                       ue_executor_,
                 timer_manager&                       timers) :
-    logger("RLC", {gnb_du_id, ue_index, rb_id_, "DL"}),
+    logger("RLC", {gnb_du_id_, ue_index_, rb_id_, "DL"}),
     metrics_high(metrics_agg_.get_metrics_period().count()),
     metrics_low(metrics_agg_.get_metrics_period().count()),
+    gnb_du_id(gnb_du_id_),
+    ue_index(ue_index_),
     rb_id(rb_id_),
     upper_dn(upper_dn_),
     upper_cn(upper_cn_),
@@ -86,6 +88,8 @@ protected:
   rlc_bearer_logger                    logger;
   rlc_tx_metrics_high_container        metrics_high;
   rlc_tx_metrics_low_container         metrics_low;
+  gnb_du_id_t                          gnb_du_id;
+  du_ue_index_t                        ue_index;
   rb_id_t                              rb_id;
   rlc_tx_upper_layer_data_notifier&    upper_dn;
   rlc_tx_upper_layer_control_notifier& upper_cn;

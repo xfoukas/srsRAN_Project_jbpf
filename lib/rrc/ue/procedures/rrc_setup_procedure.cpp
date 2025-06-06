@@ -26,6 +26,14 @@
 #include "srsran/asn1/rrc_nr/dl_ccch_msg.h"
 #include <variant>
 
+#ifdef JBPF_ENABLED
+#include "jbpf_srsran_hooks.h"
+DEFINE_JBPF_HOOK(rrc_ue_procedure_started);
+DEFINE_JBPF_HOOK(rrc_ue_procedure_completed);
+DEFINE_JBPF_HOOK(rrc_ue_update_id);
+#endif
+
+
 using namespace srsran;
 using namespace srsran::srs_cu_cp;
 using namespace asn1::rrc_nr;
@@ -51,6 +59,13 @@ void rrc_setup_procedure::operator()(coro_context<async_task<void>>& ctx)
 {
   CORO_BEGIN(ctx);
 
+  #ifdef JBPF_ENABLED 
+  {
+    struct jbpf_rrc_ctx_info ctx_info = {0, (uint64_t)context.ue_index};
+    hook_rrc_ue_procedure_started(&ctx_info, RRC_SETUP, 0);
+  }
+#endif
+
   // create SRB1
   create_srb1();
 
@@ -72,6 +87,14 @@ void rrc_setup_procedure::operator()(coro_context<async_task<void>>& ctx)
       logger.log_warning("\"{}\" cancelled", name());
       // Do nothing. We are likely shutting down the DU processor.
     }
+
+#ifdef JBPF_ENABLED 
+    {
+      struct jbpf_rrc_ctx_info ctx_info = {0, (uint64_t)context.ue_index};
+      hook_rrc_ue_procedure_completed(&ctx_info, RRC_SETUP, false, 0);
+    }
+#endif
+
     CORO_EARLY_RETURN();
   }
 
@@ -80,6 +103,13 @@ void rrc_setup_procedure::operator()(coro_context<async_task<void>>& ctx)
   send_initial_ue_msg(transaction.response().msg.c1().rrc_setup_complete());
 
   logger.log_debug("\"{}\" finished successfully", name());
+
+#ifdef JBPF_ENABLED 
+  {
+    struct jbpf_rrc_ctx_info ctx_info = {0, (uint64_t)context.ue_index};
+    hook_rrc_ue_procedure_completed(&ctx_info, RRC_SETUP, true, 0);
+  }
+#endif
 
   CORO_RETURN();
 }
@@ -134,6 +164,14 @@ void rrc_setup_procedure::send_initial_ue_msg(const asn1::rrc_nr::rrc_setup_comp
   }
 
   if (context.five_g_s_tmsi.has_value()) {
+
+#ifdef JBPF_ENABLED 
+    {
+      struct jbpf_rrc_ctx_info ctx_info = {0, (uint64_t)context.ue_index};
+      hook_rrc_ue_update_id(&ctx_info, context.five_g_s_tmsi->to_number());
+    }
+#endif
+  
     init_ue_msg.five_g_s_tmsi = context.five_g_s_tmsi.value();
   }
 

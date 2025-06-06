@@ -35,15 +35,18 @@ namespace srsran {
 class rlc_rx_entity : public rlc_rx_lower_layer_interface
 {
 protected:
-  rlc_rx_entity(gnb_du_id_t                       gnb_du_id,
-                du_ue_index_t                     ue_index,
-                rb_id_t                           rb_id,
+  rlc_rx_entity(gnb_du_id_t                       gnb_du_id_,
+                du_ue_index_t                     ue_index_,
+                rb_id_t                           rb_id_,
                 rlc_rx_upper_layer_data_notifier& upper_dn_,
                 rlc_metrics_aggregator&           metrics_agg_,
                 rlc_pcap&                         pcap_,
                 task_executor&                    ue_executor_,
                 timer_manager&                    timers) :
-    logger("RLC", {gnb_du_id, ue_index, rb_id, "UL"}),
+    logger("RLC", {gnb_du_id_, ue_index_, rb_id_, "UL"}),
+    gnb_du_id(gnb_du_id_),
+    ue_index(ue_index_),
+    rb_id(rb_id_),
     upper_dn(upper_dn_),
     metrics(metrics_agg_.get_metrics_period().count()),
     pcap(pcap_),
@@ -62,6 +65,9 @@ protected:
   }
 
   rlc_bearer_logger                 logger;
+  gnb_du_id_t                       gnb_du_id;
+  du_ue_index_t                     ue_index;
+  rb_id_t                           rb_id;
   rlc_rx_upper_layer_data_notifier& upper_dn;
   rlc_rx_metrics_container          metrics;
   rlc_pcap&                         pcap;

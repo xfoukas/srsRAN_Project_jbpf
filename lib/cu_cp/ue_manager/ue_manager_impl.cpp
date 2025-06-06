@@ -23,6 +23,13 @@
 #include "ue_manager_impl.h"
 #include "srsran/cu_cp/security_manager_config.h"
 
+#ifdef JBPF_ENABLED
+#include "jbpf_srsran_hooks.h"
+DEFINE_JBPF_HOOK(cucp_uemgr_ue_add);
+DEFINE_JBPF_HOOK(cucp_uemgr_ue_update);
+DEFINE_JBPF_HOOK(cucp_uemgr_ue_remove);
+#endif
+
 using namespace srsran;
 using namespace srs_cu_cp;
 
@@ -118,6 +125,13 @@ ue_index_t ue_manager::add_ue(du_index_t                     du_index,
               rnti.has_value() ? fmt::format(" rnti={}", rnti.value()) : "",
               pcell_index.has_value() ? fmt::format(" pcell_index={}", pcell_index.value()) : "");
 
+#ifdef JBPF_ENABLED 
+  {
+    struct jbpf_cucp_uemgr_ctx_info ctx_info = {0, (uint16_t)du_index, plmn.to_bcd(), (uint64_t)new_ue_index};
+    hook_cucp_uemgr_ue_add(&ctx_info, pci.has_value(), pci.value(), rnti.has_value(), to_value(rnti.value()));
+  }
+#endif
+
   return new_ue_index;
 }
 
@@ -145,6 +159,13 @@ void ue_manager::remove_ue(ue_index_t ue_index)
   } else {
     logger.debug("ue={}: PCI not found", ue_index);
   }
+
+#ifdef JBPF_ENABLED 
+  {
+    struct jbpf_cucp_uemgr_ctx_info ctx_info = {0, 0, 0, (uint64_t)ue_index};
+    hook_cucp_uemgr_ue_remove(&ctx_info);
+  }
+#endif
 
   // Remove CU-CP UE from database
   ues.erase(ue_index);
@@ -197,6 +218,13 @@ cu_cp_ue* ue_manager::set_ue_du_context(ue_index_t      ue_index,
     logger.warning("ue={}: UE not found", ue_index);
     return nullptr;
   }
+
+#ifdef JBPF_ENABLED 
+  {
+    struct jbpf_cucp_uemgr_ctx_info ctx_info = {0, 0, 0, (uint64_t)ue_index};
+    hook_cucp_uemgr_ue_update(&ctx_info, pci, to_value(rnti));
+  }
+#endif
 
   // check if the UE is already present
   if (get_ue_index(pci, rnti) != ue_index_t::invalid) {

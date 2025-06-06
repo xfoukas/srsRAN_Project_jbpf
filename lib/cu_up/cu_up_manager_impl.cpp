@@ -106,6 +106,7 @@ cu_up_manager_impl::handle_bearer_context_setup_request(const e1ap_bearer_contex
   // 3. Create response
   response.ue_index = ue_ctxt->get_index();
   response.success  = true;
+
   return response;
 }
 
