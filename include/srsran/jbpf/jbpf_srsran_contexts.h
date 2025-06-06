@@ -139,6 +139,25 @@ struct jbpf_rlc_ctx_info {
     } sdu_queue_info;
 };
 
+typedef enum {
+    NGAP_PROCEDURE_INITIAL_CONTEXT_SETUP = 1,
+    NGAP_PROCEDURE_UE_CONTEXT_RELEASE = 1,
+    NGAP_PROCEDURE_PDU_SESSION_SETUP,
+    NGAP_PROCEDURE_PDU_SESSION_MODIFY,
+    NGAP_PROCEDURE_PDU_SESSION_RELEASE,
+    NGAP_PROCEDURE_RESOURCE_ALLOCATION,
+    NGAP_PROCEDURE_MAX
+} JbpfNgapProcedure_t;
+
+struct jbpf_ngap_ctx_info {
+    uint16_t ctx_id;    /* Context id (could be implementation specific) */
+    uint64_t cucp_ue_index; 
+    uint16_t ran_ue_ngap_id_set;
+    uint64_t ran_ue_ngap_id; /* RAN UE NGAP ID */
+    uint16_t amf_ue_ngap_id_set;
+    uint64_t amf_ue_ngap_id; /* AMF UE NGAP ID */
+};
+
 /* srsRAN generic context */
 struct jbpf_ran_generic_ctx {
     uint64_t data; /* Pointer to beginning of buffer with int16_t IQ samples */

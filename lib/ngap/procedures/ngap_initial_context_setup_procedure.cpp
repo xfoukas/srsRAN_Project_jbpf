@@ -26,6 +26,12 @@
 #include "srsran/ngap/ngap_message.h"
 #include "srsran/support/async/coroutine.h"
 
+#ifdef JBPF_ENABLED
+#include "jbpf_srsran_hooks.h"
+DEFINE_JBPF_HOOK(ngap_procedure_started);
+DEFINE_JBPF_HOOK(ngap_procedure_completed);
+#endif
+
 using namespace srsran;
 using namespace srsran::srs_cu_cp;
 using namespace asn1::ngap;
@@ -46,6 +52,19 @@ void ngap_initial_context_setup_procedure::operator()(coro_context<async_task<vo
 
   logger.log_debug("\"{}\" initialized", name());
 
+#ifdef JBPF_ENABLED 
+  {
+    struct jbpf_ngap_ctx_info ctx_info = {0, (uint64_t)request.ue_index,
+      (ue_ids.ran_ue_id != ran_ue_id_t::invalid), ran_ue_id_to_uint(ue_ids.ran_ue_id),
+      (ue_ids.amf_ue_id != amf_ue_id_t::invalid), amf_ue_id_to_uint(ue_ids.amf_ue_id)};
+    hook_ngap_procedure_started(&ctx_info, NGAP_PROCEDURE_INITIAL_CONTEXT_SETUP, 0);
+    printf("MJB hook_ngap_procedure_started (%ld %d %ld %d %ld) NGAP_PROCEDURE_INITIAL_CONTEXT_SETUP \n", 
+      (uint64_t)request.ue_index,
+      (ue_ids.ran_ue_id != ran_ue_id_t::invalid), ran_ue_id_to_uint(ue_ids.ran_ue_id),
+      (ue_ids.amf_ue_id != amf_ue_id_t::invalid), amf_ue_id_to_uint(ue_ids.amf_ue_id));
+  }
+#endif
+
   CORO_AWAIT_VALUE(init_ctxt_setup_routine_outcome, cu_cp_notifier.on_new_initial_context_setup_request(request));
 
   if (not init_ctxt_setup_routine_outcome.has_value()) {
@@ -55,6 +74,20 @@ void ngap_initial_context_setup_procedure::operator()(coro_context<async_task<vo
     send_initial_context_setup_response(init_ctxt_setup_routine_outcome.value(), ue_ids.amf_ue_id, ue_ids.ran_ue_id);
     logger.log_debug("\"{}\" finished successfully", name());
   }
+
+#ifdef JBPF_ENABLED 
+  {
+    struct jbpf_ngap_ctx_info ctx_info = {0, (uint64_t)request.ue_index,
+      (ue_ids.ran_ue_id != ran_ue_id_t::invalid), ran_ue_id_to_uint(ue_ids.ran_ue_id),
+      (ue_ids.amf_ue_id != amf_ue_id_t::invalid), amf_ue_id_to_uint(ue_ids.amf_ue_id)};
+    hook_ngap_procedure_completed(&ctx_info, NGAP_PROCEDURE_INITIAL_CONTEXT_SETUP, init_ctxt_setup_routine_outcome.has_value(), 0);
+    printf("MJB hook_ngap_procedure_completed (%ld %d %ld %d %ld) NGAP_PROCEDURE_INITIAL_CONTEXT_SETUP %d \n", 
+      (uint64_t)request.ue_index,
+      (ue_ids.ran_ue_id != ran_ue_id_t::invalid), ran_ue_id_to_uint(ue_ids.ran_ue_id),
+      (ue_ids.amf_ue_id != amf_ue_id_t::invalid), amf_ue_id_to_uint(ue_ids.amf_ue_id), 
+      init_ctxt_setup_routine_outcome.has_value());
+  }
+#endif
 
   CORO_RETURN();
 }

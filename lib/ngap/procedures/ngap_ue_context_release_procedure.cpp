@@ -25,6 +25,10 @@
 #include "srsran/asn1/ngap/common.h"
 #include "srsran/ngap/ngap_message.h"
 
+#ifdef JBPF_ENABLED
+#include "jbpf_srsran_hooks.h"
+#endif
+
 using namespace srsran;
 using namespace srsran::srs_cu_cp;
 using namespace asn1::ngap;
@@ -51,11 +55,36 @@ void ngap_ue_context_release_procedure::operator()(coro_context<async_task<void>
 
   logger.log_debug("\"{}\" initialized", name());
 
+  #ifdef JBPF_ENABLED 
+  {
+    struct jbpf_ngap_ctx_info ctx_info = {0, (uint64_t)command.ue_index,
+      (ue_ids.ran_ue_id != ran_ue_id_t::invalid), ran_ue_id_to_uint(ue_ids.ran_ue_id),
+      (ue_ids.amf_ue_id != amf_ue_id_t::invalid), amf_ue_id_to_uint(ue_ids.amf_ue_id)};
+    hook_ngap_procedure_started(&ctx_info, NGAP_PROCEDURE_UE_CONTEXT_RELEASE, 0);
+    printf("MJB hook_ngap_procedure_started (%ld %d %ld %d %ld) NGAP_PROCEDURE_UE_CONTEXT_RELEASE \n", 
+      (uint64_t)command.ue_index,
+      (ue_ids.ran_ue_id != ran_ue_id_t::invalid), ran_ue_id_to_uint(ue_ids.ran_ue_id),
+      (ue_ids.amf_ue_id != amf_ue_id_t::invalid), amf_ue_id_to_uint(ue_ids.amf_ue_id));
+  }
+#endif
   // Notify DU processor about UE Context Release Command
   CORO_AWAIT_VALUE(ue_context_release_complete, cu_cp_notifier.on_new_ue_context_release_command(command));
 
   // Verify response from DU processor.
   if (ue_context_release_complete.ue_index != command.ue_index) {
+#ifdef JBPF_ENABLED 
+    {
+      struct jbpf_ngap_ctx_info ctx_info = {0, (uint64_t)command.ue_index,
+        (ue_ids.ran_ue_id != ran_ue_id_t::invalid), ran_ue_id_to_uint(ue_ids.ran_ue_id),
+        (ue_ids.amf_ue_id != amf_ue_id_t::invalid), amf_ue_id_to_uint(ue_ids.amf_ue_id)};
+      hook_ngap_procedure_completed(&ctx_info, NGAP_PROCEDURE_UE_CONTEXT_RELEASE, false, 0);
+      printf("MJB hook_ngap_procedure_completed (%ld %d %ld %d %ld) NGAP_PROCEDURE_UE_CONTEXT_RELEASE %d \n", 
+        (uint64_t)command.ue_index,
+        (ue_ids.ran_ue_id != ran_ue_id_t::invalid), ran_ue_id_to_uint(ue_ids.ran_ue_id),
+        (ue_ids.amf_ue_id != amf_ue_id_t::invalid), amf_ue_id_to_uint(ue_ids.amf_ue_id), 
+        false);
+    }
+#endif    
     logger.log_debug("\"{}\" aborted. UE does not exist anymore", name());
     CORO_EARLY_RETURN();
   }
@@ -64,13 +93,35 @@ void ngap_ue_context_release_procedure::operator()(coro_context<async_task<void>
 
   send_ue_context_release_complete();
 
+#ifdef JBPF_ENABLED 
+  bool jbpf_success = true;
+#endif
+
   // Send ErrorIndication if it was stored for this UE
   if (stored_error_indications.find(ue_ids.ue_index) != stored_error_indications.end()) {
     const auto& req = stored_error_indications.at(ue_ids.ue_index);
+#ifdef JBPF_ENABLED 
+    jbpf_success = false;
+#endif   
+
     send_error_indication(amf_notifier, logger.get_basic_logger(), req.ran_ue_id, req.amf_ue_id, req.cause);
     // Remove stored error indication
     stored_error_indications.erase(ue_ids.ue_index);
   }
+
+#ifdef JBPF_ENABLED 
+  {
+    struct jbpf_ngap_ctx_info ctx_info = {0, (uint64_t)command.ue_index,
+      (ue_ids.ran_ue_id != ran_ue_id_t::invalid), ran_ue_id_to_uint(ue_ids.ran_ue_id),
+      (ue_ids.amf_ue_id != amf_ue_id_t::invalid), amf_ue_id_to_uint(ue_ids.amf_ue_id)};
+    hook_ngap_procedure_completed(&ctx_info, NGAP_PROCEDURE_UE_CONTEXT_RELEASE, jbpf_success, 0);
+    printf("MJB hook_ngap_procedure_completed (%ld %d %ld %d %ld) NGAP_PROCEDURE_UE_CONTEXT_RELEASE %d \n", 
+      (uint64_t)command.ue_index,
+      (ue_ids.ran_ue_id != ran_ue_id_t::invalid), ran_ue_id_to_uint(ue_ids.ran_ue_id),
+      (ue_ids.amf_ue_id != amf_ue_id_t::invalid), amf_ue_id_to_uint(ue_ids.amf_ue_id), 
+      jbpf_success);
+  }
+#endif    
 
   logger.log_debug("\"{}\" finalized", name());
   CORO_RETURN();
