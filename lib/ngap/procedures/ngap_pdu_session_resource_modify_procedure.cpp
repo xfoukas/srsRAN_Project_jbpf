@@ -64,10 +64,6 @@ void ngap_pdu_session_resource_modify_procedure::operator()(coro_context<async_t
       (ue_ids.ran_ue_id != ran_ue_id_t::invalid), ran_ue_id_to_uint(ue_ids.ran_ue_id),
       (ue_ids.amf_ue_id != amf_ue_id_t::invalid), amf_ue_id_to_uint(ue_ids.amf_ue_id)};
     hook_ngap_procedure_started(&ctx_info, NGAP_PROCEDURE_PDU_SESSION_MODIFY, 0);
-    printf("MJB hook_ngap_procedure_started (%ld %d %ld %d %ld) NGAP_PROCEDURE_PDU_SESSION_MODIFY \n", 
-      (uint64_t)request.ue_index,
-      (ue_ids.ran_ue_id != ran_ue_id_t::invalid), ran_ue_id_to_uint(ue_ids.ran_ue_id),
-      (ue_ids.amf_ue_id != amf_ue_id_t::invalid), amf_ue_id_to_uint(ue_ids.amf_ue_id));
   }
 #endif
 
@@ -97,11 +93,6 @@ void ngap_pdu_session_resource_modify_procedure::operator()(coro_context<async_t
       (ue_ids.ran_ue_id != ran_ue_id_t::invalid), ran_ue_id_to_uint(ue_ids.ran_ue_id),
       (ue_ids.amf_ue_id != amf_ue_id_t::invalid), amf_ue_id_to_uint(ue_ids.amf_ue_id)};
     hook_ngap_procedure_completed(&ctx_info, NGAP_PROCEDURE_PDU_SESSION_MODIFY, response.pdu_session_res_failed_to_modify_list.empty(), 0);
-    printf("MJB hook_ngap_procedure_completed (%ld %d %ld %d %ld) NGAP_PROCEDURE_PDU_SESSION_MODIFY %d \n", 
-      (uint64_t)request.ue_index,
-      (ue_ids.ran_ue_id != ran_ue_id_t::invalid), ran_ue_id_to_uint(ue_ids.ran_ue_id),
-      (ue_ids.amf_ue_id != amf_ue_id_t::invalid), amf_ue_id_to_uint(ue_ids.amf_ue_id), 
-      response.pdu_session_res_failed_to_modify_list.empty());
   }
 #endif
 

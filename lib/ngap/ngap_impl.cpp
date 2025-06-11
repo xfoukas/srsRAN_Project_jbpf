@@ -139,7 +139,6 @@ async_task<void> ngap_impl::handle_ng_reset_message(const cu_cp_ng_reset& msg)
     {
       struct jbpf_ngap_ctx_info ctx_info = {0, (uint64_t)-1, false, 0,false, 0};
       hook_ngap_reset(&ctx_info, 0);
-      printf("MJB hook_ngap_reset (-1 0 0 0 0) \n");
     }
 #endif
   } else {
@@ -164,9 +163,6 @@ async_task<void> ngap_impl::handle_ng_reset_message(const cu_cp_ng_reset& msg)
             (ue_ctxt.ue_ids.ran_ue_id != ran_ue_id_t::invalid), ran_ue_id_to_uint(ue_ctxt.ue_ids.ran_ue_id),
             (ue_ctxt.ue_ids.amf_ue_id != amf_ue_id_t::invalid), amf_ue_id_to_uint(ue_ctxt.ue_ids.amf_ue_id)};
           hook_ngap_reset(&ctx_info, 0);
-          printf("MJB hook_ngap_reset (-1 %d %ld %d %ld) \n", 
-            (ue_ctxt.ue_ids.ran_ue_id != ran_ue_id_t::invalid), ran_ue_id_to_uint(ue_ctxt.ue_ids.ran_ue_id),
-            (ue_ctxt.ue_ids.amf_ue_id != amf_ue_id_t::invalid), amf_ue_id_to_uint(ue_ctxt.ue_ids.amf_ue_id));
         }
 #endif
         ng_reset_part_of_interface.push_back(conn_item);

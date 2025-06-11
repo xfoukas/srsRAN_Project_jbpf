@@ -66,10 +66,6 @@ void ngap_handover_resource_allocation_procedure::operator()(coro_context<async_
       false, 0,
       (amf_ue_id != amf_ue_id_t::invalid), amf_ue_id_to_uint(amf_ue_id)};
     hook_ngap_procedure_started(&ctx_info, NGAP_PROCEDURE_RESOURCE_ALLOCATION, 0);
-    printf("MJB hook_ngap_procedure_started (%ld %d %d %d %ld) NGAP_PROCEDURE_RESOURCE_ALLOCATION \n", 
-      (uint64_t)request.ue_index,
-      false, 0,
-      (amf_ue_id != amf_ue_id_t::invalid), amf_ue_id_to_uint(amf_ue_id));
   }
 #endif
 
@@ -82,11 +78,6 @@ void ngap_handover_resource_allocation_procedure::operator()(coro_context<async_
       false, 0,
       (amf_ue_id != amf_ue_id_t::invalid), amf_ue_id_to_uint(amf_ue_id)};
     hook_ngap_procedure_completed(&ctx_info, NGAP_PROCEDURE_RESOURCE_ALLOCATION, response.success, 0);
-    printf("MJB hook_ngap_procedure_completed (%ld %d %d %d %ld) NGAP_PROCEDURE_RESOURCE_ALLOCATION %d \n", 
-      (uint64_t)request.ue_index,
-      false, 0,
-      (amf_ue_id != amf_ue_id_t::invalid), amf_ue_id_to_uint(amf_ue_id), 
-      response.success);
   }
 #endif
 
