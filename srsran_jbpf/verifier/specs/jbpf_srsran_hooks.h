@@ -588,6 +588,53 @@ DECLARE_JBPF_HOOK(cucp_uemgr_ue_remove,
     )
 )
 
+/* NGAP */
+
+DECLARE_JBPF_HOOK(ngap_procedure_started,
+    struct jbpf_ran_generic_ctx ctx,
+    ctx,
+    HOOK_PROTO(
+        struct jbpf_ngap_ctx_info *info,
+        JbpfNgapProcedure_t procedure,
+        uint64_t meta),
+    HOOK_ASSIGN(
+        ctx.data = (uint64_t)info;
+        ctx.data_end = (uint64_t) ((uint8_t*)info + sizeof(struct jbpf_ngap_ctx_info));
+        ctx.srs_meta_data1 = procedure;
+        ctx.srs_meta_data2 = meta;
+    )
+)
+
+DECLARE_JBPF_HOOK(ngap_procedure_completed,
+    struct jbpf_ran_generic_ctx ctx,
+    ctx,
+    HOOK_PROTO(
+        struct jbpf_ngap_ctx_info *info,
+        JbpfNgapProcedure_t procedure,
+        bool success,
+        uint64_t meta),
+    HOOK_ASSIGN(
+        ctx.data = (uint64_t)info;
+        ctx.data_end = (uint64_t) ((uint8_t*)info + sizeof(struct jbpf_ngap_ctx_info));
+        ctx.srs_meta_data1 = ((uint64_t)success << 32) | procedure;
+        ctx.srs_meta_data2 = meta;
+    )
+)
+ 
+DECLARE_JBPF_HOOK(ngap_reset,
+    struct jbpf_ran_generic_ctx ctx,
+    ctx,
+    HOOK_PROTO(
+        struct jbpf_ngap_ctx_info *info,
+        uint64_t meta),
+    HOOK_ASSIGN(
+        ctx.data = (uint64_t)info;
+        ctx.data_end = (uint64_t) ((uint8_t*)info + sizeof(struct jbpf_ngap_ctx_info));
+        ctx.srs_meta_data2 = meta;
+    )
+)
+
+
 
 /* RRC */
 

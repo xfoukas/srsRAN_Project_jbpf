@@ -25,6 +25,10 @@
 #include "srsran/asn1/ngap/common.h"
 #include "srsran/ngap/ngap_message.h"
 
+#ifdef JBPF_ENABLED
+#include "jbpf_srsran_hooks.h"
+#endif
+
 using namespace srsran;
 using namespace srsran::srs_cu_cp;
 using namespace asn1::ngap;
@@ -54,6 +58,15 @@ void ngap_pdu_session_resource_modify_procedure::operator()(coro_context<async_t
 
   logger.log_debug("\"{}\" initialized", name());
 
+#ifdef JBPF_ENABLED 
+  {
+    struct jbpf_ngap_ctx_info ctx_info = {0, (uint64_t)request.ue_index,
+      (ue_ids.ran_ue_id != ran_ue_id_t::invalid), ran_ue_id_to_uint(ue_ids.ran_ue_id),
+      (ue_ids.amf_ue_id != amf_ue_id_t::invalid), amf_ue_id_to_uint(ue_ids.amf_ue_id)};
+    hook_ngap_procedure_started(&ctx_info, NGAP_PROCEDURE_PDU_SESSION_MODIFY, 0);
+  }
+#endif
+
   // Verify PDU Session Resource Modify Request
   verification_outcome = verify_pdu_session_resource_modify_request(request, asn1_request, logger);
 
@@ -73,6 +86,15 @@ void ngap_pdu_session_resource_modify_procedure::operator()(coro_context<async_t
   if (!response.pdu_session_res_failed_to_modify_list.empty()) {
     logger.log_warning("Some or all PduSessionResourceModifyItems failed to setup");
   }
+
+#ifdef JBPF_ENABLED 
+  {
+    struct jbpf_ngap_ctx_info ctx_info = {0, (uint64_t)request.ue_index,
+      (ue_ids.ran_ue_id != ran_ue_id_t::invalid), ran_ue_id_to_uint(ue_ids.ran_ue_id),
+      (ue_ids.amf_ue_id != amf_ue_id_t::invalid), amf_ue_id_to_uint(ue_ids.amf_ue_id)};
+    hook_ngap_procedure_completed(&ctx_info, NGAP_PROCEDURE_PDU_SESSION_MODIFY, response.pdu_session_res_failed_to_modify_list.empty(), 0);
+  }
+#endif
 
   send_pdu_session_resource_modify_response();
 

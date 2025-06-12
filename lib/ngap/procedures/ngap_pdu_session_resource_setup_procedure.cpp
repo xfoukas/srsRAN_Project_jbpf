@@ -26,6 +26,10 @@
 #include "srsran/ngap/ngap.h"
 #include "srsran/ngap/ngap_message.h"
 
+#ifdef JBPF_ENABLED
+#include "jbpf_srsran_hooks.h"
+#endif
+
 using namespace srsran;
 using namespace srsran::srs_cu_cp;
 using namespace asn1::ngap;
@@ -51,6 +55,16 @@ void ngap_pdu_session_resource_setup_procedure::operator()(coro_context<async_ta
   CORO_BEGIN(ctx);
 
   logger.log_debug("\"{}\" initialized", name());
+
+  
+#ifdef JBPF_ENABLED 
+  {
+    struct jbpf_ngap_ctx_info ctx_info = {0, (uint64_t)request.ue_index,
+      (ue_ids.ran_ue_id != ran_ue_id_t::invalid), ran_ue_id_to_uint(ue_ids.ran_ue_id),
+      (ue_ids.amf_ue_id != amf_ue_id_t::invalid), amf_ue_id_to_uint(ue_ids.amf_ue_id)};
+    hook_ngap_procedure_started(&ctx_info, NGAP_PROCEDURE_PDU_SESSION_SETUP, 0);
+  }
+#endif
 
   // Verify PDU Session Resource Setup Request
   verification_outcome = verify_pdu_session_resource_setup_request(request, asn1_request, logger);
@@ -78,6 +92,15 @@ void ngap_pdu_session_resource_setup_procedure::operator()(coro_context<async_ta
   send_pdu_session_resource_setup_response();
 
   logger.log_debug("\"{}\" finalized", name());
+
+#ifdef JBPF_ENABLED 
+  {
+    struct jbpf_ngap_ctx_info ctx_info = {0, (uint64_t)request.ue_index,
+      (ue_ids.ran_ue_id != ran_ue_id_t::invalid), ran_ue_id_to_uint(ue_ids.ran_ue_id),
+      (ue_ids.amf_ue_id != amf_ue_id_t::invalid), amf_ue_id_to_uint(ue_ids.amf_ue_id)};
+    hook_ngap_procedure_completed(&ctx_info, NGAP_PROCEDURE_PDU_SESSION_SETUP, response.pdu_session_res_failed_to_setup_items.empty(), 0);
+  }
+#endif
 
   CORO_RETURN();
 }

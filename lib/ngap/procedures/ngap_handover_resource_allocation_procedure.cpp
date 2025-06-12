@@ -25,6 +25,10 @@
 #include "srsran/asn1/ngap/common.h"
 #include "srsran/ngap/ngap_message.h"
 
+#ifdef JBPF_ENABLED
+#include "jbpf_srsran_hooks.h"
+#endif
+
 using namespace srsran;
 using namespace srsran::srs_cu_cp;
 using namespace asn1::ngap;
@@ -55,8 +59,27 @@ void ngap_handover_resource_allocation_procedure::operator()(coro_context<async_
 
   logger.debug("ue={}: \"{}\" initialized", request.ue_index, name());
 
+
+#ifdef JBPF_ENABLED 
+  {
+    struct jbpf_ngap_ctx_info ctx_info = {0, (uint64_t)request.ue_index,
+      false, 0,
+      (amf_ue_id != amf_ue_id_t::invalid), amf_ue_id_to_uint(amf_ue_id)};
+    hook_ngap_procedure_started(&ctx_info, NGAP_PROCEDURE_RESOURCE_ALLOCATION, 0);
+  }
+#endif
+
   // Notify DU repository about handover request and await requst ack
   CORO_AWAIT_VALUE(response, cu_cp_notifier.on_ngap_handover_request(request));
+
+  #ifdef JBPF_ENABLED 
+  {
+    struct jbpf_ngap_ctx_info ctx_info = {0, (uint64_t)request.ue_index,
+      false, 0,
+      (amf_ue_id != amf_ue_id_t::invalid), amf_ue_id_to_uint(amf_ue_id)};
+    hook_ngap_procedure_completed(&ctx_info, NGAP_PROCEDURE_RESOURCE_ALLOCATION, response.success, 0);
+  }
+#endif
 
   if (response.success) {
     // Create NGAP UE

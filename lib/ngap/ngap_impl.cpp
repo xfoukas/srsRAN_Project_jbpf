@@ -41,6 +41,10 @@
 #include "srsran/ngap/ngap_types.h"
 #include "srsran/ran/cause/ngap_cause.h"
 
+#ifdef JBPF_ENABLED
+#include "jbpf_srsran_hooks.h"
+DEFINE_JBPF_HOOK(ngap_reset);
+#endif
 using namespace srsran;
 using namespace asn1::ngap;
 using namespace srs_cu_cp;
@@ -131,6 +135,12 @@ async_task<void> ngap_impl::handle_ng_reset_message(const cu_cp_ng_reset& msg)
   if (msg.ng_interface_reset) {
     // Reset all UEs
     ng_reset.reset_type = ngap_reset_ng_interface{};
+#ifdef JBPF_ENABLED 
+    {
+      struct jbpf_ngap_ctx_info ctx_info = {0, (uint64_t)-1, false, 0,false, 0};
+      hook_ngap_reset(&ctx_info, 0);
+    }
+#endif
   } else {
     // Reset only specific UEs
     ngap_reset_type_part_of_interface ng_reset_part_of_interface = {};
@@ -147,7 +157,14 @@ async_task<void> ngap_impl::handle_ng_reset_message(const cu_cp_ng_reset& msg)
         if (ue_ctxt.ue_ids.ran_ue_id != ran_ue_id_t::invalid) {
           conn_item.ran_ue_id = ue_ctxt.ue_ids.ran_ue_id;
         }
-
+#ifdef JBPF_ENABLED 
+        {
+          struct jbpf_ngap_ctx_info ctx_info = {0, (uint64_t)-1,
+            (ue_ctxt.ue_ids.ran_ue_id != ran_ue_id_t::invalid), ran_ue_id_to_uint(ue_ctxt.ue_ids.ran_ue_id),
+            (ue_ctxt.ue_ids.amf_ue_id != amf_ue_id_t::invalid), amf_ue_id_to_uint(ue_ctxt.ue_ids.amf_ue_id)};
+          hook_ngap_reset(&ctx_info, 0);
+        }
+#endif
         ng_reset_part_of_interface.push_back(conn_item);
       }
     }
