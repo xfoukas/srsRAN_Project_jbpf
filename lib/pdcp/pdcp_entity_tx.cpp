@@ -641,7 +641,6 @@ void pdcp_entity_tx::handle_transmit_notification(uint32_t notif_sn)
 #endif    
     );
   }
-
 }
 
 void pdcp_entity_tx::handle_delivery_notification(uint32_t notif_sn)
@@ -834,11 +833,9 @@ void pdcp_entity_tx::stop_discard_timer(uint32_t highest_count
 #ifdef JBPF_ENABLED  
       // populate sdu_info
       jbpf_pdcp_sdu_info_t sdu_info = {st.tx_next_ack, 0};
-      sdu_info.length = tx_sdu_info.latency_info.sdu_length;
+      sdu_info.length = latency_info.sdu_length;
 
       // update tx_window_bytes
-  
-      // remove the SDU bytes from the tx_window
       // dont tx_window_bytes go negative
       if (sdu_info.length > tx_window_bytes) {
         tx_window_bytes = 0;
@@ -848,7 +845,6 @@ void pdcp_entity_tx::stop_discard_timer(uint32_t highest_count
 
       // populate window_info
       jbpf_pdcp_window_info_t window_info = {1, static_cast<uint32_t>(tx_window->size()), tx_window_bytes};
-
 
       bool is_srb = rb_id.is_srb();
       int rb_id_value = is_srb ? srb_id_to_uint(rb_id.get_srb_id())
@@ -912,6 +908,12 @@ void pdcp_entity_tx::discard_pdu(uint32_t count)
   // Notify lower layers of the discard. It's the RLC to actually discard, if no segment was transmitted yet.
   lower_dn.on_discard_pdu(SN(count));
 
+#ifdef JBPF_ENABLED         
+  // take a copy of the latency_info
+  const auto& tx_sdu_info = (*tx_window)[count];
+  jbpf_pdcp_sdu_latency_info_t latency_info = tx_sdu_info.latency_info;
+#endif
+
   tx_window->remove_sn(count);
 
   // Update TX_NEXT_ACK to oldest element in tx_window
@@ -924,14 +926,40 @@ void pdcp_entity_tx::discard_pdu(uint32_t count)
     st.tx_trans = st.tx_next_ack;
   }
 
-#ifdef JBPF_ENABLED 
-  {
-    int rb_id_value = rb_id.is_srb() ? srb_id_to_uint(rb_id.get_srb_id()) 
-                                : drb_id_to_uint(rb_id.get_drb_id());
-    struct jbpf_pdcp_ctx_info bearer_info = {0, ue_index, rb_id.is_srb(), (uint8_t)rb_id_value, (uint8_t)rlc_mode};                                         
-    hook_pdcp_dl_discard_pdu(&bearer_info, count, tx_window->size());
-  }
-#endif
+#ifdef JBPF_ENABLED  
+    // populate sdu_info
+    jbpf_pdcp_sdu_info_t sdu_info = {count, 0};
+    sdu_info.length = latency_info.sdu_length;
+
+    // update tx_window_bytes
+    // dont tx_window_bytes go negative
+    if (sdu_info.length > tx_window_bytes) {
+      tx_window_bytes = 0;
+    } else {
+      tx_window_bytes -= sdu_info.length;
+    }
+
+    // populate window_info
+    jbpf_pdcp_window_info_t window_info = {1, static_cast<uint32_t>(tx_window->size()), tx_window_bytes};
+
+    bool is_srb = rb_id.is_srb();
+    int rb_id_value = is_srb ? srb_id_to_uint(rb_id.get_srb_id())
+                              : drb_id_to_uint(rb_id.get_drb_id());
+
+    // Populate bearer_info
+    jbpf_pdcp_ctx_info bearer_info = {
+      0,
+      ue_index,
+      is_srb,
+      static_cast<uint8_t>(rb_id_value),
+      static_cast<uint8_t>(rlc_mode),
+      sdu_info,
+      window_info,
+      latency_info
+    };
+
+    hook_pdcp_dl_discard_pdu(&bearer_info);
+#endif   
 }
 
 std::unique_ptr<sdu_window<pdcp_entity_tx::pdcp_tx_sdu_info>> pdcp_entity_tx::create_tx_window(pdcp_sn_size sn_size_)

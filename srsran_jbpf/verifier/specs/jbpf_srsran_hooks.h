@@ -338,13 +338,10 @@ DECLARE_JBPF_HOOK(pdcp_dl_discard_pdu,
     struct jbpf_ran_generic_ctx ctx,
     ctx,
     HOOK_PROTO(
-        struct jbpf_pdcp_ctx_info *bearer,
-        uint32_t count,
-        uint32_t window_size),
+        struct jbpf_pdcp_ctx_info *bearer),
     HOOK_ASSIGN(
         ctx.data = (uint64_t)bearer;
         ctx.data_end = (uint64_t) ((uint8_t*)bearer + sizeof(struct jbpf_pdcp_ctx_info));
-        ctx.srs_meta_data1 = (uint64_t)count << 32 | window_size;
     )
 )
 
