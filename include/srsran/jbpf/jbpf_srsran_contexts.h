@@ -64,6 +64,27 @@ struct jbpf_mac_sched_ctx {
 };
 
 /* PDCP context */
+
+typedef struct {
+    uint32_t count;
+    uint32_t length;      /* Length of the SDU */
+} jbpf_pdcp_sdu_info_t;
+
+typedef struct {
+    uint8_t used;      /* Is the window used, 0 = not-used, 1 = used */
+    uint32_t pkts;     /* Total packets */
+    uint32_t bytes;    /* Total bytes*/
+} jbpf_pdcp_window_info_t;
+
+typedef struct {
+    uint32_t sdu_length;      /* Length of the SDU */
+    uint64_t arrival_ns;  /* Arrival time of the SDU in nanoseconds */
+    uint32_t pdcpTx_count;    /* Number of times PDCP TX has been called for this SDU */
+    uint64_t pdcpTx_ns;       /* Time when PDCP TX was called for this SDU */
+    uint64_t rlcTxStarted_ns; /* Time when RLC TX started for this SDU */
+    uint64_t rlcDelivered_ns; /* Time when RLC delivered this SDU */
+} jbpf_pdcp_sdu_latency_info_t;
+
 struct jbpf_pdcp_ctx_info {
     uint16_t ctx_id;   /* Context id (could be implementation specific) */
     uint32_t cu_ue_index;   /* if is_srb=True is cu_cp_ue_index, if is_srb=False is cu_up_ue_index */
@@ -71,7 +92,16 @@ struct jbpf_pdcp_ctx_info {
     uint8_t rb_id;   /* if is_srb=True:    0=srb0, 1=srb1, 2=srb2,
                         if is_srb=False:   1=drb1, 2=drb2, 3-drb3 ... */
     uint8_t rlc_mode;  /* 0=UM, 1=AM*/
-};
+
+    // sdu details
+    jbpf_pdcp_sdu_info_t sdu_info;    
+
+    // window details
+    jbpf_pdcp_window_info_t window_info;  /* Window info */
+
+    // latency info
+    jbpf_pdcp_sdu_latency_info_t latency_info; /* Latency info */
+};  
 
 /* E1 context info */
 struct jbpf_cucp_e1_ctx_info {

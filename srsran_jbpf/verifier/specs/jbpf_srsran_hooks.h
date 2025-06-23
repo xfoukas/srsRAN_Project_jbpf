@@ -258,15 +258,11 @@ DECLARE_JBPF_HOOK(pdcp_dl_new_sdu,
     struct jbpf_ran_generic_ctx ctx,
     ctx,
     HOOK_PROTO(
-        struct jbpf_pdcp_ctx_info *bearer,
-        uint32_t sdu_length,
-        uint32_t count,
-        uint32_t window_size),
+        struct jbpf_pdcp_ctx_info *bearer
+    ),
     HOOK_ASSIGN(
         ctx.data = (uint64_t)bearer;
         ctx.data_end = (uint64_t) ((uint8_t*)bearer + sizeof(struct jbpf_pdcp_ctx_info));
-        ctx.srs_meta_data1 = (uint64_t)sdu_length << 32 | count;
-        ctx.srs_meta_data2 = window_size;
     )
 )
 
@@ -278,13 +274,12 @@ DECLARE_JBPF_HOOK(pdcp_dl_tx_data_pdu,
         struct jbpf_pdcp_ctx_info *bearer,
         uint32_t pdu_length,
         uint32_t count,
-        uint8_t is_retx,
-        uint32_t window_size),
+        uint8_t is_retx),
     HOOK_ASSIGN(
         ctx.data = (uint64_t)bearer;
         ctx.data_end = (uint64_t) ((uint8_t*)bearer + sizeof(struct jbpf_pdcp_ctx_info));
         ctx.srs_meta_data1 = (uint64_t)pdu_length << 32 | count;
-        ctx.srs_meta_data2 = (uint64_t)is_retx << 32 | window_size;
+        ctx.srs_meta_data2 = (uint64_t)is_retx;
     )
 )
 
@@ -294,12 +289,11 @@ DECLARE_JBPF_HOOK(pdcp_dl_tx_control_pdu,
     ctx,
     HOOK_PROTO(
         struct jbpf_pdcp_ctx_info *bearer,
-        uint32_t sdu_length,
-        uint32_t window_size),
+        uint32_t pdu_length),
     HOOK_ASSIGN(
         ctx.data = (uint64_t)bearer;
         ctx.data_end = (uint64_t) ((uint8_t*)bearer + sizeof(struct jbpf_pdcp_ctx_info));
-        ctx.srs_meta_data1 = (uint64_t)sdu_length << 32 | window_size;
+        ctx.srs_meta_data1 = (uint64_t)pdu_length;
     )
 )
 
@@ -313,13 +307,10 @@ DECLARE_JBPF_HOOK(pdcp_dl_handle_tx_notification,
     struct jbpf_ran_generic_ctx ctx,
     ctx,
     HOOK_PROTO(
-        struct jbpf_pdcp_ctx_info *bearer,
-        uint32_t notif_count,
-        uint32_t window_size),
+        struct jbpf_pdcp_ctx_info *bearer),
     HOOK_ASSIGN(
         ctx.data = (uint64_t)bearer;
         ctx.data_end = (uint64_t) ((uint8_t*)bearer + sizeof(struct jbpf_pdcp_ctx_info));
-        ctx.srs_meta_data1 = (uint64_t)notif_count << 32 | window_size;
     )
 )
 
@@ -335,13 +326,10 @@ DECLARE_JBPF_HOOK(pdcp_dl_handle_delivery_notification,
     struct jbpf_ran_generic_ctx ctx,
     ctx,
     HOOK_PROTO(
-        struct jbpf_pdcp_ctx_info *bearer,
-        uint32_t notif_count,
-        uint32_t window_size),
+        struct jbpf_pdcp_ctx_info *bearer),
     HOOK_ASSIGN(
         ctx.data = (uint64_t)bearer;
         ctx.data_end = (uint64_t) ((uint8_t*)bearer + sizeof(struct jbpf_pdcp_ctx_info));
-        ctx.srs_meta_data1 = (uint64_t)notif_count << 32 | window_size;
     )
 )
 

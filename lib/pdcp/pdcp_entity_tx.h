@@ -96,6 +96,9 @@ public:
     ue_dl_executor(ue_dl_executor_),
     crypto_executor(crypto_executor_),
     tx_window(create_tx_window(cfg.sn_size))
+#ifdef JBPF_ENABLED
+    , tx_window_bytes(0)
+#endif
   {
     // Validate configuration
     if (is_srb() && (cfg.sn_size != pdcp_sn_size::size12bits)) {
@@ -238,8 +241,12 @@ private:
 
   /// \brief Stops all discard timer up to a PDCP PDU COUNT number that is provided as argument.
   /// \param highest_count Highest PDCP PDU COUNT to which all discard timers shall be stopped.
-  void stop_discard_timer(uint32_t highest_count);
-
+  void stop_discard_timer(uint32_t highest_count
+#ifdef JBPF_ENABLED 
+, int trigger
+#endif    
+  );
+  
   /// \brief Discard one PDU.
   ///
   /// This will notify lower layers of the discard and remove the element from the tx_window, i.e. stop the discard
@@ -253,6 +260,9 @@ private:
     uint32_t     count;
     byte_buffer  sdu;
     unique_timer discard_timer;
+#ifdef JBPF_ENABLED
+    jbpf_pdcp_sdu_latency_info_t latency_info; // Latency info
+#endif    
   };
 
   /// \brief Tx window.
@@ -260,6 +270,9 @@ private:
   /// recovery procedure. Upon expiry of a discard timer, the PDCP Tx entity instructs the lower layers to discard the
   /// associated PDCP PDU. See section 5.2.1 and 7.3 of TS 38.323.
   std::unique_ptr<sdu_window<pdcp_tx_sdu_info>> tx_window;
+#ifdef JBPF_ENABLED
+  uint32_t tx_window_bytes;
+#endif
 
   /// Creates the tx_window according to sn_size
   /// \param sn_size Size of the sequence number (SN)
