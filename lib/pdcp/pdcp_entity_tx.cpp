@@ -37,6 +37,24 @@ DEFINE_JBPF_HOOK(pdcp_dl_handle_tx_notification);
 DEFINE_JBPF_HOOK(pdcp_dl_handle_delivery_notification);
 DEFINE_JBPF_HOOK(pdcp_dl_discard_pdu);
 DEFINE_JBPF_HOOK(pdcp_dl_reestablish);
+
+#define CALL_JBPF_HOOK(hook_fn, ...)  \
+  { \
+    struct jbpf_pdcp_ctx_info jbpf_ctx = {0};\
+    jbpf_ctx.ctx_id = 0;    \
+    jbpf_ctx.cu_ue_index = ue_index;\
+    jbpf_ctx.is_srb = rb_id.is_srb();\
+    jbpf_ctx.rb_id = rb_id.is_srb() ? srb_id_to_uint(rb_id.get_srb_id()) \
+                                    : drb_id_to_uint(rb_id.get_drb_id());\
+    jbpf_ctx.rlc_mode = (uint8_t)rlc_mode; \
+    if (cfg.discard_timer.has_value()) { \
+      jbpf_ctx.window_info = {true,(uint32_t)tx_window->size(), tx_window_bytes}; \
+    } else { \
+      jbpf_ctx.window_info = {false, 0, 0}; \
+    } \
+    hook_fn(&jbpf_ctx, ##__VA_ARGS__); \
+  }
+  
 #endif
 
 using namespace srsran;
@@ -109,17 +127,7 @@ void pdcp_entity_tx::handle_sdu(byte_buffer buf)
   // TODO
 
 #ifdef JBPF_ENABLED 
-  jbpf_pdcp_sdu_info_t jbpf_pdcp_sdu_info = {st.tx_next, (uint32_t)buf.length()};
-  int rb_id_value = rb_id.is_srb() ? srb_id_to_uint(rb_id.get_srb_id()) 
-                                  : drb_id_to_uint(rb_id.get_drb_id());
-  {
-    // call hook now if we are not using discard timer, otherwise it will be called later in the function
-    if (!cfg.discard_timer.has_value()) {                                  
-      struct jbpf_pdcp_ctx_info bearer_info = {0, ue_index, rb_id.is_srb(), (uint8_t)rb_id_value, (uint8_t)rlc_mode, 
-        jbpf_pdcp_sdu_info, {0}, {0}};
-      hook_pdcp_dl_new_sdu(&bearer_info);
-    }
-  }
+  CALL_JBPF_HOOK(hook_pdcp_dl_new_sdu, st.tx_next, buf.length());
 #endif
 
   // Prepare header
@@ -162,22 +170,12 @@ void pdcp_entity_tx::handle_sdu(byte_buffer buf)
     }
 
     pdcp_tx_sdu_info& sdu_info = tx_window->add_sn(st.tx_next);
+#ifdef JBPF_ENABLED
+    tx_window_bytes += sdu.length();
+    sdu_info.time_of_arrival = std::chrono::high_resolution_clock::now();
+#endif
     sdu_info.count             = st.tx_next;
     sdu_info.discard_timer     = std::move(discard_timer);
-#ifdef JBPF_ENABLED
-    sdu_info.latency_info.sdu_length = jbpf_pdcp_sdu_info.length;
-    sdu_info.latency_info.arrival_ns = tx_tp.time_since_epoch().count();    
-    sdu_info.latency_info.pdcpTx_count = 0;
-    sdu_info.latency_info.pdcpTx_ns = 0;
-    sdu_info.latency_info.rlcTxStarted_ns = 0;
-    sdu_info.latency_info.rlcDelivered_ns = 0;
-    tx_window_bytes += jbpf_pdcp_sdu_info.length;
-    {
-      struct jbpf_pdcp_ctx_info bearer_info = {0, ue_index, rb_id.is_srb(), (uint8_t)rb_id_value, (uint8_t)rlc_mode,
-        jbpf_pdcp_sdu_info, {1, (uint32_t)tx_window->size(), tx_window_bytes}, sdu_info.latency_info};
-      hook_pdcp_dl_new_sdu(&bearer_info);
-    }
-#endif
     if (is_am()) {
       sdu_info.sdu = std::move(sdu);
     }
@@ -202,13 +200,7 @@ void pdcp_entity_tx::reestablish(security::sec_128_as_config sec_cfg)
   logger.log_debug("Reestablishing PDCP. st={}", st);
 
 #ifdef JBPF_ENABLED 
-  {
-    int rb_id_value = rb_id.is_srb() ? srb_id_to_uint(rb_id.get_srb_id()) 
-                                    : drb_id_to_uint(rb_id.get_drb_id());
-    struct jbpf_pdcp_ctx_info bearer_info = {0, ue_index, rb_id.is_srb(), (uint8_t)rb_id_value, (uint8_t)rlc_mode,
-      {0}, {0}, {0}};
-    hook_pdcp_dl_reestablish(&bearer_info);
-}
+  CALL_JBPF_HOOK(hook_pdcp_dl_reestablish)
 #endif
 
   // - for UM DRBs and AM DRBs, reset the ROHC protocol for uplink and start with an IR state in U-mode (as
@@ -273,43 +265,16 @@ void pdcp_entity_tx::write_data_pdu_to_lower_layers(uint32_t count, byte_buffer 
   metrics_add_pdus(1, buf.length());
 
 #ifdef JBPF_ENABLED 
-  {
-    trace_point tx_tp = up_tracer.now();
-    bool is_srb = rb_id.is_srb();
-    int rb_id_value = is_srb ? srb_id_to_uint(rb_id.get_srb_id())
-                                    : drb_id_to_uint(rb_id.get_drb_id());
-
-    jbpf_pdcp_sdu_info_t sdu_info = {count, 0};    
-    jbpf_pdcp_window_info_t window_info = {0};
-    jbpf_pdcp_sdu_latency_info_t latency_info = {0}; /* Latency info */
-
-    if (cfg.discard_timer.has_value()) {
-      window_info.used = 1;
-      window_info.pkts = static_cast<uint32_t>(tx_window->size());
-      window_info.bytes = tx_window_bytes;
-
-      if (tx_window->has_sn(count)) {
-        auto& tx_sdu_info = (*tx_window)[count];
-        tx_sdu_info.latency_info.pdcpTx_ns = tx_tp.time_since_epoch().count();
-        tx_sdu_info.latency_info.pdcpTx_count++;
-        sdu_info.length = tx_sdu_info.latency_info.sdu_length;
-        latency_info = tx_sdu_info.latency_info;
-      }
-    }
-
-    jbpf_pdcp_ctx_info bearer_info = {
-      0,
-      ue_index,
-      is_srb,
-      static_cast<uint8_t>(rb_id_value),
-      static_cast<uint8_t>(rlc_mode),
-      sdu_info,
-      window_info,
-      latency_info
-    };
-
-    hook_pdcp_dl_tx_data_pdu(&bearer_info, buf.length(), count, static_cast<uint8_t>(is_retx));  
+  uint64_t latency = 0;
+  if (cfg.discard_timer && tx_window->has_sn(count)) {
+    const auto& sdu_info = (*tx_window)[count];
+    latency = (uint64_t)(std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::high_resolution_clock::now() -
+                                                                      sdu_info.time_of_arrival)).count();
   }
+  CALL_JBPF_HOOK(hook_pdcp_dl_tx_data_pdu, buf.length(), count,
+                static_cast<uint8_t>(is_retx),
+                cfg.discard_timer && tx_window->has_sn(count),
+                latency);  
 #endif
 
   lower_dn.on_new_pdu(std::move(buf), is_retx);
@@ -321,34 +286,7 @@ void pdcp_entity_tx::write_control_pdu_to_lower_layers(byte_buffer buf)
   metrics_add_pdus(1, buf.length());
 
 #ifdef JBPF_ENABLED 
-  {
-    bool is_srb = rb_id.is_srb();
-    int rb_id_value = is_srb ? srb_id_to_uint(rb_id.get_srb_id())
-                                    : drb_id_to_uint(rb_id.get_drb_id());
-
-    jbpf_pdcp_sdu_info_t sdu_info = {0};    
-    jbpf_pdcp_window_info_t window_info = {0};
-    jbpf_pdcp_sdu_latency_info_t latency_info = {0}; /* Latency info */
-
-    if (cfg.discard_timer.has_value()) {
-      window_info.used = 1;
-      window_info.pkts = static_cast<uint32_t>(tx_window->size());
-      window_info.bytes = tx_window_bytes;
-    }
-
-    jbpf_pdcp_ctx_info bearer_info = {
-      0,
-      ue_index,
-      is_srb,
-      static_cast<uint8_t>(rb_id_value),
-      static_cast<uint8_t>(rlc_mode),
-      sdu_info,
-      window_info,
-      latency_info
-    };
-
-    hook_pdcp_dl_tx_control_pdu(&bearer_info, buf.length());
-  }
+  CALL_JBPF_HOOK(hook_pdcp_dl_tx_control_pdu, buf.length());
 #endif
 
   lower_dn.on_new_pdu(std::move(buf), /* is_retx = */ false);
@@ -635,12 +573,12 @@ void pdcp_entity_tx::handle_transmit_notification(uint32_t notif_sn)
   }
 
   if (is_um()) {
-    stop_discard_timer(notif_count
-#ifdef JBPF_ENABLED 
-,1 /* handle_transmit_notification */                   
-#endif    
-    );
+    stop_discard_timer(notif_count);
   }
+
+#ifdef JBPF_ENABLED
+  CALL_JBPF_HOOK(hook_pdcp_dl_handle_tx_notification, notif_sn);
+#endif
 }
 
 void pdcp_entity_tx::handle_delivery_notification(uint32_t notif_sn)
@@ -662,15 +600,14 @@ void pdcp_entity_tx::handle_delivery_notification(uint32_t notif_sn)
   }
 
   if (is_am()) {
-    stop_discard_timer(notif_count
-#ifdef JBPF_ENABLED 
-,2 /* handle_delivery_notification */                   
-#endif    
-    );
-
+    stop_discard_timer(notif_count);
   } else {
     logger.log_error("Ignored unexpected PDU delivery notification in UM bearer. notif_sn={}", notif_sn);
   }
+
+#ifdef JBPF_ENABLED
+  CALL_JBPF_HOOK(hook_pdcp_dl_handle_delivery_notification, notif_sn);
+#endif
 }
 
 void pdcp_entity_tx::handle_retransmit_notification(uint32_t notif_sn)
@@ -801,11 +738,7 @@ bool pdcp_entity_tx::write_data_pdu_header(byte_buffer& buf, const pdcp_data_pdu
 /*
  * Timers
  */
-void pdcp_entity_tx::stop_discard_timer(uint32_t highest_count
-#ifdef JBPF_ENABLED 
-, int trigger                          
-#endif
-)
+void pdcp_entity_tx::stop_discard_timer(uint32_t highest_count)
 {
   if (!cfg.discard_timer.has_value()) {
     logger.log_debug("Cannot stop discard timers. No discard timer configured. highest_count={}", highest_count);
@@ -820,65 +753,12 @@ void pdcp_entity_tx::stop_discard_timer(uint32_t highest_count
   // Stop discard timers and update TX_NEXT_ACK to oldest element in tx_window
   while (st.tx_next_ack <= highest_count) {
     if (tx_window->has_sn(st.tx_next_ack)) {
-
-#ifdef JBPF_ENABLED         
-        // take a copy of the latency_info
-        const auto& tx_sdu_info = (*tx_window)[st.tx_next_ack];
-        jbpf_pdcp_sdu_latency_info_t latency_info = tx_sdu_info.latency_info;
+#ifdef JBPF_ENABLED
+      const auto& tx_sdu_info = (*tx_window)[st.tx_next_ack];
+      tx_window_bytes -= tx_sdu_info.sdu.length();
 #endif
-
       tx_window->remove_sn(st.tx_next_ack);
       logger.log_debug("Stopped discard timer. count={}", st.tx_next_ack);
-
-#ifdef JBPF_ENABLED  
-      // populate sdu_info
-      jbpf_pdcp_sdu_info_t sdu_info = {st.tx_next_ack, 0};
-      sdu_info.length = latency_info.sdu_length;
-
-      // update tx_window_bytes
-      // dont tx_window_bytes go negative
-      if (sdu_info.length > tx_window_bytes) {
-        tx_window_bytes = 0;
-      } else {
-        tx_window_bytes -= sdu_info.length;
-      }
-
-      // populate window_info
-      jbpf_pdcp_window_info_t window_info = {1, static_cast<uint32_t>(tx_window->size()), tx_window_bytes};
-
-      bool is_srb = rb_id.is_srb();
-      int rb_id_value = is_srb ? srb_id_to_uint(rb_id.get_srb_id())
-                               : drb_id_to_uint(rb_id.get_drb_id());
-
-      // populate latency info
-      trace_point tx_tp = up_tracer.now();
-      if (trigger == 1) {
-          latency_info.rlcTxStarted_ns = tx_tp.time_since_epoch().count();
-      } else if (trigger == 2) {
-          latency_info.rlcDelivered_ns = tx_tp.time_since_epoch().count();
-      }   
-
-      // Populate bearer_info
-      jbpf_pdcp_ctx_info bearer_info = {
-        0,
-        ue_index,
-        is_srb,
-        static_cast<uint8_t>(rb_id_value),
-        static_cast<uint8_t>(rlc_mode),
-        sdu_info,
-        window_info,
-        latency_info
-      };
-
-      // calls hooks based on trigger.
-      // trigger 1 = handle_transmit_notification 
-      // trigger 2 = handle_delivery_notification
-      if (trigger == 1) {
-        hook_pdcp_dl_handle_tx_notification(&bearer_info);
-      } else if (trigger == 2) {
-        hook_pdcp_dl_handle_delivery_notification(&bearer_info);
-      }   
-#endif   
     }
     st.tx_next_ack++;
   }
@@ -908,12 +788,10 @@ void pdcp_entity_tx::discard_pdu(uint32_t count)
   // Notify lower layers of the discard. It's the RLC to actually discard, if no segment was transmitted yet.
   lower_dn.on_discard_pdu(SN(count));
 
-#ifdef JBPF_ENABLED         
-  // take a copy of the latency_info
+#ifdef JBPF_ENABLED
   const auto& tx_sdu_info = (*tx_window)[count];
-  jbpf_pdcp_sdu_latency_info_t latency_info = tx_sdu_info.latency_info;
+  tx_window_bytes -= tx_sdu_info.sdu.length();
 #endif
-
   tx_window->remove_sn(count);
 
   // Update TX_NEXT_ACK to oldest element in tx_window
@@ -927,38 +805,7 @@ void pdcp_entity_tx::discard_pdu(uint32_t count)
   }
 
 #ifdef JBPF_ENABLED  
-    // populate sdu_info
-    jbpf_pdcp_sdu_info_t sdu_info = {count, 0};
-    sdu_info.length = latency_info.sdu_length;
-
-    // update tx_window_bytes
-    // dont tx_window_bytes go negative
-    if (sdu_info.length > tx_window_bytes) {
-      tx_window_bytes = 0;
-    } else {
-      tx_window_bytes -= sdu_info.length;
-    }
-
-    // populate window_info
-    jbpf_pdcp_window_info_t window_info = {1, static_cast<uint32_t>(tx_window->size()), tx_window_bytes};
-
-    bool is_srb = rb_id.is_srb();
-    int rb_id_value = is_srb ? srb_id_to_uint(rb_id.get_srb_id())
-                              : drb_id_to_uint(rb_id.get_drb_id());
-
-    // Populate bearer_info
-    jbpf_pdcp_ctx_info bearer_info = {
-      0,
-      ue_index,
-      is_srb,
-      static_cast<uint8_t>(rb_id_value),
-      static_cast<uint8_t>(rlc_mode),
-      sdu_info,
-      window_info,
-      latency_info
-    };
-
-    hook_pdcp_dl_discard_pdu(&bearer_info);
+  CALL_JBPF_HOOK(hook_pdcp_dl_discard_pdu, count);
 #endif   
 }
 

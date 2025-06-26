@@ -112,6 +112,10 @@ private:
 
   /// TX window
   std::unique_ptr<sdu_window<rlc_tx_am_sdu_info>> tx_window;
+#ifdef JBPF_ENABLED
+  /// Window size in bytes
+  uint32_t tx_window_bytes = 0;
+#endif
 
   /// Recycler for discarded PDUs (from tx_window) that shall be deleted by a different executor off the critical path
   rlc_pdu_recycler pdu_recycler;
@@ -159,13 +163,24 @@ public:
 
 #ifdef JBPF_ENABLED
   ~rlc_tx_am_entity() override {
-    {
-      int rb_id_value = rb_id.is_srb() ? srb_id_to_uint(rb_id.get_srb_id()) 
-                                      : drb_id_to_uint(rb_id.get_drb_id());
-      struct jbpf_rlc_ctx_info ctx_info = {0, (uint64_t)gnb_du_id, ue_index, rb_id.is_srb(), 
-        (uint8_t)rb_id_value, JBPF_RLC_MODE_AM};
-      hook_rlc_dl_deletion(&ctx_info);
-    }
+    struct jbpf_rlc_ctx_info jbpf_ctx = {0};
+    jbpf_ctx.ctx_id = 0;   
+    jbpf_ctx.gnb_du_id = (uint64_t)gnb_du_id;
+    jbpf_ctx.du_ue_index = ue_index;
+    jbpf_ctx.is_srb = rb_id.is_srb();
+    jbpf_ctx.rb_id = rb_id.is_srb() ? srb_id_to_uint(rb_id.get_srb_id()) 
+                                    : drb_id_to_uint(rb_id.get_drb_id());
+    jbpf_ctx.direction = JBPF_DL; 
+    jbpf_ctx.rlc_mode = JBPF_RLC_MODE_AM; 
+    jbpf_ctx.u.am_tx.sdu_queue_info = {
+        true,
+        0,
+        0};
+      jbpf_ctx.u.am_tx.window_info = {
+        true,
+        0,
+        0};
+    hook_rlc_dl_deletion(&jbpf_ctx);
   }
 #endif
     

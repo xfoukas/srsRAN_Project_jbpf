@@ -34,6 +34,7 @@
 DEFINE_JBPF_HOOK(rlc_dl_creation);
 DEFINE_JBPF_HOOK(rlc_dl_deletion);
 DEFINE_JBPF_HOOK(rlc_dl_new_sdu);
+DEFINE_JBPF_HOOK(rlc_dl_lost_sdu);
 DEFINE_JBPF_HOOK(rlc_dl_discard_sdu);
 DEFINE_JBPF_HOOK(rlc_dl_sdu_send_started);
 DEFINE_JBPF_HOOK(rlc_dl_sdu_send_completed);
@@ -42,6 +43,29 @@ DEFINE_JBPF_HOOK(rlc_dl_tx_pdu);
 DEFINE_JBPF_HOOK(rlc_dl_rx_status);
 DEFINE_JBPF_HOOK(rlc_dl_am_tx_pdu_retx_count);
 DEFINE_JBPF_HOOK(rlc_dl_am_tx_pdu_max_retx_count_reached);
+
+
+#define CALL_JBPF_HOOK(hook_fn, ...)   {                         \
+  struct jbpf_rlc_ctx_info jbpf_ctx = {0};\
+  jbpf_ctx.ctx_id = 0;   \
+  jbpf_ctx.gnb_du_id = (uint64_t)gnb_du_id;\
+  jbpf_ctx.du_ue_index = ue_index;\
+  jbpf_ctx.is_srb = rb_id.is_srb();\
+  jbpf_ctx.rb_id = rb_id.is_srb() ? srb_id_to_uint(rb_id.get_srb_id()) \
+                                   : drb_id_to_uint(rb_id.get_drb_id());\
+  jbpf_ctx.direction = JBPF_DL; \
+  jbpf_ctx.rlc_mode = JBPF_RLC_MODE_AM; \
+  jbpf_ctx.u.am_tx.sdu_queue_info = {                             \
+      true, \
+      sdu_queue.get_state().n_sdus,                             \
+      sdu_queue.get_state().n_bytes};                           \
+  jbpf_ctx.u.am_tx.window_info = {                                \
+      true, \
+      (uint32_t)tx_window->size(), \
+      tx_window_bytes};      \
+  hook_fn(&jbpf_ctx, ##__VA_ARGS__); \
+}
+
 #endif
 
 using namespace srsran;
@@ -106,15 +130,8 @@ rlc_tx_am_entity::rlc_tx_am_entity(gnb_du_id_t                          gnb_du_i
   logger.log_info("RLC AM configured. {}", cfg);
 
 #ifdef JBPF_ENABLED
-  {
-    int rb_id_value = rb_id.is_srb() ? srb_id_to_uint(rb_id.get_srb_id()) 
-                                    : drb_id_to_uint(rb_id.get_drb_id());
-    struct jbpf_rlc_ctx_info ctx_info = {0, (uint64_t)gnb_du_id, ue_index, rb_id.is_srb(), 
-      (uint8_t)rb_id_value, JBPF_RLC_MODE_AM, {sdu_queue.get_state().n_sdus, sdu_queue.get_state().n_bytes}};
-    hook_rlc_dl_creation(&ctx_info);
-  }
+  CALL_JBPF_HOOK(hook_rlc_dl_creation);
 #endif
-
 }
 
 // TS 38.322 v16.2.0 Sec. 5.2.3.1
@@ -144,6 +161,9 @@ void rlc_tx_am_entity::handle_sdu(byte_buffer sdu_buf, bool is_retx)
                     sdu_queue.get_state());
     metrics_high.metrics_add_sdus(1, sdu_length);
     handle_changed_buffer_state();
+#ifdef JBPF_ENABLED
+  CALL_JBPF_HOOK(hook_rlc_dl_new_sdu, sdu.buf.length(), sdu.pdcp_sn.value(), sdu.is_retx);
+#endif    
   } else {
     logger.log_warning("Dropped SDU. sdu_len={} pdcp_sn={} is_retx={} {}",
                        sdu_length,
@@ -151,41 +171,27 @@ void rlc_tx_am_entity::handle_sdu(byte_buffer sdu_buf, bool is_retx)
                        sdu.is_retx,
                        sdu_queue.get_state());
     metrics_high.metrics_add_lost_sdus(1);
-  }
-
 #ifdef JBPF_ENABLED
-  {
-    int rb_id_value = rb_id.is_srb() ? srb_id_to_uint(rb_id.get_srb_id()) 
-                                    : drb_id_to_uint(rb_id.get_drb_id());
-    struct jbpf_rlc_ctx_info ctx_info = {0, (uint64_t)gnb_du_id, ue_index, rb_id.is_srb(), 
-      (uint8_t)rb_id_value, JBPF_RLC_MODE_AM, 
-      {sdu_queue.get_state().n_sdus, sdu_queue.get_state().n_bytes}};
-    hook_rlc_dl_new_sdu(&ctx_info, sdu.buf.length(), sdu.pdcp_sn.value());
+  CALL_JBPF_HOOK(hook_rlc_dl_lost_sdu, sdu.buf.length(), sdu.pdcp_sn.value(), sdu.is_retx);
+#endif    
   }
-#endif
-
 }
 
 // TS 38.322 v16.2.0 Sec. 5.4
 void rlc_tx_am_entity::discard_sdu(uint32_t pdcp_sn)
 {
   if (sdu_queue.try_discard(pdcp_sn)) {
-    logger.log_info("Discarded SDU. pdcp_sn={}", pdcp_sn);
-    
+    logger.log_info("Discarded SDU. pdcp_sn={}", pdcp_sn);    
 #ifdef JBPF_ENABLED
-    {
-      int rb_id_value = rb_id.is_srb() ? srb_id_to_uint(rb_id.get_srb_id()) 
-                                      : drb_id_to_uint(rb_id.get_drb_id());
-      struct jbpf_rlc_ctx_info ctx_info = {0, (uint64_t)gnb_du_id, ue_index, rb_id.is_srb(), 
-        (uint8_t)rb_id_value, JBPF_RLC_MODE_AM, {sdu_queue.get_state().n_sdus, sdu_queue.get_state().n_bytes}};
-      hook_rlc_dl_discard_sdu(&ctx_info, pdcp_sn);
-    }
+  CALL_JBPF_HOOK(hook_rlc_dl_discard_sdu, pdcp_sn, true);
 #endif
-
     metrics_high.metrics_add_discard(1);
     handle_changed_buffer_state();
   } else {
     logger.log_info("Could not discard SDU. pdcp_sn={}", pdcp_sn);
+#ifdef JBPF_ENABLED
+  CALL_JBPF_HOOK(hook_rlc_dl_discard_sdu, pdcp_sn, false);
+#endif
     metrics_high.metrics_add_discard_failure(1);
   }
 }
@@ -241,13 +247,7 @@ size_t rlc_tx_am_entity::pull_pdu(span<uint8_t> rlc_pdu_buf)
     }
 
 #ifdef JBPF_ENABLED
-    {
-      int rb_id_value = rb_id.is_srb() ? srb_id_to_uint(rb_id.get_srb_id()) 
-                                      : drb_id_to_uint(rb_id.get_drb_id());
-      struct jbpf_rlc_ctx_info ctx_info = {0, (uint64_t)gnb_du_id, ue_index, rb_id.is_srb(), 
-        (uint8_t)rb_id_value, JBPF_RLC_MODE_AM, {sdu_queue.get_state().n_sdus, sdu_queue.get_state().n_bytes}};
-      hook_rlc_dl_tx_pdu(&ctx_info, JBPF_RLC_PDUTYPE_STATUS, (uint32_t)pdu_len, tx_window->size());
-    }
+    CALL_JBPF_HOOK(hook_rlc_dl_tx_pdu, JBPF_RLC_PDUTYPE_STATUS, (uint32_t)pdu_len);
 #endif
 
     return pdu_len;
@@ -268,13 +268,7 @@ size_t rlc_tx_am_entity::pull_pdu(span<uint8_t> rlc_pdu_buf)
     }
 
 #ifdef JBPF_ENABLED
-    {
-      int rb_id_value = rb_id.is_srb() ? srb_id_to_uint(rb_id.get_srb_id()) 
-                                      : drb_id_to_uint(rb_id.get_drb_id());
-      struct jbpf_rlc_ctx_info ctx_info = {0, (uint64_t)gnb_du_id, ue_index, rb_id.is_srb(), 
-        (uint8_t)rb_id_value, JBPF_RLC_MODE_AM, {sdu_queue.get_state().n_sdus, sdu_queue.get_state().n_bytes}};
-      hook_rlc_dl_tx_pdu(&ctx_info, JBPF_RLC_PDUTYPE_DATA_RETX, (uint32_t)pdu_len, tx_window->size());
-    }
+    CALL_JBPF_HOOK(hook_rlc_dl_tx_pdu, JBPF_RLC_PDUTYPE_DATA_RETX, (uint32_t)pdu_len);
 #endif
 
     return pdu_len;
@@ -287,13 +281,7 @@ size_t rlc_tx_am_entity::pull_pdu(span<uint8_t> rlc_pdu_buf)
       pcap.push_pdu(pcap_context, rlc_pdu_buf.subspan(0, pdu_len));
 
 #ifdef JBPF_ENABLED
-      {
-        int rb_id_value = rb_id.is_srb() ? srb_id_to_uint(rb_id.get_srb_id()) 
-                                        : drb_id_to_uint(rb_id.get_drb_id());
-        struct jbpf_rlc_ctx_info ctx_info = {0, (uint64_t)gnb_du_id, ue_index, rb_id.is_srb(), 
-          (uint8_t)rb_id_value, JBPF_RLC_MODE_AM, {sdu_queue.get_state().n_sdus, sdu_queue.get_state().n_bytes}};
-        hook_rlc_dl_tx_pdu(&ctx_info, JBPF_RLC_PDUTYPE_DATA, (uint32_t)pdu_len, tx_window->size());
-      }
+      CALL_JBPF_HOOK(hook_rlc_dl_tx_pdu, JBPF_RLC_PDUTYPE_DATA, (uint32_t)pdu_len);
 #endif
     
       return pdu_len;
@@ -318,13 +306,7 @@ size_t rlc_tx_am_entity::pull_pdu(span<uint8_t> rlc_pdu_buf)
   }
 
 #ifdef JBPF_ENABLED
-  {
-    int rb_id_value = rb_id.is_srb() ? srb_id_to_uint(rb_id.get_srb_id()) 
-                                    : drb_id_to_uint(rb_id.get_drb_id());
-    struct jbpf_rlc_ctx_info ctx_info = {0, (uint64_t)gnb_du_id, ue_index, rb_id.is_srb(), 
-      (uint8_t)rb_id_value, JBPF_RLC_MODE_AM, {sdu_queue.get_state().n_sdus, sdu_queue.get_state().n_bytes}};
-    hook_rlc_dl_tx_pdu(&ctx_info, JBPF_RLC_PDUTYPE_DATA, (uint32_t)pdu_len, tx_window->size());
-  }
+  CALL_JBPF_HOOK(hook_rlc_dl_tx_pdu, JBPF_RLC_PDUTYPE_DATA, (uint32_t)pdu_len);
 #endif
 
   return pdu_len;
@@ -358,6 +340,7 @@ size_t rlc_tx_am_entity::build_new_pdu(span<uint8_t> rlc_pdu_buf)
   // insert newly assigned SN into window and use reference for in-place operations
   // NOTE: from now on, we can't return from this function anymore before increasing tx_next
   rlc_tx_am_sdu_info& sdu_info = tx_window->add_sn(st.tx_next);
+  tx_window_bytes += sdu.buf.length();
   sdu_info.sdu                 = std::move(sdu.buf); // Move SDU into TX window SDU info
   sdu_info.is_retx             = sdu.is_retx;
   sdu_info.pdcp_sn             = sdu.pdcp_sn;
@@ -367,13 +350,9 @@ size_t rlc_tx_am_entity::build_new_pdu(span<uint8_t> rlc_pdu_buf)
   if (sdu.pdcp_sn.has_value()) {
 
 #ifdef JBPF_ENABLED
-    {
-      int rb_id_value = rb_id.is_srb() ? srb_id_to_uint(rb_id.get_srb_id()) 
-                                      : drb_id_to_uint(rb_id.get_drb_id());
-      struct jbpf_rlc_ctx_info ctx_info = {0, (uint64_t)gnb_du_id, ue_index, rb_id.is_srb(), 
-        (uint8_t)rb_id_value, JBPF_RLC_MODE_AM, {sdu_queue.get_state().n_sdus, sdu_queue.get_state().n_bytes}};
-      hook_rlc_dl_sdu_send_started(&ctx_info, sdu_info.pdcp_sn.value(), sdu_info.is_retx);
-    }
+    auto latency = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::high_resolution_clock::now() -
+                                                                      sdu_info.time_of_arrival);
+    CALL_JBPF_HOOK(hook_rlc_dl_sdu_send_started, sdu_info.pdcp_sn.value(), sdu_info.is_retx, (uint64_t)latency.count());
 #endif
   
     if (sdu.is_retx) {
@@ -426,13 +405,8 @@ size_t rlc_tx_am_entity::build_new_pdu(span<uint8_t> rlc_pdu_buf)
                                                                       sdu_info.time_of_arrival);
 
 #ifdef JBPF_ENABLED
-    {
-      int rb_id_value = rb_id.is_srb() ? srb_id_to_uint(rb_id.get_srb_id()) 
-                                      : drb_id_to_uint(rb_id.get_drb_id());
-      struct jbpf_rlc_ctx_info ctx_info = {0, (uint64_t)gnb_du_id, ue_index, rb_id.is_srb(), 
-        (uint8_t)rb_id_value, JBPF_RLC_MODE_AM, {sdu_queue.get_state().n_sdus, sdu_queue.get_state().n_bytes}};
-      hook_rlc_dl_sdu_send_completed(&ctx_info, sdu_info.pdcp_sn.value(), sdu_info.is_retx);
-    }
+  CALL_JBPF_HOOK(hook_rlc_dl_sdu_send_completed, sdu_info.pdcp_sn.value(), sdu_info.is_retx,
+   (uint64_t)latency.count());
 #endif
 
   metrics_low.metrics_add_sdu_latency_us(latency.count() / 1000);
@@ -599,13 +573,8 @@ size_t rlc_tx_am_entity::build_continued_sdu_segment(span<uint8_t> rlc_pdu_buf, 
                                                                         sdu_info.time_of_arrival);
 
 #ifdef JBPF_ENABLED
-    {
-      int rb_id_value = rb_id.is_srb() ? srb_id_to_uint(rb_id.get_srb_id()) 
-                                      : drb_id_to_uint(rb_id.get_drb_id());
-      struct jbpf_rlc_ctx_info ctx_info = {0, (uint64_t)gnb_du_id, ue_index, rb_id.is_srb(), 
-        (uint8_t)rb_id_value, JBPF_RLC_MODE_AM, {sdu_queue.get_state().n_sdus, sdu_queue.get_state().n_bytes}};
-      hook_rlc_dl_sdu_send_completed(&ctx_info, sdu_info.pdcp_sn.has_value() ? sdu_info.pdcp_sn.value() : 0, sdu_info.is_retx);
-    }
+  CALL_JBPF_HOOK(hook_rlc_dl_sdu_send_completed, sdu_info.pdcp_sn.has_value() ? sdu_info.pdcp_sn.value() : 0, sdu_info.is_retx,
+    (uint64_t)latency.count());
 #endif                                                                        
 
     metrics_low.metrics_add_sdu_latency_us(latency.count() / 1000);
@@ -855,11 +824,21 @@ void rlc_tx_am_entity::handle_status_pdu(rlc_am_status_pdu status)
           max_deliv_pdcp_sn = (*tx_window)[sn].pdcp_sn;
         }
       }
+      tx_window_bytes -= sdu_info.sdu.length();
       // move the PDU's byte_buffer from tx_window into pdu_recycler (if possible) for deletion off the critical path.
       if (!pdu_recycler.add_discarded_pdu(std::move(sdu_info.sdu))) {
         // recycle bin is full and the PDU was deleted on the spot, which may slow down this worker. Warn later.
         recycle_bin_full = true;
       }
+#ifdef JBPF_ENABLED
+      auto latency = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::high_resolution_clock::now() -
+                                                                        sdu_info.time_of_arrival);
+      if (sdu_info.is_retx) {
+        CALL_JBPF_HOOK(hook_rlc_dl_sdu_delivered, max_deliv_retx_pdcp_sn.value(), true, (uint64_t)latency.count());
+      } else {
+        CALL_JBPF_HOOK(hook_rlc_dl_sdu_delivered, max_deliv_pdcp_sn.value(), false, (uint64_t)latency.count());
+      }
+#endif
       tx_window->remove_sn(sn); // remove the from tx_window
       st.tx_next_ack = (sn + 1) % mod;
     } else {
@@ -869,41 +848,13 @@ void rlc_tx_am_entity::handle_status_pdu(rlc_am_status_pdu status)
   }
 
 #ifdef JBPF_ENABLED
-  {
-    int rb_id_value = rb_id.is_srb() ? srb_id_to_uint(rb_id.get_srb_id()) 
-                                    : drb_id_to_uint(rb_id.get_drb_id());
-    struct jbpf_rlc_ctx_info ctx_info = {0, (uint64_t)gnb_du_id, ue_index, rb_id.is_srb(), 
-      (uint8_t)rb_id_value, JBPF_RLC_MODE_AM, {sdu_queue.get_state().n_sdus, sdu_queue.get_state().n_bytes}};
-    hook_rlc_dl_rx_status(&ctx_info, tx_window->size());
-  }
+  CALL_JBPF_HOOK(hook_rlc_dl_rx_status);
 #endif
 
   if (max_deliv_pdcp_sn.has_value()) {
-
-#ifdef JBPF_ENABLED
-    {
-      int rb_id_value = rb_id.is_srb() ? srb_id_to_uint(rb_id.get_srb_id()) 
-                                      : drb_id_to_uint(rb_id.get_drb_id());
-      struct jbpf_rlc_ctx_info ctx_info = {0, (uint64_t)gnb_du_id, ue_index, rb_id.is_srb(), 
-        (uint8_t)rb_id_value, JBPF_RLC_MODE_AM, {sdu_queue.get_state().n_sdus, sdu_queue.get_state().n_bytes}};
-      hook_rlc_dl_sdu_delivered(&ctx_info, max_deliv_pdcp_sn.value(), false);
-    }
-#endif  
-
     upper_dn.on_delivered_sdu(max_deliv_pdcp_sn.value());
   }
   if (max_deliv_retx_pdcp_sn.has_value()) {
-
-#ifdef JBPF_ENABLED
-    {
-      int rb_id_value = rb_id.is_srb() ? srb_id_to_uint(rb_id.get_srb_id()) 
-                                      : drb_id_to_uint(rb_id.get_drb_id());
-      struct jbpf_rlc_ctx_info ctx_info = {0, (uint64_t)gnb_du_id, ue_index, rb_id.is_srb(), 
-        (uint8_t)rb_id_value, JBPF_RLC_MODE_AM, {sdu_queue.get_state().n_sdus, sdu_queue.get_state().n_bytes}};
-      hook_rlc_dl_sdu_delivered(&ctx_info, max_deliv_retx_pdcp_sn.value(), true);
-    }
-#endif  
-
     upper_dn.on_delivered_retransmitted_sdu(max_deliv_retx_pdcp_sn.value());
   }
 
@@ -1095,13 +1046,7 @@ void rlc_tx_am_entity::increment_retx_count(uint32_t sn)
   }
 
 #ifdef JBPF_ENABLED
-  {
-    int rb_id_value = rb_id.is_srb() ? srb_id_to_uint(rb_id.get_srb_id()) 
-                                    : drb_id_to_uint(rb_id.get_drb_id());
-    struct jbpf_rlc_ctx_info ctx_info = {0, (uint64_t)gnb_du_id, ue_index, rb_id.is_srb(), 
-      (uint8_t)rb_id_value, JBPF_RLC_MODE_AM, {sdu_queue.get_state().n_sdus, sdu_queue.get_state().n_bytes}};
-    hook_rlc_dl_am_tx_pdu_retx_count(&ctx_info, tx_window->size(), sn, pdu.retx_count);
-  }
+  CALL_JBPF_HOOK(hook_rlc_dl_am_tx_pdu_retx_count, sn, pdu.retx_count);
 #endif
 
   // Inform upper layers if needed
@@ -1121,13 +1066,7 @@ void rlc_tx_am_entity::decrement_retx_count(uint32_t sn)
   pdu.retx_count--;
 
 #ifdef JBPF_ENABLED
-  {
-    int rb_id_value = rb_id.is_srb() ? srb_id_to_uint(rb_id.get_srb_id()) 
-                                    : drb_id_to_uint(rb_id.get_drb_id());
-    struct jbpf_rlc_ctx_info ctx_info = {0, (uint64_t)gnb_du_id, ue_index, rb_id.is_srb(), 
-      (uint8_t)rb_id_value, JBPF_RLC_MODE_AM, {sdu_queue.get_state().n_sdus, sdu_queue.get_state().n_bytes}};
-    hook_rlc_dl_am_tx_pdu_retx_count(&ctx_info, tx_window->size(), sn, pdu.retx_count);
-  }
+  CALL_JBPF_HOOK(hook_rlc_dl_am_tx_pdu_retx_count, sn, pdu.retx_count);
 #endif
 
 }
@@ -1138,13 +1077,7 @@ void rlc_tx_am_entity::check_sn_reached_max_retx(uint32_t sn)
     logger.log_warning("Reached maximum number of RETX. sn={} retx_count={}", sn, (*tx_window)[sn].retx_count);
 
 #ifdef JBPF_ENABLED
-    {
-      int rb_id_value = rb_id.is_srb() ? srb_id_to_uint(rb_id.get_srb_id()) 
-                                      : drb_id_to_uint(rb_id.get_drb_id());
-      struct jbpf_rlc_ctx_info ctx_info = {0, (uint64_t)gnb_du_id, ue_index, rb_id.is_srb(), 
-        (uint8_t)rb_id_value, JBPF_RLC_MODE_AM, {sdu_queue.get_state().n_sdus, sdu_queue.get_state().n_bytes}};
-      hook_rlc_dl_am_tx_pdu_max_retx_count_reached(&ctx_info, tx_window->size(), sn, cfg.max_retx_thresh);
-    }
+    CALL_JBPF_HOOK(hook_rlc_dl_am_tx_pdu_max_retx_count_reached, sn, cfg.max_retx_thresh);
 #endif
   }
 }

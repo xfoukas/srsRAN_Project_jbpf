@@ -46,11 +46,16 @@ rlc_rx_tm_entity::rlc_rx_tm_entity(gnb_du_id_t                       gnb_du_id_,
 
 #ifdef JBPF_ENABLED
   {
-    int rb_id_value = rb_id.is_srb() ? srb_id_to_uint(rb_id.get_srb_id()) 
+    struct jbpf_rlc_ctx_info jbpf_ctx = {0};
+    jbpf_ctx.ctx_id = 0;    /* Context id (could be implementation specific) */
+    jbpf_ctx.gnb_du_id = (uint64_t)gnb_du_id;
+    jbpf_ctx.du_ue_index = ue_index;
+    jbpf_ctx.is_srb = rb_id.is_srb();
+    jbpf_ctx.rb_id = rb_id.is_srb() ? srb_id_to_uint(rb_id.get_srb_id()) 
                                     : drb_id_to_uint(rb_id.get_drb_id());
-    struct jbpf_rlc_ctx_info ctx_info = {0, (uint64_t)gnb_du_id, ue_index, rb_id.is_srb(), 
-      (uint8_t)rb_id_value, JBPF_RLC_MODE_TM};
-    hook_rlc_ul_creation(&ctx_info);
+    jbpf_ctx.direction = JBPF_UL; 
+    jbpf_ctx.rlc_mode = JBPF_RLC_MODE_TM; 
+    hook_rlc_ul_creation(&jbpf_ctx);
   }
 #endif  
 }
@@ -70,13 +75,18 @@ void rlc_rx_tm_entity::handle_pdu(byte_buffer_slice buf)
   }
 
 #ifdef JBPF_ENABLED
-      {
-        int rb_id_value = rb_id.is_srb() ? srb_id_to_uint(rb_id.get_srb_id()) 
-                                        : drb_id_to_uint(rb_id.get_drb_id());
-        struct jbpf_rlc_ctx_info ctx_info = {0, (uint64_t)gnb_du_id, ue_index, rb_id.is_srb(), 
-          (uint8_t)rb_id_value, JBPF_RLC_MODE_TM};
-        hook_rlc_ul_sdu_delivered(&ctx_info, 0, 0, sdu.value().length());
-      }
+  {
+    struct jbpf_rlc_ctx_info jbpf_ctx = {0};
+    jbpf_ctx.ctx_id = 0;    /* Context id (could be implementation specific) */
+    jbpf_ctx.gnb_du_id = (uint64_t)gnb_du_id;
+    jbpf_ctx.du_ue_index = ue_index;
+    jbpf_ctx.is_srb = rb_id.is_srb();
+    jbpf_ctx.rb_id = rb_id.is_srb() ? srb_id_to_uint(rb_id.get_srb_id()) 
+                                    : drb_id_to_uint(rb_id.get_drb_id());
+    jbpf_ctx.direction = JBPF_UL; 
+    jbpf_ctx.rlc_mode = JBPF_RLC_MODE_TM; 
+    hook_rlc_ul_sdu_delivered(&jbpf_ctx, 0, sdu.value().length(), 0);
+  }
 #endif
 
   logger.log_info(sdu.value().begin(), sdu.value().end(), "RX SDU. sdu_len={}", sdu.value().length());

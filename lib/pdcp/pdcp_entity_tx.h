@@ -96,9 +96,6 @@ public:
     ue_dl_executor(ue_dl_executor_),
     crypto_executor(crypto_executor_),
     tx_window(create_tx_window(cfg.sn_size))
-#ifdef JBPF_ENABLED
-    , tx_window_bytes(0)
-#endif
   {
     // Validate configuration
     if (is_srb() && (cfg.sn_size != pdcp_sn_size::size12bits)) {
@@ -116,12 +113,18 @@ public:
 
     logger.log_info("PDCP configured. {}", cfg);
 
-#ifdef JBPF_ENABLED 
+#ifdef JBPF_ENABLED
     {
-      int rb_id_value = rb_id.is_srb() ? srb_id_to_uint(rb_id.get_srb_id()) 
-                                  : drb_id_to_uint(rb_id.get_drb_id());
-      struct jbpf_pdcp_ctx_info bearer_info = {0, ue_index, rb_id.is_srb(), (uint8_t)rb_id_value, (uint8_t)rlc_mode};                                         
-      hook_pdcp_dl_creation(&bearer_info);
+      struct jbpf_pdcp_ctx_info jbpf_ctx = {0};
+
+      jbpf_ctx.ctx_id = 0;    /* Context id (could be implementation specific) */
+      jbpf_ctx.cu_ue_index = ue_index;
+      jbpf_ctx.is_srb = rb_id.is_srb();
+      jbpf_ctx.rb_id = rb_id.is_srb() ? srb_id_to_uint(rb_id.get_srb_id()) 
+                                      : drb_id_to_uint(rb_id.get_drb_id());
+      jbpf_ctx.rlc_mode = (uint8_t)rlc_mode; 
+      jbpf_ctx.window_info = {cfg.discard_timer.has_value(), 0, 0};
+      hook_pdcp_dl_creation(&jbpf_ctx);
     }
 #endif
 
@@ -133,10 +136,16 @@ public:
 #ifdef JBPF_ENABLED 
   ~pdcp_entity_tx() override {
     {
-      int rb_id_value = rb_id.is_srb() ? srb_id_to_uint(rb_id.get_srb_id()) 
-                                  : drb_id_to_uint(rb_id.get_drb_id());
-      struct jbpf_pdcp_ctx_info bearer_info = {0, ue_index, rb_id.is_srb(), (uint8_t)rb_id_value, (uint8_t)rlc_mode};                                         
-      hook_pdcp_dl_deletion(&bearer_info);
+      struct jbpf_pdcp_ctx_info jbpf_ctx = {0};
+
+      jbpf_ctx.ctx_id = 0;    /* Context id (could be implementation specific) */
+      jbpf_ctx.cu_ue_index = ue_index;
+      jbpf_ctx.is_srb = rb_id.is_srb();
+      jbpf_ctx.rb_id = rb_id.is_srb() ? srb_id_to_uint(rb_id.get_srb_id()) 
+                                      : drb_id_to_uint(rb_id.get_drb_id());
+      jbpf_ctx.rlc_mode = (uint8_t)rlc_mode; 
+      jbpf_ctx.window_info = {cfg.discard_timer.has_value(), 0, 0};
+      hook_pdcp_dl_deletion(&jbpf_ctx);
     }
   }
 #endif
@@ -241,11 +250,7 @@ private:
 
   /// \brief Stops all discard timer up to a PDCP PDU COUNT number that is provided as argument.
   /// \param highest_count Highest PDCP PDU COUNT to which all discard timers shall be stopped.
-  void stop_discard_timer(uint32_t highest_count
-#ifdef JBPF_ENABLED 
-, int trigger
-#endif    
-  );
+  void stop_discard_timer(uint32_t highest_count);
   
   /// \brief Discard one PDU.
   ///
@@ -261,8 +266,8 @@ private:
     byte_buffer  sdu;
     unique_timer discard_timer;
 #ifdef JBPF_ENABLED
-    jbpf_pdcp_sdu_latency_info_t latency_info; // Latency info
-#endif    
+    std::chrono::system_clock::time_point time_of_arrival;    
+#endif
   };
 
   /// \brief Tx window.
@@ -271,7 +276,7 @@ private:
   /// associated PDCP PDU. See section 5.2.1 and 7.3 of TS 38.323.
   std::unique_ptr<sdu_window<pdcp_tx_sdu_info>> tx_window;
 #ifdef JBPF_ENABLED
-  uint32_t tx_window_bytes;
+  uint32_t tx_window_bytes = 0;
 #endif
 
   /// Creates the tx_window according to sn_size

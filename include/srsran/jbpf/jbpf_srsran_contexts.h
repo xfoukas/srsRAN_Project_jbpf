@@ -17,6 +17,11 @@ typedef enum {
     JBPF_PROG_TYPE_RAN_GENERIC    
 } jbpf_srsran_index_e;
 
+typedef enum {
+    JBPF_DL = 0,
+    JBPF_UL
+} JbpfDirection_t;
+
 /* OFH context*/
 struct jbpf_ran_ofh_ctx {
   uint64_t data; /* Pointer to beginning of buffer with int16_t IQ samples */
@@ -25,7 +30,7 @@ struct jbpf_ran_ofh_ctx {
   /* Combination of frame, slot and cell_id, provide a unique
      context for an execution pipeline */
   uint16_t ctx_id; /* Context id (could be implementation specific) */
-  uint8_t direction; /* 0 DL, 1 UL */
+  JbpfDirection_t direction; /* 0 DL, 1 UL */
 };
 
 /* L2 context*/
@@ -66,24 +71,10 @@ struct jbpf_mac_sched_ctx {
 /* PDCP context */
 
 typedef struct {
-    uint32_t count;
-    uint32_t length;      /* Length of the SDU */
-} jbpf_pdcp_sdu_info_t;
-
-typedef struct {
     uint8_t used;      /* Is the window used, 0 = not-used, 1 = used */
     uint32_t pkts;     /* Total packets */
     uint32_t bytes;    /* Total bytes*/
-} jbpf_pdcp_window_info_t;
-
-typedef struct {
-    uint32_t sdu_length;      /* Length of the SDU */
-    uint64_t arrival_ns;  /* Arrival time of the SDU in nanoseconds */
-    uint32_t pdcpTx_count;    /* Number of times PDCP TX has been called for this SDU */
-    uint64_t pdcpTx_ns;       /* Time when PDCP TX was called for this SDU */
-    uint64_t rlcTxStarted_ns; /* Time when RLC TX started for this SDU */
-    uint64_t rlcDelivered_ns; /* Time when RLC delivered this SDU */
-} jbpf_pdcp_sdu_latency_info_t;
+} jbpf_queue_info_t;
 
 struct jbpf_pdcp_ctx_info {
     uint16_t ctx_id;   /* Context id (could be implementation specific) */
@@ -93,14 +84,8 @@ struct jbpf_pdcp_ctx_info {
                         if is_srb=False:   1=drb1, 2=drb2, 3-drb3 ... */
     uint8_t rlc_mode;  /* 0=UM, 1=AM*/
 
-    // sdu details
-    jbpf_pdcp_sdu_info_t sdu_info;    
-
     // window details
-    jbpf_pdcp_window_info_t window_info;  /* Window info */
-
-    // latency info
-    jbpf_pdcp_sdu_latency_info_t latency_info; /* Latency info */
+    jbpf_queue_info_t window_info;  /* Window info */
 };  
 
 /* E1 context info */
@@ -162,11 +147,27 @@ struct jbpf_rlc_ctx_info {
     uint8_t is_srb;  /* true=srb, false=drb */
     uint8_t rb_id;   /* if is_srb=True:    0=srb0, 1=srb1, 2=srb2,
                      if is_srb=False:      1=drb1, 2=drb2, 3-drb3 ... */
+    JbpfDirection_t direction; /* 0 DL, 1 UL */
     JbpfRlcMode_t rlc_mode;  /* 0=TM, 1=UM, 2=AM*/
-    struct  {
-        uint32_t n_sdus;  ///< Number of buffered SDUs that are not marked as discarded.
-        uint32_t n_bytes; ///< Number of buffered bytes that are not marked as discarded.
-    } sdu_queue_info;
+
+    union {
+        struct {
+            jbpf_queue_info_t sdu_queue_info; /* SDU queue info */
+        } tm_tx;
+        struct {
+            jbpf_queue_info_t sdu_queue_info; /* SDU queue info */
+        } um_tx;
+        struct {
+            jbpf_queue_info_t sdu_queue_info; /* SDU queue info */
+            jbpf_queue_info_t window_info;  /* Window info */
+        } am_tx;
+        struct {
+            uint32_t window_size;  /* Window info */
+        } um_rx;
+        struct {
+            uint32_t window_size;  /* Window info */
+        } am_rx;
+    } u;
 };
 
 typedef enum {
