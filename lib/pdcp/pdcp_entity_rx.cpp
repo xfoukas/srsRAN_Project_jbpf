@@ -273,13 +273,20 @@ void pdcp_entity_rx::handle_data_pdu(byte_buffer pdu)
       return; // PDU already present, drop.
     } else {
       logger.log_error("Removing old PDU with count={} for new PDU with count={}", sdu_info.count, rcvd_count);
+#ifdef JBPF_ENABLED
+      rx_window_bytes -= sdu_info.sdu.length();
+#endif
       rx_window->remove_sn(rcvd_count);
     }
   }
 
   // Store PDU in Rx window
   pdcp_rx_sdu_info& sdu_info = rx_window->add_sn(rcvd_count);
-  sdu_info.sdu               = std::move(pdu);
+#ifdef JBPF_ENABLED
+  rx_window_bytes += pdu.length();
+#endif
+
+  sdu_info.sdu               = std::move(pdu);  
   sdu_info.count             = rcvd_count;
 
   // Update RX_NEXT
@@ -361,11 +368,14 @@ void pdcp_entity_rx::deliver_all_consecutive_counts()
     metrics_add_sdus(1, sdu_info.sdu.length());
 
 #ifdef JBPF_ENABLED
-  CALL_JBPF_HOOK(hook_pdcp_ul_deliver_sdu, sdu_info.sdu.length());
+    auto sdu_length = sdu_info.sdu.length();
 #endif
-
     upper_dn.on_new_sdu(std::move(sdu_info.sdu));
     rx_window->remove_sn(st.rx_deliv);
+#ifdef JBPF_ENABLED
+    rx_window_bytes -= sdu_length;
+    CALL_JBPF_HOOK(hook_pdcp_ul_deliver_sdu, sdu_length);
+#endif
 
     // Update RX_DELIV
     st.rx_deliv = st.rx_deliv + 1;
@@ -386,12 +396,14 @@ void pdcp_entity_rx::deliver_all_sdus()
       metrics_add_sdus(1, sdu_info.sdu.length());
 
 #ifdef JBPF_ENABLED
-      CALL_JBPF_HOOK(hook_pdcp_ul_deliver_sdu, sdu_info.sdu.length());
+      auto sdu_length = sdu_info.sdu.length();
 #endif
-
       upper_dn.on_new_sdu(std::move(sdu_info.sdu));
-        
       rx_window->remove_sn(count);
+#ifdef JBPF_ENABLED
+      rx_window_bytes -= sdu_length;
+      CALL_JBPF_HOOK(hook_pdcp_ul_deliver_sdu, sdu_length);
+#endif
     }
   }
 }
@@ -401,6 +413,11 @@ void pdcp_entity_rx::discard_all_sdus()
 {
   while (st.rx_deliv != st.rx_next) {
     if (rx_window->has_sn(st.rx_deliv)) {
+
+#ifdef JBPF_ENABLED
+      pdcp_rx_sdu_info& sdu_info = (*rx_window)[st.rx_deliv];
+      rx_window_bytes -= sdu_info.sdu.length();
+#endif
       rx_window->remove_sn(st.rx_deliv);
       logger.log_debug("Discarded RX SDU. count={}", st.rx_next);
     }
@@ -409,6 +426,10 @@ void pdcp_entity_rx::discard_all_sdus()
     st.rx_deliv = st.rx_deliv + 1;
   }
 }
+
+
+
+
 
 byte_buffer pdcp_entity_rx::compile_status_report()
 {
@@ -593,11 +614,14 @@ void pdcp_entity_rx::handle_t_reordering_expire()
       metrics_add_sdus(1, sdu_info.sdu.length());
 
 #ifdef JBPF_ENABLED
-      CALL_JBPF_HOOK(hook_pdcp_ul_deliver_sdu, sdu_info.sdu.length());
+    auto sdu_length = sdu_info.sdu.length();
 #endif
-
       upper_dn.on_new_sdu(std::move(sdu_info.sdu));
       rx_window->remove_sn(st.rx_deliv);
+#ifdef JBPF_ENABLED
+      rx_window_bytes -= sdu_length;
+      CALL_JBPF_HOOK(hook_pdcp_ul_deliver_sdu, sdu_length);
+#endif
     }
 
     // Update RX_DELIV

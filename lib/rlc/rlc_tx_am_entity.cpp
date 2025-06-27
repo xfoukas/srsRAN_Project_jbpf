@@ -340,7 +340,9 @@ size_t rlc_tx_am_entity::build_new_pdu(span<uint8_t> rlc_pdu_buf)
   // insert newly assigned SN into window and use reference for in-place operations
   // NOTE: from now on, we can't return from this function anymore before increasing tx_next
   rlc_tx_am_sdu_info& sdu_info = tx_window->add_sn(st.tx_next);
+#ifdef JBPF_ENABLED
   tx_window_bytes += sdu.buf.length();
+#endif
   sdu_info.sdu                 = std::move(sdu.buf); // Move SDU into TX window SDU info
   sdu_info.is_retx             = sdu.is_retx;
   sdu_info.pdcp_sn             = sdu.pdcp_sn;
@@ -824,12 +826,15 @@ void rlc_tx_am_entity::handle_status_pdu(rlc_am_status_pdu status)
           max_deliv_pdcp_sn = (*tx_window)[sn].pdcp_sn;
         }
       }
+#ifdef JBPF_ENABLED
       tx_window_bytes -= sdu_info.sdu.length();
+#endif
       // move the PDU's byte_buffer from tx_window into pdu_recycler (if possible) for deletion off the critical path.
       if (!pdu_recycler.add_discarded_pdu(std::move(sdu_info.sdu))) {
         // recycle bin is full and the PDU was deleted on the spot, which may slow down this worker. Warn later.
         recycle_bin_full = true;
       }
+      tx_window->remove_sn(sn); // remove the from tx_window
 #ifdef JBPF_ENABLED
       auto latency = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::high_resolution_clock::now() -
                                                                         sdu_info.time_of_arrival);
@@ -839,7 +844,6 @@ void rlc_tx_am_entity::handle_status_pdu(rlc_am_status_pdu status)
         CALL_JBPF_HOOK(hook_rlc_dl_sdu_delivered, max_deliv_pdcp_sn.value(), false, (uint64_t)latency.count());
       }
 #endif
-      tx_window->remove_sn(sn); // remove the from tx_window
       st.tx_next_ack = (sn + 1) % mod;
     } else {
       logger.log_error("Could not find ACK'ed sn={} in TX window.", sn);

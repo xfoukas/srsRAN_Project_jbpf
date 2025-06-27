@@ -68,25 +68,6 @@ struct jbpf_mac_sched_ctx {
     uint16_t rnti; /* UE RNTI */
 };
 
-/* PDCP context */
-
-typedef struct {
-    uint8_t used;      /* Is the window used, 0 = not-used, 1 = used */
-    uint32_t pkts;     /* Total packets */
-    uint32_t bytes;    /* Total bytes*/
-} jbpf_queue_info_t;
-
-struct jbpf_pdcp_ctx_info {
-    uint16_t ctx_id;   /* Context id (could be implementation specific) */
-    uint32_t cu_ue_index;   /* if is_srb=True is cu_cp_ue_index, if is_srb=False is cu_up_ue_index */
-    uint8_t is_srb; /* true=srb, false=drb */
-    uint8_t rb_id;   /* if is_srb=True:    0=srb0, 1=srb1, 2=srb2,
-                        if is_srb=False:   1=drb1, 2=drb2, 3-drb3 ... */
-    uint8_t rlc_mode;  /* 0=UM, 1=AM*/
-
-    // window details
-    jbpf_queue_info_t window_info;  /* Window info */
-};  
 
 /* E1 context info */
 struct jbpf_cucp_e1_ctx_info {
@@ -140,6 +121,13 @@ typedef enum {
     JBPF_RLC_PDUTYPE_MAX
 } JbpfRlcPdu_t;
 
+
+typedef struct {
+    uint8_t used;      /* Is the window used, 0 = not-used, 1 = used */
+    uint32_t pkts;     /* Total packets */
+    uint32_t bytes;    /* Total bytes*/
+} jbpf_queue_info_t;
+
 struct jbpf_rlc_ctx_info {
     uint16_t ctx_id;    /* Context id (could be implementation specific) */
     uint64_t gnb_du_id;
@@ -170,6 +158,21 @@ struct jbpf_rlc_ctx_info {
     } u;
 };
 
+
+/* PDCP context */
+
+struct jbpf_pdcp_ctx_info {
+    uint16_t ctx_id;   /* Context id (could be implementation specific) */
+    uint32_t cu_ue_index;   /* if is_srb=True is cu_cp_ue_index, if is_srb=False is cu_up_ue_index */
+    uint8_t is_srb; /* true=srb, false=drb */
+    uint8_t rb_id;   /* if is_srb=True:    0=srb0, 1=srb1, 2=srb2,
+                        if is_srb=False:   1=drb1, 2=drb2, 3-drb3 ... */
+    uint8_t rlc_mode;  /* 0=UM, 1=AM*/
+
+    // window details
+    jbpf_queue_info_t window_info;  /* Window info */
+};  
+
 typedef enum {
     NGAP_PROCEDURE_INITIAL_CONTEXT_SETUP = 1,
     NGAP_PROCEDURE_UE_CONTEXT_RELEASE,
@@ -179,6 +182,9 @@ typedef enum {
     NGAP_PROCEDURE_RESOURCE_ALLOCATION,
     NGAP_PROCEDURE_MAX
 } JbpfNgapProcedure_t;
+
+
+/* NBAP context */
 
 struct jbpf_ngap_ctx_info {
     uint16_t ctx_id;    /* Context id (could be implementation specific) */
