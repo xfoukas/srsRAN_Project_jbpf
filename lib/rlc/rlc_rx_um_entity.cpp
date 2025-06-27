@@ -38,7 +38,7 @@ using namespace srsran;
                                    : drb_id_to_uint(rb_id.get_drb_id());\
   jbpf_ctx.direction = JBPF_UL; \
   jbpf_ctx.rlc_mode = JBPF_RLC_MODE_UM;   \
-  jbpf_ctx.u.um_rx.window_size = (uint32_t)rx_window->size();   \
+  jbpf_ctx.u.um_rx.window_num_pkts = (uint32_t)rx_window->size();   \
   hook_fn(&jbpf_ctx, ##__VA_ARGS__); \
 }
 

@@ -129,7 +129,7 @@ public:
                                     : drb_id_to_uint(rb_id.get_drb_id());
     jbpf_ctx.direction = JBPF_UL; 
     jbpf_ctx.rlc_mode = JBPF_RLC_MODE_UM;   
-    jbpf_ctx.u.um_rx.window_size = 0;
+    jbpf_ctx.u.um_rx.window_num_pkts = 0;
     hook_rlc_ul_deletion(&jbpf_ctx);
   }
 #endif

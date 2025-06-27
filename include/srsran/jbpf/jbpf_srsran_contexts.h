@@ -124,8 +124,8 @@ typedef enum {
 
 typedef struct {
     uint8_t used;      /* Is the window used, 0 = not-used, 1 = used */
-    uint32_t pkts;     /* Total packets */
-    uint32_t bytes;    /* Total bytes*/
+    uint32_t num_pkts;     /* Total packets */
+    uint32_t num_bytes;    /* Total bytes*/
 } jbpf_queue_info_t;
 
 struct jbpf_rlc_ctx_info {
@@ -150,10 +150,10 @@ struct jbpf_rlc_ctx_info {
             jbpf_queue_info_t window_info;  /* Window info */
         } am_tx;
         struct {
-            uint32_t window_size;  /* Window info */
+            uint32_t window_num_pkts;  /* Window info */
         } um_rx;
         struct {
-            uint32_t window_size;  /* Window info */
+            uint32_t window_num_pkts;  /* Window info */
         } am_rx;
     } u;
 };
