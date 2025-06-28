@@ -120,13 +120,17 @@ public:
 
 #ifdef JBPF_ENABLED
   ~rlc_rx_um_entity() override {
-    {
-      int rb_id_value = rb_id.is_srb() ? srb_id_to_uint(rb_id.get_srb_id()) 
-                                      : drb_id_to_uint(rb_id.get_drb_id());
-      struct jbpf_rlc_ctx_info ctx_info = {0, (uint64_t)gnb_du_id, ue_index, rb_id.is_srb(), 
-        (uint8_t)rb_id_value, JBPF_RLC_MODE_UM};
-      hook_rlc_ul_deletion(&ctx_info);
-    }
+    struct jbpf_rlc_ctx_info jbpf_ctx = {0};
+    jbpf_ctx.ctx_id = 0;
+    jbpf_ctx.gnb_du_id = (uint64_t)gnb_du_id;
+    jbpf_ctx.du_ue_index = ue_index;
+    jbpf_ctx.is_srb = rb_id.is_srb();
+    jbpf_ctx.rb_id = rb_id.is_srb() ? srb_id_to_uint(rb_id.get_srb_id()) 
+                                    : drb_id_to_uint(rb_id.get_drb_id());
+    jbpf_ctx.direction = JBPF_UL; 
+    jbpf_ctx.rlc_mode = JBPF_RLC_MODE_UM;   
+    jbpf_ctx.u.um_rx.window_num_pkts = 0;
+    hook_rlc_ul_deletion(&jbpf_ctx);
   }
 #endif
 

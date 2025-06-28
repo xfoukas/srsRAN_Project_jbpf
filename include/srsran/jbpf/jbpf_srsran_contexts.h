@@ -17,6 +17,11 @@ typedef enum {
     JBPF_PROG_TYPE_RAN_GENERIC    
 } jbpf_srsran_index_e;
 
+typedef enum {
+    JBPF_DL = 0,
+    JBPF_UL
+} JbpfDirection_t;
+
 /* OFH context*/
 struct jbpf_ran_ofh_ctx {
   uint64_t data; /* Pointer to beginning of buffer with int16_t IQ samples */
@@ -25,7 +30,7 @@ struct jbpf_ran_ofh_ctx {
   /* Combination of frame, slot and cell_id, provide a unique
      context for an execution pipeline */
   uint16_t ctx_id; /* Context id (could be implementation specific) */
-  uint8_t direction; /* 0 DL, 1 UL */
+  JbpfDirection_t direction; /* 0 DL, 1 UL */
 };
 
 /* L2 context*/
@@ -63,15 +68,6 @@ struct jbpf_mac_sched_ctx {
     uint16_t rnti; /* UE RNTI */
 };
 
-/* PDCP context */
-struct jbpf_pdcp_ctx_info {
-    uint16_t ctx_id;   /* Context id (could be implementation specific) */
-    uint32_t cu_ue_index;   /* if is_srb=True is cu_cp_ue_index, if is_srb=False is cu_up_ue_index */
-    uint8_t is_srb; /* true=srb, false=drb */
-    uint8_t rb_id;   /* if is_srb=True:    0=srb0, 1=srb1, 2=srb2,
-                        if is_srb=False:   1=drb1, 2=drb2, 3-drb3 ... */
-    uint8_t rlc_mode;  /* 0=UM, 1=AM*/
-};
 
 /* E1 context info */
 struct jbpf_cucp_e1_ctx_info {
@@ -125,6 +121,13 @@ typedef enum {
     JBPF_RLC_PDUTYPE_MAX
 } JbpfRlcPdu_t;
 
+
+typedef struct {
+    uint8_t used;      /* Is the window used, 0 = not-used, 1 = used */
+    uint32_t num_pkts;     /* Total packets */
+    uint32_t num_bytes;    /* Total bytes*/
+} jbpf_queue_info_t;
+
 struct jbpf_rlc_ctx_info {
     uint16_t ctx_id;    /* Context id (could be implementation specific) */
     uint64_t gnb_du_id;
@@ -132,12 +135,43 @@ struct jbpf_rlc_ctx_info {
     uint8_t is_srb;  /* true=srb, false=drb */
     uint8_t rb_id;   /* if is_srb=True:    0=srb0, 1=srb1, 2=srb2,
                      if is_srb=False:      1=drb1, 2=drb2, 3-drb3 ... */
+    JbpfDirection_t direction; /* 0 DL, 1 UL */
     JbpfRlcMode_t rlc_mode;  /* 0=TM, 1=UM, 2=AM*/
-    struct  {
-        uint32_t n_sdus;  ///< Number of buffered SDUs that are not marked as discarded.
-        uint32_t n_bytes; ///< Number of buffered bytes that are not marked as discarded.
-    } sdu_queue_info;
+
+    union {
+        struct {
+            jbpf_queue_info_t sdu_queue_info; /* SDU queue info */
+        } tm_tx;
+        struct {
+            jbpf_queue_info_t sdu_queue_info; /* SDU queue info */
+        } um_tx;
+        struct {
+            jbpf_queue_info_t sdu_queue_info; /* SDU queue info */
+            jbpf_queue_info_t window_info;  /* Window info */
+        } am_tx;
+        struct {
+            uint32_t window_num_pkts;  /* Window info */
+        } um_rx;
+        struct {
+            uint32_t window_num_pkts;  /* Window info */
+        } am_rx;
+    } u;
 };
+
+
+/* PDCP context */
+
+struct jbpf_pdcp_ctx_info {
+    uint16_t ctx_id;   /* Context id (could be implementation specific) */
+    uint32_t cu_ue_index;   /* if is_srb=True is cu_cp_ue_index, if is_srb=False is cu_up_ue_index */
+    uint8_t is_srb; /* true=srb, false=drb */
+    uint8_t rb_id;   /* if is_srb=True:    0=srb0, 1=srb1, 2=srb2,
+                        if is_srb=False:   1=drb1, 2=drb2, 3-drb3 ... */
+    uint8_t rlc_mode;  /* 0=UM, 1=AM*/
+
+    // window details
+    jbpf_queue_info_t window_info;  /* Window info */
+};  
 
 typedef enum {
     NGAP_PROCEDURE_INITIAL_CONTEXT_SETUP = 1,
@@ -148,6 +182,9 @@ typedef enum {
     NGAP_PROCEDURE_RESOURCE_ALLOCATION,
     NGAP_PROCEDURE_MAX
 } JbpfNgapProcedure_t;
+
+
+/* NBAP context */
 
 struct jbpf_ngap_ctx_info {
     uint16_t ctx_id;    /* Context id (could be implementation specific) */

@@ -80,12 +80,16 @@ public:
 
 #ifdef JBPF_ENABLED 
   ~pdcp_entity_rx() override {
-      {
-        int rb_id_value = rb_id.is_srb() ? srb_id_to_uint(rb_id.get_srb_id()) 
-                                    : drb_id_to_uint(rb_id.get_drb_id());
-        struct jbpf_pdcp_ctx_info bearer_info = {0, ue_index, rb_id.is_srb(), (uint8_t)rb_id_value, (uint8_t)rlc_mode};                                         
-        hook_pdcp_ul_deletion(&bearer_info);
-      }
+      struct jbpf_pdcp_ctx_info jbpf_ctx = {0};
+
+      jbpf_ctx.ctx_id = 0;    /* Context id (could be implementation specific) */
+      jbpf_ctx.cu_ue_index = ue_index;
+      jbpf_ctx.is_srb = rb_id.is_srb();
+      jbpf_ctx.rb_id = rb_id.is_srb() ? srb_id_to_uint(rb_id.get_srb_id()) 
+                                      : drb_id_to_uint(rb_id.get_drb_id());
+      jbpf_ctx.rlc_mode = (uint8_t)rlc_mode; 
+      jbpf_ctx.window_info = {true, 0, 0};
+      hook_pdcp_ul_deletion(&jbpf_ctx);
   }
 #endif
 
@@ -144,6 +148,9 @@ private:
 
   /// Rx window
   std::unique_ptr<sdu_window<pdcp_rx_sdu_info>> rx_window;
+#ifdef JBPF_ENABLED
+  uint32_t rx_window_bytes = 0;
+#endif  
 
   /// Rx reordering timer
   unique_timer reordering_timer;

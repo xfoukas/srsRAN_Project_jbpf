@@ -32,6 +32,21 @@ DEFINE_JBPF_HOOK(rlc_ul_deletion);
 DEFINE_JBPF_HOOK(rlc_ul_rx_pdu);
 DEFINE_JBPF_HOOK(rlc_ul_sdu_recv_started);
 DEFINE_JBPF_HOOK(rlc_ul_sdu_delivered);
+
+#define CALL_JBPF_HOOK(hook_fn, ...)  {                          \
+    struct jbpf_rlc_ctx_info jbpf_ctx = {0};\
+    jbpf_ctx.ctx_id = 0;    \
+    jbpf_ctx.gnb_du_id = (uint64_t)gnb_du_id;\
+    jbpf_ctx.du_ue_index = ue_index;\
+    jbpf_ctx.is_srb = rb_id.is_srb();\
+    jbpf_ctx.rb_id = rb_id.is_srb() ? srb_id_to_uint(rb_id.get_srb_id()) \
+                                    : drb_id_to_uint(rb_id.get_drb_id());\
+    jbpf_ctx.direction = JBPF_UL; \
+    jbpf_ctx.rlc_mode = JBPF_RLC_MODE_AM; \
+    jbpf_ctx.u.am_rx.window_num_pkts = (uint32_t)rx_window->size();   \
+    hook_fn(&jbpf_ctx, ##__VA_ARGS__);\
+}
+
 #endif
 
 using namespace srsran;
@@ -96,15 +111,8 @@ rlc_rx_am_entity::rlc_rx_am_entity(gnb_du_id_t                       gnb_du_id_,
   logger.log_info("RLC AM configured. {}", cfg);
 
 #ifdef JBPF_ENABLED
-  {
-    int rb_id_value = rb_id.is_srb() ? srb_id_to_uint(rb_id.get_srb_id()) 
-                                    : drb_id_to_uint(rb_id.get_drb_id());
-    struct jbpf_rlc_ctx_info ctx_info = {0, (uint64_t)gnb_du_id, ue_index, rb_id.is_srb(), 
-      (uint8_t)rb_id_value, JBPF_RLC_MODE_AM};
-    hook_rlc_ul_creation(&ctx_info);
-  }
+  CALL_JBPF_HOOK(hook_rlc_ul_creation);
 #endif
-
 }
 
 // Interfaces for lower layers
@@ -244,13 +252,7 @@ void rlc_rx_am_entity::handle_data_pdu(byte_buffer_slice buf)
                                                                           sdu_info.time_of_arrival);
 
 #ifdef JBPF_ENABLED
-      {
-        int rb_id_value = rb_id.is_srb() ? srb_id_to_uint(rb_id.get_srb_id()) 
-                                        : drb_id_to_uint(rb_id.get_drb_id());
-        struct jbpf_rlc_ctx_info ctx_info = {0, (uint64_t)gnb_du_id, ue_index, rb_id.is_srb(), 
-          (uint8_t)rb_id_value, JBPF_RLC_MODE_AM};
-        hook_rlc_ul_sdu_delivered(&ctx_info, header.sn, rx_window->size(), sdu.value().length());
-      }
+      CALL_JBPF_HOOK(hook_rlc_ul_sdu_delivered, header.sn, sdu.value().length(), latency.count());
 #endif
 
       metrics.metrics_add_sdu_latency(latency.count() / 1000);
@@ -364,13 +366,7 @@ void rlc_rx_am_entity::handle_data_pdu(byte_buffer_slice buf)
   }
 
 #ifdef JBPF_ENABLED
-  {
-    int rb_id_value = rb_id.is_srb() ? srb_id_to_uint(rb_id.get_srb_id()) 
-                                    : drb_id_to_uint(rb_id.get_drb_id());
-    struct jbpf_rlc_ctx_info ctx_info = {0, (uint64_t)gnb_du_id, ue_index, rb_id.is_srb(), 
-      (uint8_t)rb_id_value, JBPF_RLC_MODE_AM};
-    hook_rlc_ul_rx_pdu(&ctx_info, JBPF_RLC_PDUTYPE_DATA, (uint32_t)buf.length(), rx_window->size());
-  }
+  CALL_JBPF_HOOK(hook_rlc_ul_rx_pdu, JBPF_RLC_PDUTYPE_DATA, (uint32_t)buf.length());
 #endif
 }
 
@@ -392,13 +388,7 @@ bool rlc_rx_am_entity::handle_full_data_sdu(const rlc_am_pdu_header& header, byt
   })();
 
 #ifdef JBPF_ENABLED
-  {
-    int rb_id_value = rb_id.is_srb() ? srb_id_to_uint(rb_id.get_srb_id()) 
-                                    : drb_id_to_uint(rb_id.get_drb_id());
-    struct jbpf_rlc_ctx_info ctx_info = {0, (uint64_t)gnb_du_id, ue_index, rb_id.is_srb(), 
-      (uint8_t)rb_id_value, JBPF_RLC_MODE_AM};
-    hook_rlc_ul_sdu_recv_started(&ctx_info, header.sn, rx_window->size());
-  }
+  CALL_JBPF_HOOK(hook_rlc_ul_sdu_recv_started, header.sn);
 #endif
 
   // Store the full SDU and flag it as complete.
@@ -426,13 +416,7 @@ bool rlc_rx_am_entity::handle_segment_data_sdu(const rlc_am_pdu_header& header, 
   })();
 
 #ifdef JBPF_ENABLED
-  {
-    int rb_id_value = rb_id.is_srb() ? srb_id_to_uint(rb_id.get_srb_id()) 
-                                    : drb_id_to_uint(rb_id.get_drb_id());
-    struct jbpf_rlc_ctx_info ctx_info = {0, (uint64_t)gnb_du_id, ue_index, rb_id.is_srb(), 
-      (uint8_t)rb_id_value, JBPF_RLC_MODE_AM};
-    hook_rlc_ul_sdu_recv_started(&ctx_info, header.sn, rx_window->size());
-  }
+  CALL_JBPF_HOOK(hook_rlc_ul_sdu_recv_started, header.sn);
 #endif
 
   // Create SDU segment, to be stored later

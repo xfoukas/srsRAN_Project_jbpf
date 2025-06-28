@@ -34,6 +34,20 @@ DEFINE_JBPF_HOOK(pdcp_ul_rx_data_pdu);
 DEFINE_JBPF_HOOK(pdcp_ul_rx_control_pdu);
 DEFINE_JBPF_HOOK(pdcp_ul_deliver_sdu);
 DEFINE_JBPF_HOOK(pdcp_ul_reestablish);
+
+#define CALL_JBPF_HOOK(hook_fn, ...)  \
+  { \
+      struct jbpf_pdcp_ctx_info jbpf_ctx = {0};\
+      jbpf_ctx.ctx_id = 0; \
+      jbpf_ctx.cu_ue_index = ue_index;\
+      jbpf_ctx.is_srb = rb_id.is_srb();\
+      jbpf_ctx.rb_id = rb_id.is_srb() ? srb_id_to_uint(rb_id.get_srb_id()) \
+                                      : drb_id_to_uint(rb_id.get_drb_id());\
+      jbpf_ctx.rlc_mode = (uint8_t)rlc_mode; \
+      jbpf_ctx.window_info = {true,(uint32_t)rx_window->size(), rx_window_bytes}; \
+      hook_fn(&jbpf_ctx, ##__VA_ARGS__); \
+  }
+
 #endif
 
 using namespace srsran;
@@ -76,12 +90,7 @@ pdcp_entity_rx::pdcp_entity_rx(uint32_t                        ue_index_,
   (void)crypto_executor;
 
 #ifdef JBPF_ENABLED 
-  {
-    int rb_id_value = rb_id.is_srb() ? srb_id_to_uint(rb_id.get_srb_id()) 
-                                : drb_id_to_uint(rb_id.get_drb_id());
-    struct jbpf_pdcp_ctx_info bearer_info = {0, ue_index, rb_id.is_srb(), (uint8_t)rb_id_value, (uint8_t)rlc_mode};                                         
-    hook_pdcp_ul_creation(&bearer_info);
-  }
+  CALL_JBPF_HOOK(hook_pdcp_ul_creation);
 #endif 
 }
 
@@ -122,12 +131,7 @@ void pdcp_entity_rx::reestablish(security::sec_128_as_config sec_cfg)
   //   as specified in the clause 5.2.2.1;
 
 #ifdef JBPF_ENABLED 
-  {
-    int rb_id_value = rb_id.is_srb() ? srb_id_to_uint(rb_id.get_srb_id()) 
-                                    : drb_id_to_uint(rb_id.get_drb_id());
-    struct jbpf_pdcp_ctx_info bearer_info = {0, ue_index, rb_id.is_srb(), (uint8_t)rb_id_value, (uint8_t)rlc_mode};                                         
-    hook_pdcp_ul_reestablish(&bearer_info);
-  }
+  CALL_JBPF_HOOK(hook_pdcp_ul_reestablish);
 #endif
 
   // - for SRBs, discard all stored PDCP SDUs and PDCP PDUs;
@@ -269,13 +273,20 @@ void pdcp_entity_rx::handle_data_pdu(byte_buffer pdu)
       return; // PDU already present, drop.
     } else {
       logger.log_error("Removing old PDU with count={} for new PDU with count={}", sdu_info.count, rcvd_count);
+#ifdef JBPF_ENABLED
+      rx_window_bytes -= sdu_info.sdu.length();
+#endif
       rx_window->remove_sn(rcvd_count);
     }
   }
 
   // Store PDU in Rx window
   pdcp_rx_sdu_info& sdu_info = rx_window->add_sn(rcvd_count);
-  sdu_info.sdu               = std::move(pdu);
+#ifdef JBPF_ENABLED
+  rx_window_bytes += pdu.length();
+#endif
+
+  sdu_info.sdu               = std::move(pdu);  
   sdu_info.count             = rcvd_count;
 
   // Update RX_NEXT
@@ -284,12 +295,7 @@ void pdcp_entity_rx::handle_data_pdu(byte_buffer pdu)
   }
 
 #ifdef JBPF_ENABLED 
-  {
-    int rb_id_value = rb_id.is_srb() ? srb_id_to_uint(rb_id.get_srb_id()) 
-                                    : drb_id_to_uint(rb_id.get_drb_id());
-    struct jbpf_pdcp_ctx_info bearer_info = {0, ue_index, rb_id.is_srb(), (uint8_t)rb_id_value, (uint8_t)rlc_mode};                                         
-    hook_pdcp_ul_rx_data_pdu(&bearer_info, sdu_info.sdu.length(), hdr_len_bytes, rcvd_count, rx_window->size());
-  }
+  CALL_JBPF_HOOK(hook_pdcp_ul_rx_data_pdu, sdu_info.sdu.length(), hdr_len_bytes, rcvd_count);
 #endif
 
   // TODO if out-of-order configured, submit to upper layer
@@ -334,13 +340,8 @@ void pdcp_entity_rx::handle_control_pdu(byte_buffer_chain pdu)
   pdcp_dc_field dc = pdcp_pdu_get_dc(hdr_byte);
   srsran_assert(dc == pdcp_dc_field::control, "Invalid D/C field in control PDU. dc={}", dc);
 
-#ifdef JBPF_ENABLED 
-  {
-    int rb_id_value = rb_id.is_srb() ? srb_id_to_uint(rb_id.get_srb_id()) 
-                                    : drb_id_to_uint(rb_id.get_drb_id());
-    struct jbpf_pdcp_ctx_info bearer_info = {0, ue_index, rb_id.is_srb(), (uint8_t)rb_id_value, (uint8_t)rlc_mode};                                         
-    hook_pdcp_ul_rx_control_pdu(&bearer_info, pdu.length(), rx_window->size());
-  }
+#ifdef JBPF_ENABLED
+  CALL_JBPF_HOOK(hook_pdcp_ul_rx_control_pdu, pdu.length());
 #endif
 
   // Switch control PDU type (CPT)
@@ -367,16 +368,14 @@ void pdcp_entity_rx::deliver_all_consecutive_counts()
     metrics_add_sdus(1, sdu_info.sdu.length());
 
 #ifdef JBPF_ENABLED
-    {
-      int rb_id_value = rb_id.is_srb() ? srb_id_to_uint(rb_id.get_srb_id()) 
-                                      : drb_id_to_uint(rb_id.get_drb_id());
-      struct jbpf_pdcp_ctx_info bearer_info = {0, ue_index, rb_id.is_srb(), (uint8_t)rb_id_value, (uint8_t)rlc_mode};                                         
-      hook_pdcp_ul_deliver_sdu(&bearer_info, sdu_info.sdu.length(), rx_window->size());
-    }
+    auto sdu_length = sdu_info.sdu.length();
 #endif
-
     upper_dn.on_new_sdu(std::move(sdu_info.sdu));
     rx_window->remove_sn(st.rx_deliv);
+#ifdef JBPF_ENABLED
+    rx_window_bytes -= sdu_length;
+    CALL_JBPF_HOOK(hook_pdcp_ul_deliver_sdu, sdu_length);
+#endif
 
     // Update RX_DELIV
     st.rx_deliv = st.rx_deliv + 1;
@@ -397,17 +396,14 @@ void pdcp_entity_rx::deliver_all_sdus()
       metrics_add_sdus(1, sdu_info.sdu.length());
 
 #ifdef JBPF_ENABLED
-    {
-      int rb_id_value = rb_id.is_srb() ? srb_id_to_uint(rb_id.get_srb_id()) 
-                                      : drb_id_to_uint(rb_id.get_drb_id());
-      struct jbpf_pdcp_ctx_info bearer_info = {0, ue_index, rb_id.is_srb(), (uint8_t)rb_id_value, (uint8_t)rlc_mode};
-      hook_pdcp_ul_deliver_sdu(&bearer_info, sdu_info.sdu.length(), rx_window->size());
-    }
+      auto sdu_length = sdu_info.sdu.length();
 #endif
-
       upper_dn.on_new_sdu(std::move(sdu_info.sdu));
-        
       rx_window->remove_sn(count);
+#ifdef JBPF_ENABLED
+      rx_window_bytes -= sdu_length;
+      CALL_JBPF_HOOK(hook_pdcp_ul_deliver_sdu, sdu_length);
+#endif
     }
   }
 }
@@ -417,6 +413,11 @@ void pdcp_entity_rx::discard_all_sdus()
 {
   while (st.rx_deliv != st.rx_next) {
     if (rx_window->has_sn(st.rx_deliv)) {
+
+#ifdef JBPF_ENABLED
+      pdcp_rx_sdu_info& sdu_info = (*rx_window)[st.rx_deliv];
+      rx_window_bytes -= sdu_info.sdu.length();
+#endif
       rx_window->remove_sn(st.rx_deliv);
       logger.log_debug("Discarded RX SDU. count={}", st.rx_next);
     }
@@ -425,6 +426,10 @@ void pdcp_entity_rx::discard_all_sdus()
     st.rx_deliv = st.rx_deliv + 1;
   }
 }
+
+
+
+
 
 byte_buffer pdcp_entity_rx::compile_status_report()
 {
@@ -609,16 +614,14 @@ void pdcp_entity_rx::handle_t_reordering_expire()
       metrics_add_sdus(1, sdu_info.sdu.length());
 
 #ifdef JBPF_ENABLED
-    {
-      int rb_id_value = rb_id.is_srb() ? srb_id_to_uint(rb_id.get_srb_id()) 
-                                      : drb_id_to_uint(rb_id.get_drb_id());
-      struct jbpf_pdcp_ctx_info bearer_info = {0, ue_index, rb_id.is_srb(), (uint8_t)rb_id_value, (uint8_t)rlc_mode};                                         
-      hook_pdcp_ul_deliver_sdu(&bearer_info, sdu_info.sdu.length(), rx_window->size());
-    }
+    auto sdu_length = sdu_info.sdu.length();
 #endif
-
       upper_dn.on_new_sdu(std::move(sdu_info.sdu));
       rx_window->remove_sn(st.rx_deliv);
+#ifdef JBPF_ENABLED
+      rx_window_bytes -= sdu_length;
+      CALL_JBPF_HOOK(hook_pdcp_ul_deliver_sdu, sdu_length);
+#endif
     }
 
     // Update RX_DELIV

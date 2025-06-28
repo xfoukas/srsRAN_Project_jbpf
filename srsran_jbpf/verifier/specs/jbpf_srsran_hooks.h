@@ -92,7 +92,7 @@ DECLARE_JBPF_HOOK(capture_xran_packet,
 			      const void* xran_packet,
 			      uint32_t packet_len, 
 			      uint16_t ctx_id,
-				  uint8_t direction
+				  JbpfDirection_t direction
 			      ),
 		   HOOK_ASSIGN(
 			       ctx.ctx_id = ctx_id;
@@ -259,14 +259,12 @@ DECLARE_JBPF_HOOK(pdcp_dl_new_sdu,
     ctx,
     HOOK_PROTO(
         struct jbpf_pdcp_ctx_info *bearer,
-        uint32_t sdu_length,
         uint32_t count,
-        uint32_t window_size),
+        uint32_t sdu_length),
     HOOK_ASSIGN(
         ctx.data = (uint64_t)bearer;
         ctx.data_end = (uint64_t) ((uint8_t*)bearer + sizeof(struct jbpf_pdcp_ctx_info));
-        ctx.srs_meta_data1 = (uint64_t)sdu_length << 32 | count;
-        ctx.srs_meta_data2 = window_size;
+        ctx.srs_meta_data1 = (uint64_t)count << 32 | sdu_length; 
     )
 )
 
@@ -279,12 +277,14 @@ DECLARE_JBPF_HOOK(pdcp_dl_tx_data_pdu,
         uint32_t pdu_length,
         uint32_t count,
         uint8_t is_retx,
-        uint32_t window_size),
+        uint8_t latency_set,
+        uint64_t latency_ns), // from sdu-arrival to transmission of the PDU
     HOOK_ASSIGN(
         ctx.data = (uint64_t)bearer;
         ctx.data_end = (uint64_t) ((uint8_t*)bearer + sizeof(struct jbpf_pdcp_ctx_info));
         ctx.srs_meta_data1 = (uint64_t)pdu_length << 32 | count;
-        ctx.srs_meta_data2 = (uint64_t)is_retx << 32 | window_size;
+        ctx.srs_meta_data2 = (uint64_t)is_retx << 32 | latency_set;
+        ctx.srs_meta_data3 = latency_ns; 
     )
 )
 
@@ -294,12 +294,11 @@ DECLARE_JBPF_HOOK(pdcp_dl_tx_control_pdu,
     ctx,
     HOOK_PROTO(
         struct jbpf_pdcp_ctx_info *bearer,
-        uint32_t sdu_length,
-        uint32_t window_size),
+        uint32_t pdu_length),
     HOOK_ASSIGN(
         ctx.data = (uint64_t)bearer;
         ctx.data_end = (uint64_t) ((uint8_t*)bearer + sizeof(struct jbpf_pdcp_ctx_info));
-        ctx.srs_meta_data1 = (uint64_t)sdu_length << 32 | window_size;
+        ctx.srs_meta_data1 = (uint64_t)pdu_length;
     )
 )
 
@@ -314,12 +313,11 @@ DECLARE_JBPF_HOOK(pdcp_dl_handle_tx_notification,
     ctx,
     HOOK_PROTO(
         struct jbpf_pdcp_ctx_info *bearer,
-        uint32_t notif_count,
-        uint32_t window_size),
+        uint32_t notif_sn),         
     HOOK_ASSIGN(
         ctx.data = (uint64_t)bearer;
         ctx.data_end = (uint64_t) ((uint8_t*)bearer + sizeof(struct jbpf_pdcp_ctx_info));
-        ctx.srs_meta_data1 = (uint64_t)notif_count << 32 | window_size;
+        ctx.srs_meta_data1 = notif_sn;
     )
 )
 
@@ -336,12 +334,11 @@ DECLARE_JBPF_HOOK(pdcp_dl_handle_delivery_notification,
     ctx,
     HOOK_PROTO(
         struct jbpf_pdcp_ctx_info *bearer,
-        uint32_t notif_count,
-        uint32_t window_size),
+        uint32_t notif_sn), 
     HOOK_ASSIGN(
         ctx.data = (uint64_t)bearer;
         ctx.data_end = (uint64_t) ((uint8_t*)bearer + sizeof(struct jbpf_pdcp_ctx_info));
-        ctx.srs_meta_data1 = (uint64_t)notif_count << 32 | window_size;
+        ctx.srs_meta_data1 = notif_sn; 
     )
 )
 
@@ -351,12 +348,11 @@ DECLARE_JBPF_HOOK(pdcp_dl_discard_pdu,
     ctx,
     HOOK_PROTO(
         struct jbpf_pdcp_ctx_info *bearer,
-        uint32_t count,
-        uint32_t window_size),
+        uint32_t count),
     HOOK_ASSIGN(
         ctx.data = (uint64_t)bearer;
         ctx.data_end = (uint64_t) ((uint8_t*)bearer + sizeof(struct jbpf_pdcp_ctx_info));
-        ctx.srs_meta_data1 = (uint64_t)count << 32 | window_size;
+        ctx.srs_meta_data1 = count;
     )
 )
 
@@ -380,13 +376,12 @@ DECLARE_JBPF_HOOK(pdcp_ul_rx_data_pdu,
         struct jbpf_pdcp_ctx_info *bearer,
         uint32_t sdu_length,
         uint32_t header_length,
-        uint32_t count,
-        uint32_t window_size),
+        uint32_t count),
     HOOK_ASSIGN(
         ctx.data = (uint64_t)bearer;
         ctx.data_end = (uint64_t) ((uint8_t*)bearer + sizeof(struct jbpf_pdcp_ctx_info));
         ctx.srs_meta_data1 = (uint64_t)sdu_length << 32 | header_length;
-        ctx.srs_meta_data2 = (uint64_t)count << 32 | window_size;
+        ctx.srs_meta_data2 = (uint64_t)count;
     )
 )
 
@@ -396,12 +391,11 @@ DECLARE_JBPF_HOOK(pdcp_ul_rx_control_pdu,
     ctx,
     HOOK_PROTO(
         struct jbpf_pdcp_ctx_info *bearer,
-        uint32_t pdu_length,
-        uint32_t window_size),
+        uint32_t pdu_length),
     HOOK_ASSIGN(
         ctx.data = (uint64_t)bearer;
         ctx.data_end = (uint64_t) ((uint8_t*)bearer + sizeof(struct jbpf_pdcp_ctx_info));
-        ctx.srs_meta_data1 = (uint64_t)pdu_length << 32 | window_size;
+        ctx.srs_meta_data1 = (uint64_t)pdu_length;
     )
 )
 
@@ -435,12 +429,11 @@ DECLARE_JBPF_HOOK(pdcp_ul_deliver_sdu,
     ctx,
     HOOK_PROTO(
         struct jbpf_pdcp_ctx_info *bearer,
-        uint32_t sdu_length,
-        uint32_t window_size),
+        uint32_t sdu_length),
     HOOK_ASSIGN(
         ctx.data = (uint64_t)bearer;
         ctx.data_end = (uint64_t) ((uint8_t*)bearer + sizeof(struct jbpf_pdcp_ctx_info));
-        ctx.srs_meta_data1 = (uint64_t)sdu_length << 32 | window_size;
+        ctx.srs_meta_data1 = (uint64_t)sdu_length ;
     )
 )
 
@@ -757,18 +750,37 @@ DECLARE_JBPF_HOOK(rlc_dl_deletion,
     )
 )
 
-// trigger: new SDU received from upper layer
+// trigger: SDU received from upper layer
 DECLARE_JBPF_HOOK(rlc_dl_new_sdu,
     struct jbpf_ran_generic_ctx ctx,
     ctx,
     HOOK_PROTO(
         struct jbpf_rlc_ctx_info *info,
         uint32_t sdu_length,
-        uint32_t pdcp_sn),
+        uint32_t pdcp_sn,
+        uint8_t is_retx),
     HOOK_ASSIGN(
         ctx.data = (uint64_t)info;
         ctx.data_end = (uint64_t) ((uint8_t*)info + sizeof(struct jbpf_rlc_ctx_info));
         ctx.srs_meta_data1 = (uint64_t)sdu_length << 32 | pdcp_sn;
+        ctx.srs_meta_data2 = is_retx; // is_retx indicates if this SDU is a retransmission
+    )
+)
+
+// trigger: SDU received from upper layer which is dropped
+DECLARE_JBPF_HOOK(rlc_dl_lost_sdu,
+    struct jbpf_ran_generic_ctx ctx,
+    ctx,
+    HOOK_PROTO(
+        struct jbpf_rlc_ctx_info *info,
+        uint32_t sdu_length,
+        uint32_t pdcp_sn,
+        uint8_t is_retx),
+    HOOK_ASSIGN(
+        ctx.data = (uint64_t)info;
+        ctx.data_end = (uint64_t) ((uint8_t*)info + sizeof(struct jbpf_rlc_ctx_info));
+        ctx.srs_meta_data1 = (uint64_t)sdu_length << 32 | pdcp_sn;
+        ctx.srs_meta_data2 = is_retx; // is_retx indicates if this SDU is a retransmission
     )
 )
 
@@ -778,11 +790,12 @@ DECLARE_JBPF_HOOK(rlc_dl_discard_sdu,
     ctx,
     HOOK_PROTO(
         struct jbpf_rlc_ctx_info *info,
-        uint32_t pdcp_sn),
+        uint32_t pdcp_sn,
+        bool success),
     HOOK_ASSIGN(
         ctx.data = (uint64_t)info;
         ctx.data_end = (uint64_t) ((uint8_t*)info + sizeof(struct jbpf_rlc_ctx_info));
-        ctx.srs_meta_data1 = pdcp_sn;
+        ctx.srs_meta_data1 = (uint64_t)pdcp_sn << 32 | success;
     )
 )
 
@@ -793,11 +806,13 @@ DECLARE_JBPF_HOOK(rlc_dl_sdu_send_started,
     HOOK_PROTO(
         struct jbpf_rlc_ctx_info *info,
         uint32_t pdcp_sn,
-        bool is_retx),
+        bool is_retx,
+        uint64_t latency_ns),   /* this is ns from sdu-arrival time to start of SDU transmission*/
     HOOK_ASSIGN(
         ctx.data = (uint64_t)info;
         ctx.data_end = (uint64_t) ((uint8_t*)info + sizeof(struct jbpf_rlc_ctx_info));
         ctx.srs_meta_data1 = (uint64_t)pdcp_sn << 32 | is_retx;
+        ctx.srs_meta_data2 = latency_ns; 
     )
 )
 
@@ -808,11 +823,13 @@ DECLARE_JBPF_HOOK(rlc_dl_sdu_send_completed,
     HOOK_PROTO(
         struct jbpf_rlc_ctx_info *info,
         uint32_t pdcp_sn,
-        bool is_retx),
+        bool is_retx,
+        uint64_t latency_ns),   /* this is ns from sdu-arrival time to end of SDU transmission*/
     HOOK_ASSIGN(
         ctx.data = (uint64_t)info;
         ctx.data_end = (uint64_t) ((uint8_t*)info + sizeof(struct jbpf_rlc_ctx_info));
         ctx.srs_meta_data1 = (uint64_t)pdcp_sn << 32 | is_retx;
+        ctx.srs_meta_data2 = latency_ns; 
     )
 )
 
@@ -823,11 +840,13 @@ DECLARE_JBPF_HOOK(rlc_dl_sdu_delivered,
     HOOK_PROTO(
         struct jbpf_rlc_ctx_info *info,
         uint32_t pdcp_sn,
-        bool is_retx),
+        bool is_retx,
+        uint64_t latency_ns),   /* this is ns from sdu-arrival time to SDU delivery notification*/
     HOOK_ASSIGN(
         ctx.data = (uint64_t)info;
         ctx.data_end = (uint64_t) ((uint8_t*)info + sizeof(struct jbpf_rlc_ctx_info));
         ctx.srs_meta_data1 = (uint64_t)pdcp_sn << 32 | is_retx;
+        ctx.srs_meta_data2 = latency_ns; 
     )
 )
 
@@ -838,13 +857,11 @@ DECLARE_JBPF_HOOK(rlc_dl_tx_pdu,
     HOOK_PROTO(
         struct jbpf_rlc_ctx_info *info,
         JbpfRlcPdu_t pdu_type,
-        uint32_t pdu_len,
-        uint16_t window_size),
+        uint32_t pdu_len),
     HOOK_ASSIGN(
         ctx.data = (uint64_t)info;
         ctx.data_end = (uint64_t) ((uint8_t*)info + sizeof(struct jbpf_rlc_ctx_info));
         ctx.srs_meta_data1 = (uint64_t)pdu_type << 32 | pdu_len;
-        ctx.srs_meta_data2 = window_size;
     )
 )
 
@@ -853,12 +870,10 @@ DECLARE_JBPF_HOOK(rlc_dl_rx_status,
     struct jbpf_ran_generic_ctx ctx,
     ctx,
     HOOK_PROTO(
-        struct jbpf_rlc_ctx_info *info,
-        uint16_t window_size),
+        struct jbpf_rlc_ctx_info *info),
     HOOK_ASSIGN(
         ctx.data = (uint64_t)info;
         ctx.data_end = (uint64_t) ((uint8_t*)info + sizeof(struct jbpf_rlc_ctx_info));
-        ctx.srs_meta_data1 = window_size;
     )
 )
 
@@ -869,14 +884,12 @@ DECLARE_JBPF_HOOK(rlc_dl_am_tx_pdu_retx_count,
     ctx,
     HOOK_PROTO(
         struct jbpf_rlc_ctx_info *info,
-        uint16_t window_size,
         uint32_t sn,
         uint32_t retx_count),
     HOOK_ASSIGN(
         ctx.data = (uint64_t)info;
         ctx.data_end = (uint64_t) ((uint8_t*)info + sizeof(struct jbpf_rlc_ctx_info));
-        ctx.srs_meta_data1 = window_size;
-        ctx.srs_meta_data2 = (uint64_t)sn << 32 | retx_count;
+        ctx.srs_meta_data1 = (uint64_t)sn << 32 | retx_count;
     )
 )
 
@@ -886,14 +899,12 @@ DECLARE_JBPF_HOOK(rlc_dl_am_tx_pdu_max_retx_count_reached,
     ctx,
     HOOK_PROTO(
         struct jbpf_rlc_ctx_info *info,
-        uint16_t window_size,
         uint32_t sn,
         uint32_t retx_count),
     HOOK_ASSIGN(
         ctx.data = (uint64_t)info;
         ctx.data_end = (uint64_t) ((uint8_t*)info + sizeof(struct jbpf_rlc_ctx_info));
-        ctx.srs_meta_data1 = window_size;
-        ctx.srs_meta_data2 = (uint64_t)sn << 32 | retx_count;
+        ctx.srs_meta_data1 = (uint64_t)sn << 32 | retx_count;
     )
 )
 
@@ -928,13 +939,11 @@ DECLARE_JBPF_HOOK(rlc_ul_rx_pdu,
     HOOK_PROTO(
         struct jbpf_rlc_ctx_info *info,
         JbpfRlcPdu_t pdu_type,
-        uint32_t pdu_len,
-        uint16_t window_size),
+        uint32_t pdu_len),
     HOOK_ASSIGN(
         ctx.data = (uint64_t)info;
         ctx.data_end = (uint64_t) ((uint8_t*)info + sizeof(struct jbpf_rlc_ctx_info));
         ctx.srs_meta_data1 = (uint64_t)pdu_type << 32 | pdu_len;
-        ctx.srs_meta_data2 = window_size;
     )
 )
 
@@ -944,12 +953,11 @@ DECLARE_JBPF_HOOK(rlc_ul_sdu_recv_started,
     ctx,
     HOOK_PROTO(
         struct jbpf_rlc_ctx_info *info,
-        uint32_t sn,
-        uint16_t window_size),
+        uint32_t sn),
     HOOK_ASSIGN(
         ctx.data = (uint64_t)info;
         ctx.data_end = (uint64_t) ((uint8_t*)info + sizeof(struct jbpf_rlc_ctx_info));
-        ctx.srs_meta_data1 = (uint64_t)sn << 32 | window_size;
+        ctx.srs_meta_data1 = (uint64_t)sn;
     )
 )
 
@@ -960,13 +968,13 @@ DECLARE_JBPF_HOOK(rlc_ul_sdu_delivered,
     HOOK_PROTO(
         struct jbpf_rlc_ctx_info *info,
         uint32_t sn,
-        uint16_t window_size,
-        uint32_t sdu_length),
+        uint32_t sdu_length,
+        uint64_t latency_ns), // from start of SDU reception to SDU delivery
     HOOK_ASSIGN(
         ctx.data = (uint64_t)info;
         ctx.data_end = (uint64_t) ((uint8_t*)info + sizeof(struct jbpf_rlc_ctx_info));
-        ctx.srs_meta_data1 = (uint64_t)sn << 32 | window_size;
-        ctx.srs_meta_data2 = sdu_length;
+        ctx.srs_meta_data1 = (uint64_t)sn << 32 | sdu_length;
+        ctx.srs_meta_data2 = latency_ns; 
     )
 )
 
