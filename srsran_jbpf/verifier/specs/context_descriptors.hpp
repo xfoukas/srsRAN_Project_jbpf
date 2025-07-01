@@ -8,7 +8,7 @@
 //   /* Combination of frame, slot and cell_id, provide a unique
 //      context for an execution pipeline */
 //   uint16_t ctx_id; /* Context id (could be implementation specific) */
-//   uint8_t direction; /* 0 DL, 1 UL */
+//   JbpfDirection_t direction; /* 0 DL, 1 UL */
 // };
 constexpr int jbpf_ran_ofh_regions = 3 * 8 + 1 * 2 + 1;
 constexpr ebpf_context_descriptor_t jbpf_ran_ofh_descr = {jbpf_ran_ofh_regions, 0, 1 * 8, 2 * 8};

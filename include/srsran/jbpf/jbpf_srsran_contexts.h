@@ -17,10 +17,9 @@ typedef enum {
     JBPF_PROG_TYPE_RAN_GENERIC    
 } jbpf_srsran_index_e;
 
-typedef enum {
-    JBPF_DL = 0,
-    JBPF_UL
-} JbpfDirection_t;
+typedef uint8_t JbpfDirection_t;
+#define JBPF_DL (0)
+#define JBPF_UL (1)
 
 /* OFH context*/
 struct jbpf_ran_ofh_ctx {
