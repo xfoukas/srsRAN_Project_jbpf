@@ -64,9 +64,7 @@
  *         uint16_t ctx_id;       // Context ID (implementation specific)
  *         uint32_t cu_ue_index;  // SRB: cu_cp_ue_index, DRB: cu_up_ue_index
  *         uint8_t  is_srb;       // true = SRB, false = DRB
- *         uint8_t  rb_id;        // SRB: 0=srb0, 1=srb1, 2=srb2
- *                                // DRB: 1=drb1, 2=drb2, 3=drb3, etc.
- *         uint8_t  rlc_mode;     // 0 = UM, 1 = AM
+ *         ....
  *     };
  *
  * Notes:
