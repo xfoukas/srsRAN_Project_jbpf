@@ -428,11 +428,6 @@ void ue_event_manager::handle_crc_indication(const ul_crc_indication& crc_ind)
                   static_cast<double>(last_sl - sl_rx) *
                   (static_cast<double>(10) / static_cast<double>(du_cells[ue_cc.cell_index].cfg->nof_slots_per_frame));
 
-#ifdef JBPF_ENABLED
-              hook_mac_sched_crc_indication(const_cast<void*>(static_cast<const void*>(&crc)),
-                0, ue_cc.ue_index, ue_cc.get_cell_cfg().pci, (uint16_t)crc.rnti, sizeof(ul_crc_pdu_indication));
-#endif
-
               const int tbs = ue_cc.handle_crc_pdu(sl_rx, crc);
               if (tbs < 0) {
                 return;
