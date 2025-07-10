@@ -244,9 +244,28 @@ DECLARE_JBPF_HOOK(mac_sched_crc_indication,
     ) 
 )
 
+#define DECLARE_MAC_SCHED_HARQ_HOOK(name, harq_ctx_type) \
+    DECLARE_JBPF_HOOK(name, \
+        struct jbpf_mac_sched_ctx ctx, \
+        ctx, \
+        HOOK_PROTO( \
+            struct harq_ctx_type *harq_info, \
+            uint16_t ctx_id, \
+            uint16_t cell_id, \
+            uint16_t du_ue_index, \
+            uint16_t rnti), \
+        HOOK_ASSIGN( \
+            ctx.ctx_id = ctx_id; \
+            ctx.cell_id = cell_id; \
+            ctx.du_ue_index = du_ue_index; \
+            ctx.rnti = rnti; \
+            ctx.data = (uint64_t)harq_info; \
+            ctx.data_end = (uint64_t) ((uint8_t*)harq_info + sizeof(*harq_info)); \
+        ) \
+    )
 
-
-
+DECLARE_MAC_SCHED_HARQ_HOOK(mac_sched_harq_ul, jbpf_mac_sched_harq_ctx_info);
+DECLARE_MAC_SCHED_HARQ_HOOK(mac_sched_harq_dl, jbpf_mac_sched_harq_ctx_info_dl);
 
 // PDCP
 

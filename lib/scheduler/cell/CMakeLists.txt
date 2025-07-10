@@ -24,3 +24,4 @@ add_library(sched_cell OBJECT
         resource_grid.cpp
         scheduler_prb.cpp
         cell_harq_manager.cpp)
+target_link_libraries(sched_cell srsran_support)
