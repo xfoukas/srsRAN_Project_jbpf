@@ -301,6 +301,14 @@ typename cell_harq_repository<IsDl>::harq_type* cell_harq_repository<IsDl>::allo
   h.slot_ack_timeout = sl_ack + max_ack_wait_in_slots;
   harq_timeout_wheel[h.slot_ack_timeout.to_uint() % harq_timeout_wheel.size()].push_front(&h);
 
+  printf("MJB ul:%d newTx, ue_index=%d  rnti=%d h_id=%d: retx=%d max_retx=%d\n",
+        std::is_same_v<harq_type, ul_harq_process_impl>,
+        (int)h.ue_idx,
+        (int)h.rnti,
+        (int)h.h_id,
+        (int)h.nof_retxs,
+        (int)h.max_nof_harq_retxs);
+
   return &h;
 }
 
@@ -346,6 +354,14 @@ void cell_harq_repository<IsDl>::handle_ack(harq_type& h, bool ack)
           IsDl ? "DL" : "UL",
           h.prev_tx_params.tbs_bytes,
           h.max_nof_harq_retxs);
+
+      printf("MJB ul:%d harqFailure, ue_index=%d  rnti=%d h_id=%d: retx=%d max_retx=%d\n",
+            std::is_same_v<harq_type, ul_harq_process_impl>,
+            (int)h.ue_idx,
+            (int)h.rnti,
+            (int)h.h_id,
+            (int)h.nof_retxs,
+            (int)h.max_nof_harq_retxs);
     }
   }
 
@@ -403,6 +419,14 @@ bool cell_harq_repository<IsDl>::handle_new_retx(harq_type& h, slot_point sl_tx,
   // Add HARQ to the timeout list.
   h.slot_ack_timeout = sl_ack + max_ack_wait_in_slots;
   harq_timeout_wheel[h.slot_ack_timeout.to_uint() % harq_timeout_wheel.size()].push_front(&h);
+
+  printf("MJB ul:%d reTx,  ue_index=%d  rnti=%d h_id=%d: retx=%d max_retx=%d\n",
+        std::is_same_v<harq_type, ul_harq_process_impl>,
+        (int)h.ue_idx,
+        (int)h.rnti,
+        (int)h.h_id,
+        (int)h.nof_retxs,
+        (int)h.max_nof_harq_retxs);
 
   return true;
 }
