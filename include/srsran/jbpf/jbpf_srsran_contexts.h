@@ -79,8 +79,8 @@ struct jbpf_mac_sched_harq_ctx_info {
 };
 
 struct jbpf_mac_sched_harq_ctx_info_dl {
-    jbpf_mac_sched_harq_ctx_info h;
-    uint8_t                      cqi;
+    struct jbpf_mac_sched_harq_ctx_info h;
+    uint8_t                             cqi;
 };
 
 
