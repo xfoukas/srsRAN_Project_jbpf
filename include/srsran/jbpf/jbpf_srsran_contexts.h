@@ -59,17 +59,18 @@ struct jbpf_du_ue_ctx_info {
 
 /* MAC HARQ context */
 
-typedef uint8_t JbpHarq_t;
-#define JBPF_HARQ_TX (0)
-#define JBPF_HARQ_RETX (1)
-#define JBPF_HARQ_FAILURE (2)
+typedef uint8_t JbpHarqEvent_t;
+#define JBPF_HARQ_EVENT_TX (0)
+#define JBPF_HARQ_EVENT_RETX (1)
+#define JBPF_HARQ_EVENT_FAILURE (2)
+#define JBPF_HARQ_EVENT_NUM (3)
 
 struct jbpf_mac_sched_harq_ctx_info {
-    JbpHarq_t       harq_type; /* 0=TX, 1=RETX, 2=HARQ_FAILURE */
+    JbpHarqEvent_t  harq_type; /* 0=TX, 1=RETX, 2=HARQ_FAILURE */
     uint8_t         harq_id;
-    bool            ndi ;
-    uint8_t         nof_retxs = 0;
-    uint8_t         max_nof_harq_retxs = 0;
+    bool            ndi;
+    uint8_t         nof_retxs;
+    uint8_t         max_nof_harq_retxs;
     uint8_t         mcs_table;
     uint8_t         mcs;
     uint32_t        tbs_bytes;

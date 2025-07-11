@@ -333,7 +333,7 @@ typename cell_harq_repository<IsDl>::harq_type* cell_harq_repository<IsDl>::allo
   harq_timeout_wheel[h.slot_ack_timeout.to_uint() % harq_timeout_wheel.size()].push_front(&h);
 
 #ifdef JBPF_ENABLED
-  CALL_JBPF_HARQ_HOOK(JBPF_HARQ_TX, h, harq_type);
+  CALL_JBPF_HARQ_HOOK(JBPF_HARQ_EVENT_TX, h, harq_type);
 #endif
 
   return &h;
@@ -383,7 +383,7 @@ void cell_harq_repository<IsDl>::handle_ack(harq_type& h, bool ack)
           h.max_nof_harq_retxs);
 
 #ifdef JBPF_ENABLED
-      CALL_JBPF_HARQ_HOOK(JBPF_HARQ_FAILURE, h, harq_type);
+      CALL_JBPF_HARQ_HOOK(JBPF_HARQ_EVENT_FAILURE, h, harq_type);
 #endif
 
     }
@@ -445,7 +445,7 @@ bool cell_harq_repository<IsDl>::handle_new_retx(harq_type& h, slot_point sl_tx,
   harq_timeout_wheel[h.slot_ack_timeout.to_uint() % harq_timeout_wheel.size()].push_front(&h);
 
 #ifdef JBPF_ENABLED
-  CALL_JBPF_HARQ_HOOK(JBPF_HARQ_RETX, h, harq_type);
+  CALL_JBPF_HARQ_HOOK(JBPF_HARQ_EVENT_RETX, h, harq_type);
 #endif
 
   return true;
