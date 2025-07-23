@@ -24,6 +24,37 @@
 #include "srsran/scheduler/resource_grid_util.h"
 #include "srsran/scheduler/scheduler_slot_handler.h"
 
+#ifdef JBPF_ENABLED
+#include "jbpf_srsran_hooks.h"
+DEFINE_JBPF_HOOK(mac_sched_harq_ul);
+DEFINE_JBPF_HOOK(mac_sched_harq_dl);
+
+
+#define CALL_JBPF_HARQ_HOOK(__jbpf_harq_event, __h, __harq_type) { \
+    struct jbpf_mac_sched_harq_ctx_info __jbpf_harq_info = { \
+      __jbpf_harq_event,\
+      static_cast<uint8_t>(__h.h_id),\
+      __h.ndi,\
+      static_cast<uint8_t>(__h.nof_retxs),\
+      static_cast<uint8_t>(__h.max_nof_harq_retxs),\
+      static_cast<uint8_t>(__h.prev_tx_params.mcs_table),\
+      static_cast<uint8_t>(__h.prev_tx_params.mcs),\
+      static_cast<uint32_t>(__h.prev_tx_params.tbs_bytes),\
+      __h.prev_tx_params.slice_id.has_value(),\
+      __h.prev_tx_params.slice_id.has_value() ? __h.prev_tx_params.slice_id->value() : static_cast<uint8_t>(0),\
+    };\
+    if (std::is_same_v<__harq_type, ul_harq_process_impl>) {\
+      hook_mac_sched_harq_ul(&__jbpf_harq_info, 0, 0, (uint16_t)__h.ue_idx, static_cast<uint16_t>(__h.rnti));\
+    } else if constexpr (std::is_same_v<__harq_type, dl_harq_process_impl>) {\
+      jbpf_mac_sched_harq_ctx_info_dl __jbpf_harq_info_dl = {\
+        __jbpf_harq_info, static_cast<uint8_t>(__h.prev_tx_params.cqi)};\
+      hook_mac_sched_harq_dl(&__jbpf_harq_info_dl, 0, 0, (uint16_t)__h.ue_idx, static_cast<uint16_t>(__h.rnti));\
+    }\
+  }
+
+
+#endif
+
 using namespace srsran;
 using namespace harq_utils;
 
@@ -301,6 +332,10 @@ typename cell_harq_repository<IsDl>::harq_type* cell_harq_repository<IsDl>::allo
   h.slot_ack_timeout = sl_ack + max_ack_wait_in_slots;
   harq_timeout_wheel[h.slot_ack_timeout.to_uint() % harq_timeout_wheel.size()].push_front(&h);
 
+#ifdef JBPF_ENABLED
+  CALL_JBPF_HARQ_HOOK(JBPF_HARQ_EVENT_TX, h, harq_type);
+#endif
+
   return &h;
 }
 
@@ -346,6 +381,11 @@ void cell_harq_repository<IsDl>::handle_ack(harq_type& h, bool ack)
           IsDl ? "DL" : "UL",
           h.prev_tx_params.tbs_bytes,
           h.max_nof_harq_retxs);
+
+#ifdef JBPF_ENABLED
+      CALL_JBPF_HARQ_HOOK(JBPF_HARQ_EVENT_FAILURE, h, harq_type);
+#endif
+
     }
   }
 
@@ -403,6 +443,10 @@ bool cell_harq_repository<IsDl>::handle_new_retx(harq_type& h, slot_point sl_tx,
   // Add HARQ to the timeout list.
   h.slot_ack_timeout = sl_ack + max_ack_wait_in_slots;
   harq_timeout_wheel[h.slot_ack_timeout.to_uint() % harq_timeout_wheel.size()].push_front(&h);
+
+#ifdef JBPF_ENABLED
+  CALL_JBPF_HARQ_HOOK(JBPF_HARQ_EVENT_RETX, h, harq_type);
+#endif
 
   return true;
 }

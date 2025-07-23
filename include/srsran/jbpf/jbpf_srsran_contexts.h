@@ -8,6 +8,7 @@ extern "C"
 
 #include <stdint.h>
 
+
 #include "jbpf_helper_api_defs_ext.h"
 
 typedef enum {
@@ -54,6 +55,34 @@ struct jbpf_du_ue_ctx_info {
     uint16_t pci;
     uint16_t crnti;
 };
+
+
+/* MAC HARQ context */
+
+typedef uint8_t JbpHarqEvent_t;
+#define JBPF_HARQ_EVENT_TX (0)
+#define JBPF_HARQ_EVENT_RETX (1)
+#define JBPF_HARQ_EVENT_FAILURE (2)
+#define JBPF_HARQ_EVENT_NUM (3)
+
+struct jbpf_mac_sched_harq_ctx_info {
+    JbpHarqEvent_t  harq_type; /* 0=TX, 1=RETX, 2=HARQ_FAILURE */
+    uint8_t         harq_id;
+    bool            ndi;
+    uint8_t         nof_retxs;
+    uint8_t         max_nof_harq_retxs;
+    uint8_t         mcs_table;
+    uint8_t         mcs;
+    uint32_t        tbs_bytes;
+    bool            slice_id_present;
+    uint8_t         slice_id; 
+};
+
+struct jbpf_mac_sched_harq_ctx_info_dl {
+    struct jbpf_mac_sched_harq_ctx_info h;
+    uint8_t                             cqi;
+};
+
 
 /* MAC Scheduler context */
 struct jbpf_mac_sched_ctx {

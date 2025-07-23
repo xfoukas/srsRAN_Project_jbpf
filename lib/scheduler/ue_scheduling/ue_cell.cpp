@@ -29,6 +29,10 @@
 #include "srsran/scheduler/scheduler_feedback_handler.h"
 #include "srsran/srslog/srslog.h"
 
+#ifdef JBPF_ENABLED
+#include "jbpf_srsran_hooks.h"
+#endif
+
 using namespace srsran;
 
 /// Number of UL HARQs reserved per UE (Implementation-defined)
@@ -240,6 +244,14 @@ int ue_cell::handle_crc_pdu(slot_point pusch_slot, const ul_crc_pdu_indication& 
 {
   // Find UL HARQ with matching PUSCH slot.
   std::optional<ul_harq_process_handle> h_ul = harqs.find_ul_harq_waiting_ack(pusch_slot);
+
+#ifdef JBPF_ENABLED
+  hook_mac_sched_crc_indication(const_cast<void*>(static_cast<const void*>(&crc_pdu)),
+    0, ue_index, cell_cfg.pci, (uint16_t)crc_pdu.rnti, 
+    ((h_ul.has_value()) and (h_ul->id() == crc_pdu.harq_id) and (h_ul->is_waiting_ack())), h_ul->nof_retxs(), h_ul->max_nof_retxs(),
+    sizeof(ul_crc_pdu_indication));
+#endif
+
   if (not h_ul.has_value() or h_ul->id() != crc_pdu.harq_id) {
     logger.warning("rnti={} h_id={}: Discarding CRC. Cause: UL HARQ process is not expecting CRC for PUSCH slot {}",
                    rnti(),

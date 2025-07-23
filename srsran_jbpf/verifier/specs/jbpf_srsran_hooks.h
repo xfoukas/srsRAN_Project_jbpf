@@ -216,14 +216,56 @@ DECLARE_MAC_SCHED_HOOK_NO_PAYLOAD(mac_sched_ue_reconfig);
 DECLARE_MAC_SCHED_HOOK_NO_PAYLOAD(mac_sched_ue_deletion);
 DECLARE_MAC_SCHED_HOOK_NO_PAYLOAD(mac_sched_ue_config_applied);
 DECLARE_MAC_SCHED_HOOK(mac_sched_ul_bsr_indication);           /* ctx.data will be a srsran::ul_bsr_indication_message */
-DECLARE_MAC_SCHED_HOOK(mac_sched_crc_indication);              /* ctx.data will be a srsran::ul_crc_pdu_indication */
 DECLARE_MAC_SCHED_HOOK(mac_sched_uci_indication);              /* ctx.data will be a srsran::uci_indication::uci_pdu */
 DECLARE_MAC_SCHED_HOOK(mac_sched_dl_mac_ce_indication);        /* ctx.data will be a srsran::dl_mac_ce_indication */
 DECLARE_MAC_SCHED_HOOK(mac_sched_ul_phr_indication);           /* ctx.data will be a srsran::ul_phr_indication_message */
 DECLARE_MAC_SCHED_HOOK(mac_sched_dl_buffer_state_indication);  /* ctx.data will be a srsran::dl_buffer_state_indication_message */
 DECLARE_MAC_SCHED_HOOK(mac_sched_srs_indication);              /* ctx.data will be a srsran::srs_indication::srs_indication_pdu */
 
+DECLARE_JBPF_HOOK(mac_sched_crc_indication,
+    struct jbpf_mac_sched_ctx ctx, 
+    ctx, 
+    HOOK_PROTO( 
+        void* ind,                         /* will be a srsran::ul_crc_pdu_indication */
+        uint16_t ctx_id, 
+        uint16_t du_ue_index, 
+        uint16_t cell_id, 
+        uint16_t rnti,
+        bool processed, 
+        uint nof_retxs,
+        uint max_nof_retxs,
+        size_t payload_size),
+    HOOK_ASSIGN( \
+        ctx.ctx_id = ctx_id; 
+        ctx.du_ue_index = du_ue_index; 
+        ctx.data = (uint64_t)ind;
+        ctx.data_end = (uint64_t) ((uint8_t*)ind + payload_size); 
+        ctx.srs_meta_data1 = (uint64_t)processed << 32 | (uint64_t)nof_retxs << 16 | (uint64_t)max_nof_retxs;
+    ) 
+)
 
+#define DECLARE_MAC_SCHED_HARQ_HOOK(name, harq_ctx_type) \
+    DECLARE_JBPF_HOOK(name, \
+        struct jbpf_mac_sched_ctx ctx, \
+        ctx, \
+        HOOK_PROTO( \
+            struct harq_ctx_type *harq_info, \
+            uint16_t ctx_id, \
+            uint16_t cell_id, \
+            uint16_t du_ue_index, \
+            uint16_t rnti), \
+        HOOK_ASSIGN( \
+            ctx.ctx_id = ctx_id; \
+            ctx.cell_id = cell_id; \
+            ctx.du_ue_index = du_ue_index; \
+            ctx.rnti = rnti; \
+            ctx.data = (uint64_t)harq_info; \
+            ctx.data_end = (uint64_t) ((uint8_t*)harq_info + sizeof(*harq_info)); \
+        ) \
+    )
+
+DECLARE_MAC_SCHED_HARQ_HOOK(mac_sched_harq_ul, jbpf_mac_sched_harq_ctx_info);
+DECLARE_MAC_SCHED_HARQ_HOOK(mac_sched_harq_dl, jbpf_mac_sched_harq_ctx_info_dl);
 
 // PDCP
 
