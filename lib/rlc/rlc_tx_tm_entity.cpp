@@ -84,6 +84,7 @@ rlc_tx_tm_entity::rlc_tx_tm_entity(gnb_du_id_t                          du_id_,
 void rlc_tx_tm_entity::handle_sdu(byte_buffer sdu_buf, bool is_retx)
 {
   rlc_sdu sdu_;
+  sdu_.time_of_arrival = std::chrono::high_resolution_clock::now();
 
   sdu_.buf = std::move(sdu_buf);
 
