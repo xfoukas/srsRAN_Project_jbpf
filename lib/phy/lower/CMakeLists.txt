@@ -1,5 +1,5 @@
 #
-# Copyright 2021-2024 Software Radio Systems Limited
+# Copyright 2021-2025 Software Radio Systems Limited
 #
 # This file is part of srsRAN
 #
@@ -27,7 +27,7 @@ add_library(srsran_lower_phy STATIC
         lower_phy_factory.cpp
         lower_phy_impl.cpp)
 target_link_libraries(srsran_lower_phy
-        srsran_generic_funcs
+        srsran_dft
         srsran_lower_phy_adaptors
         srsran_lower_phy_amplitude_controller
         srsran_lower_phy_downlink_processor

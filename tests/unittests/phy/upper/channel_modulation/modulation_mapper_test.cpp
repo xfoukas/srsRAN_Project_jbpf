@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -22,7 +22,6 @@
 
 #include "modulation_mapper_test_data.h"
 #include "srsran/phy/upper/channel_modulation/channel_modulation_factories.h"
-#include "srsran/srsvec/aligned_vec.h"
 #include "srsran/srsvec/bit.h"
 #include "fmt/ostream.h"
 #include <gtest/gtest.h>
@@ -61,20 +60,20 @@ using ModulationMapperParams = test_case_t;
 class ModulationMapperFixture : public ::testing::TestWithParam<ModulationMapperParams>
 {
 protected:
-  static std::shared_ptr<channel_modulation_factory> factory;
-  static std::unique_ptr<modulation_mapper>          modulator;
+  static std::shared_ptr<modulation_mapper_factory> factory;
+  static std::unique_ptr<modulation_mapper>         modulator;
 
   static void SetUpTestSuite()
   {
     // Create modulation mapper factory.
     if (!factory) {
-      factory = create_channel_modulation_sw_factory();
+      factory = create_modulation_mapper_factory();
       ASSERT_NE(factory, nullptr) << "Cannot create factory";
     }
 
     // Create modulation mapper.
     if (!modulator) {
-      modulator = factory->create_modulation_mapper();
+      modulator = factory->create();
       ASSERT_NE(modulator, nullptr) << "Cannot create modulator";
     }
   }
@@ -84,8 +83,8 @@ protected:
     ASSERT_NE(modulator, nullptr) << "Cannot create modulator";
   }
 };
-std::shared_ptr<channel_modulation_factory> ModulationMapperFixture::factory   = nullptr;
-std::unique_ptr<modulation_mapper>          ModulationMapperFixture::modulator = nullptr;
+std::shared_ptr<modulation_mapper_factory> ModulationMapperFixture::factory   = nullptr;
+std::unique_ptr<modulation_mapper>         ModulationMapperFixture::modulator = nullptr;
 
 TEST_P(ModulationMapperFixture, ModulationMapperTest)
 {
@@ -101,13 +100,13 @@ TEST_P(ModulationMapperFixture, ModulationMapperTest)
     srsvec::bit_pack(packed_data, testvector_data);
 
     // Modulate in complex float.
-    srsran::srsvec::aligned_vec<cf_t> symbols_cf(test_case.nsymbols);
+    std::vector<cf_t> symbols_cf(test_case.nsymbols);
     modulator->modulate(symbols_cf, packed_data, test_case.scheme);
     assert_symbols<cf_t>(symbols_cf, expected_symbols);
 
     // Modulate in complex i8.
-    srsran::srsvec::aligned_vec<ci8_t> symbols_ci8(test_case.nsymbols);
-    float                              scale_ci8 = modulator->modulate(symbols_ci8, packed_data, test_case.scheme);
+    std::vector<ci8_t> symbols_ci8(test_case.nsymbols);
+    float              scale_ci8 = modulator->modulate(symbols_ci8, packed_data, test_case.scheme);
     assert_symbols<ci8_t>(symbols_ci8, expected_symbols, scale_ci8);
   }
 }

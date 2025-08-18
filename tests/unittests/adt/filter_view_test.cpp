@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -20,7 +20,7 @@
  *
  */
 
-#include "srsran/adt/filter_view.h"
+#include "srsran/adt/ranges/filter_view.h"
 #include "srsran/support/test_utils.h"
 
 using namespace srsran;

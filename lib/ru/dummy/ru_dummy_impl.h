@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -22,6 +22,7 @@
 
 #pragma once
 
+#include "ru_dummy_metrics_collector.h"
 #include "ru_dummy_sector.h"
 #include "srsran/adt/interval.h"
 #include "srsran/phy/support/prach_buffer.h"
@@ -29,10 +30,10 @@
 #include "srsran/phy/support/resource_grid.h"
 #include "srsran/phy/support/resource_grid_context.h"
 #include "srsran/ran/slot_point.h"
+#include "srsran/ru/dummy/ru_dummy_configuration.h"
 #include "srsran/ru/ru.h"
 #include "srsran/ru/ru_controller.h"
 #include "srsran/ru/ru_downlink_plane.h"
-#include "srsran/ru/ru_dummy_configuration.h"
 #include "srsran/ru/ru_timing_notifier.h"
 #include "srsran/ru/ru_uplink_plane.h"
 #include "srsran/srslog/logger.h"
@@ -53,6 +54,7 @@ namespace srsran {
 /// It determines the timing from the system time.
 class ru_dummy_impl : public radio_unit,
                       private ru_controller,
+                      private ru_operation_controller,
                       private ru_downlink_plane_handler,
                       private ru_uplink_plane_handler
 {
@@ -60,18 +62,30 @@ public:
   /// Creates a dummy radio unit from its configuration.
   explicit ru_dummy_impl(const ru_dummy_configuration& config, ru_dummy_dependencies dependencies) noexcept;
 
-  // See radio_unit interface for documentation.
+  // See the radio_unit interface for documentation.
   ru_controller& get_controller() override { return *this; }
 
-  // See radio_unit interface for documentation.
+  // See the radio_unit interface for documentation.
   ru_downlink_plane_handler& get_downlink_plane_handler() override { return *this; }
 
-  // See radio_unit interface for documentation.
+  // See the radio_unit interface for documentation.
   ru_uplink_plane_handler& get_uplink_plane_handler() override { return *this; }
 
+  // See the radio_unit interface for documentation.
+  ru_metrics_collector* get_metrics_collector() override { return are_metrics_enabled ? &metrics_collector : nullptr; }
+
+  // See the radio_unit interface for documentation.
+  ru_center_frequency_controller* get_center_frequency_controller() override { return nullptr; }
+
 private:
-  /// Possible internal states.
-  enum class state : uint8_t { idle = 0, running, wait_stop, stopped };
+  /// State value in idle.
+  static constexpr uint32_t state_idle = 0xffffffff;
+  /// State value while running.
+  static constexpr uint32_t state_running = 0x80000000;
+  /// State value while the RU is stopping.
+  static constexpr uint32_t state_wait_stop = 0x40000000;
+  /// Stopped state, depends on the maximum processing delay number of slots.
+  const uint32_t state_stopped;
   /// Minimum loop time.
   const std::chrono::microseconds minimum_loop_time = std::chrono::microseconds(10);
 
@@ -81,14 +95,17 @@ private:
   // See ru_controller for documentation.
   void stop() override;
 
-  // See ru_controller interface for documentation.
-  bool set_tx_gain(unsigned port_id, double gain_dB) override { return false; }
+  // See interface for documentation.
+  ru_operation_controller& get_operation_controller() override { return *this; }
 
-  // See ru_controller interface for documentation.
-  bool set_rx_gain(unsigned port_id, double gain_dB) override { return false; }
+  // See interface for documentation.
+  ru_gain_controller* get_gain_controller() override { return nullptr; }
 
-  // See ru_controller interface for documentation.
-  void print_metrics() override;
+  // See interface for documentation.
+  ru_cfo_controller* get_cfo_controller() override { return nullptr; }
+
+  // See interface for documentation.
+  ru_tx_time_offset_controller* get_tx_time_offset_controller() override { return nullptr; }
 
   // See ru_downlink_plane_handler for documentation.
   void handle_dl_data(const resource_grid_context& context, const shared_resource_grid& grid) override
@@ -126,6 +143,8 @@ private:
   /// Loop execution task.
   void loop();
 
+  /// Flag that enables (or not) metrics.
+  const bool are_metrics_enabled;
   /// Ru logger.
   srslog::basic_logger& logger;
   /// Internal executor.
@@ -133,15 +152,17 @@ private:
   /// Radio Unit timing notifier.
   ru_timing_notifier& timing_notifier;
   /// Internal state.
-  std::atomic<state> current_state = {state::idle};
+  std::atomic<uint32_t> internal_state = state_idle;
   /// Slot time in microseconds.
   std::chrono::microseconds slot_duration;
   /// Number of slots is notified in advance of the transmission time.
-  unsigned max_processing_delay_slots;
+  const unsigned max_processing_delay_slots;
   /// Current slot.
   slot_point current_slot;
   /// Radio unit sectors.
   std::vector<ru_dummy_sector> sectors;
+  /// RU dummy metrics collector.
+  ru_dummy_metrics_collector metrics_collector;
 };
 
 } // namespace srsran

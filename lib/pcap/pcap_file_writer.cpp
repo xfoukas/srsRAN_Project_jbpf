@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -43,13 +43,13 @@ bool pcap_file_writer::open(uint32_t dlt_, const std::string& filename_)
   filename = filename_;
 
   pcap_hdr_t file_header = {
-      0xa1b2c3d4, /// magic number
-      2,
-      4,     /// version number is 2.4
-      0,     /// timezone
-      0,     /// sigfigs - apparently all tools do this
-      65535, /// snaplen - this should be long enough
-      dlt    /// Data Link Type (DLT).  Set as unused value 147 for now
+      0xa1b2c3d4,                           // magic number
+      2,                                    // version_major is 2
+      4,                                    // version_minor is 4 (together: 2.4)
+      0,                                    // timezone
+      0,                                    // sigfigs - apparently all tools do this
+      std::numeric_limits<uint32_t>::max(), // snaplen - this should be long enough
+      dlt                                   // Data Link Type (DLT). Set as unused value 147 for now
   };
 
   pcap_fstream.open(filename.c_str(), std::ios::out | std::ios::binary);
@@ -61,21 +61,32 @@ bool pcap_file_writer::open(uint32_t dlt_, const std::string& filename_)
 
   pcap_fstream.write((char*)&file_header, sizeof(file_header));
   if (pcap_fstream.fail()) {
-    logger.error("Failed to write to pcap: {}", strerror(errno));
+    logger.error("Failed to write to PCAP: {}", strerror(errno));
     return false;
   }
 
   return true;
 }
 
-void pcap_file_writer::close()
+void pcap_file_writer::flush()
 {
   if (pcap_fstream.is_open()) {
-    logger.debug("Saving PCAP (DLT={}) to \"{}\"", dlt, filename);
+    logger.debug("Flushing PCAP (DLT={})", dlt);
     pcap_fstream.flush();
-    pcap_fstream.close();
-    logger.info("PCAP (DLT={}) successfully written to \"{}\" and closed.", dlt, filename);
+    return;
   }
+  logger.info("Failed to flush closed PCAP (DLT={})", dlt);
+}
+
+void pcap_file_writer::close()
+{
+  flush();
+  if (pcap_fstream.is_open()) {
+    logger.debug("Saving PCAP (DLT={}) to \"{}\"", dlt, filename);
+    pcap_fstream.close();
+    logger.info("Saved PCAP (DLT={}) to \"{}\" and closed", dlt, filename);
+  }
+  logger.info("Failed to close already closed PCAP (DLT={})", dlt);
 }
 
 void pcap_file_writer::write_pdu_header(uint32_t length)
@@ -92,7 +103,7 @@ void pcap_file_writer::write_pdu_header(uint32_t length)
 
   pcap_fstream.write((char*)&packet_header, sizeof(packet_header));
   if (pcap_fstream.fail()) {
-    logger.error("Failed to write to pcap: {}", strerror(errno));
+    logger.error("Failed to write to PCAP: {}", strerror(errno));
     return;
   }
 }
@@ -105,7 +116,7 @@ void pcap_file_writer::write_pdu(srsran::const_span<uint8_t> pdu)
 
   pcap_fstream.write((char*)pdu.data(), pdu.size());
   if (pcap_fstream.fail()) {
-    logger.error("Failed to write to pcap: {}", strerror(errno));
+    logger.error("Failed to write to PCAP: {}", strerror(errno));
     return;
   }
 }
@@ -119,7 +130,7 @@ void pcap_file_writer::write_pdu(const byte_buffer& pdu)
   for (span<const uint8_t> seg : pdu.segments()) {
     pcap_fstream.write((char*)seg.data(), seg.size());
     if (pcap_fstream.fail()) {
-      logger.error("Failed to write to pcap: {}", strerror(errno));
+      logger.error("Failed to write to PCAP: {}", strerror(errno));
       return;
     }
   }

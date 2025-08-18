@@ -1,0 +1,93 @@
+#
+# Copyright 2021-2025 Software Radio Systems Limited
+#
+# This file is part of srsRAN
+#
+# srsRAN is free software: you can redistribute it and/or modify
+# it under the terms of the GNU Affero General Public License as
+# published by the Free Software Foundation, either version 3 of
+# the License, or (at your option) any later version.
+#
+# srsRAN is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+# GNU Affero General Public License for more details.
+#
+# A copy of the GNU Affero General Public License can be found in
+# the LICENSE file in the top-level directory of this distribution
+# and at http://www.gnu.org/licenses/.
+#
+
+metrics:
+  layers:
+    enable_app_usage: true
+    enable_pdcp: true
+    enable_sched: true
+    enable_rlc: true
+    enable_mac: true
+    enable_du_low: true
+    enable_ru: true
+  periodicity:
+    app_usage_report_period: 10000
+    cu_cp_report_period: 5000
+    cu_up_report_period: 5000
+    du_report_period: 1000
+
+cu_up:
+  warn_on_drop: False
+
+buffer_pool:
+  nof_segments: 1048576
+
+cell_cfg:
+  dl_arfcn: 381500
+  band: 39
+  channel_bandwidth_MHz: 100
+  common_scs: 30
+  plmn: "00101"
+  tac: 7
+  pci: 1
+  nof_antennas_dl: {{nof_antennas_dl}}
+  nof_antennas_ul: {{nof_antennas_ul}}
+  pdsch:
+    min_ue_mcs: 27
+    mcs_table: qam256
+  pusch:
+    min_ue_mcs: 27
+    mcs_table: qam256
+    rv_sequence: 0
+
+cells:
+  - pci: 1
+  - pci: 2
+
+ru_dummy:
+  time_scaling: 10
+
+test_mode:
+  test_ue:
+    rnti: 0x1234
+    pdsch_active: true
+    pusch_active: true
+    ri: 4
+    nof_ues: 16
+
+hal:
+  bbdev_hwacc:
+    hwacc_type: {{ accelerator_model }}
+    id: {{ accelerator_id }}
+    pdsch_enc:
+      nof_hwacc: {{ accelerator_pdsch_enc_nof_hwacc }}
+      cb_mode: {{ accelerator_cb_mode }}
+      dedicated_queue: true
+    pusch_dec:
+      nof_hwacc: {{ accelerator_pusch_dec_nof_hwacc }}
+      force_local_harq: False
+      dedicated_queue: true
+      harq_context_size: {{ accelerator_harq_context_size }}
+  eal_args: "--lcores {{ lcores_eal_args }} {{ accelerator_extra_eal_args }}"
+
+expert_phy:
+  max_request_headroom_slots: 3
+  max_proc_delay: 4
+  pusch_dec_max_iterations: 2

@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -58,7 +58,8 @@ dummy_ue_resource_configurator_factory::dummy_resource_updater::~dummy_resource_
 du_ue_resource_update_response dummy_ue_resource_configurator_factory::dummy_resource_updater::update(
     du_cell_index_t                       pcell_index,
     const f1ap_ue_context_update_request& upd_req,
-    const du_ue_resource_config*          reestablished_context)
+    const du_ue_resource_config*          reestablished_context,
+    const ue_capability_summary*          reestablished_ue_caps)
 {
   parent.ue_resource_pool[ue_index] = parent.next_context_update_result;
   return parent.next_config_resp;
@@ -69,9 +70,16 @@ const du_ue_resource_config& dummy_ue_resource_configurator_factory::dummy_resou
   return parent.ue_resource_pool[ue_index];
 }
 
+const std::optional<ue_capability_summary>&
+dummy_ue_resource_configurator_factory::dummy_resource_updater::ue_capabilities() const
+{
+  return parent.next_ue_caps;
+}
+
 expected<ue_ran_resource_configurator, std::string>
 dummy_ue_resource_configurator_factory::create_ue_resource_configurator(du_ue_index_t   ue_index,
-                                                                        du_cell_index_t pcell_index)
+                                                                        du_cell_index_t pcell_index,
+                                                                        bool            has_tc_rnti)
 {
   if (ue_resource_pool.count(ue_index) > 0) {
     return make_unexpected(std::string("Duplicate UE index"));
@@ -92,7 +100,7 @@ srsran::srs_du::create_f1ap_ue_context_update_request(du_ue_index_t             
                                                       std::initializer_list<drb_id_t> drbs_to_add,
                                                       std::initializer_list<drb_id_t> drbs_to_mod)
 {
-  f1ap_ue_context_update_request req;
+  f1ap_ue_context_update_request req = {};
 
   req.ue_index             = ue_idx;
   req.full_config_required = false;
@@ -131,7 +139,7 @@ du_manager_test_bench::du_manager_test_bench(span<const du_cell_config> cells) :
   cell_exec_mapper(worker),
   params{{"srsgnb", (gnb_du_id_t)1, 1, du_cells},
          {timers, du_mng_exec, ue_exec_mapper, cell_exec_mapper},
-         {f1ap, f1ap},
+         {f1ap, f1ap, f1ap},
          {f1u_gw},
          {mac, f1ap, f1ap, rlc_pcap},
          {mac, mac}},

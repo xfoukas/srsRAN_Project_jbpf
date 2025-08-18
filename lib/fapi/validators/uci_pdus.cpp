@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -22,7 +22,7 @@
 
 #include "uci_pdus.h"
 #include "field_checkers.h"
-#include "srsran/fapi/messages.h"
+#include "srsran/fapi/messages/uci_indication.h"
 
 using namespace srsran;
 using namespace fapi;

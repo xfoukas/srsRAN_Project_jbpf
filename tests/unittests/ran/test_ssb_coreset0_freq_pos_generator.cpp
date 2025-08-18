@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -20,7 +20,7 @@
  *
  */
 
-#include "lib/ran/ssb_freq_position_generator.h"
+#include "lib/ran/ssb/ssb_freq_position_generator.h"
 #include "ssb_coreset0_freq_pos_checker.h"
 #include "srsran/ran/band_helper.h"
 #include <gtest/gtest.h>

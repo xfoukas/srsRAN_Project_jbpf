@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -67,7 +67,11 @@ public:
     return hard_bits[codeblock_id].first(data_size);
   }
 
-  void lock() override { locked = true; }
+  bool try_lock() override
+  {
+    locked = true;
+    return true;
+  }
 
   void unlock() override { locked = false; }
 

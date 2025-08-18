@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -22,7 +22,9 @@
 
 #pragma once
 
+#include "srsran/adt/byte_buffer.h"
 #include "srsran/adt/slotted_array.h"
+#include "srsran/adt/slotted_vector.h"
 #include "srsran/ran/pci.h"
 #include "srsran/ran/subcarrier_spacing.h"
 #include <string>
@@ -95,7 +97,7 @@ struct rrc_periodicity_and_offset {
 inline bool operator==(const rrc_periodicity_and_offset& lhs, const rrc_periodicity_and_offset& rhs)
 {
   return lhs.periodicity == rhs.periodicity && lhs.offset == rhs.offset;
-};
+}
 
 struct rrc_ssb_mtc {
   rrc_periodicity_and_offset periodicity_and_offset;
@@ -105,7 +107,7 @@ struct rrc_ssb_mtc {
 inline bool operator==(const rrc_ssb_mtc& lhs, const rrc_ssb_mtc& rhs)
 {
   return lhs.periodicity_and_offset == rhs.periodicity_and_offset && lhs.dur == rhs.dur;
-};
+}
 
 struct rrc_ss_rssi_meas {
   uint64_t meas_slots;
@@ -131,7 +133,7 @@ struct rrc_ssb_mtc2 {
 inline bool operator==(const rrc_ssb_mtc2& lhs, const rrc_ssb_mtc2& rhs)
 {
   return lhs.periodicity == rhs.periodicity && lhs.pci_list == rhs.pci_list;
-};
+}
 
 struct rrc_ssb_to_measure {
   enum class bitmap_type_t : uint8_t { /* uint8_t */ short_bitmap,
@@ -479,42 +481,16 @@ struct rrc_quant_cfg {
   std::vector<rrc_quant_cfg_nr> quant_cfg_nr_list;
 };
 
-struct rrc_gap_cfg {
-  uint8_t gap_offset;
-  uint8_t mgl;
-  uint8_t mgrp;
-  float   mgta;
-};
-
-struct rrc_gap_cfg_setup_release {
-  bool                       is_release;
-  std::optional<rrc_gap_cfg> setup;
-};
-
-struct rrc_measg_gap_cfg {
-  std::optional<rrc_gap_cfg_setup_release> gap_fr2;
-};
-
-struct rrc_meas_gap_sharing_scheme_setup_release {
-  bool                       is_release;
-  std::optional<std::string> setup;
-};
-
-struct rrc_meas_gap_sharing_cfg {
-  std::optional<rrc_meas_gap_sharing_scheme_setup_release> gap_sharing_fr2;
-};
-
 struct rrc_meas_cfg {
-  std::vector<meas_obj_id_t>              meas_obj_to_rem_list;
-  std::vector<rrc_meas_obj_to_add_mod>    meas_obj_to_add_mod_list;
-  std::vector<report_cfg_id_t>            report_cfg_to_rem_list;
-  std::vector<rrc_report_cfg_to_add_mod>  report_cfg_to_add_mod_list;
-  std::vector<meas_id_t>                  meas_id_to_rem_list;
-  std::vector<rrc_meas_id_to_add_mod>     meas_id_to_add_mod_list;
-  std::optional<rrc_s_measure_cfg>        s_measure_cfg;
-  std::optional<rrc_quant_cfg>            quant_cfg;
-  std::optional<rrc_measg_gap_cfg>        meas_gap_cfg;
-  std::optional<rrc_meas_gap_sharing_cfg> meas_gap_sharing_cfg;
+  std::vector<meas_obj_id_t>             meas_obj_to_rem_list;
+  std::vector<rrc_meas_obj_to_add_mod>   meas_obj_to_add_mod_list;
+  std::vector<report_cfg_id_t>           report_cfg_to_rem_list;
+  std::vector<rrc_report_cfg_to_add_mod> report_cfg_to_add_mod_list;
+  std::vector<meas_id_t>                 meas_id_to_rem_list;
+  std::vector<rrc_meas_id_to_add_mod>    meas_id_to_add_mod_list;
+  std::optional<rrc_s_measure_cfg>       s_measure_cfg;
+  std::optional<rrc_quant_cfg>           quant_cfg;
+  // The meas gap config is excluded from the common type and stored in the RRC UE context.
 };
 
 struct rrc_meas_quant_results {
@@ -574,21 +550,20 @@ namespace fmt {
 template <>
 struct formatter<srsran::srs_cu_cp::rrc_meas_obj_nr> {
   template <typename ParseContext>
-  auto parse(ParseContext& ctx) -> decltype(ctx.begin())
+  auto parse(ParseContext& ctx)
   {
     return ctx.begin();
   }
 
   template <typename FormatContext>
-  auto format(srsran::srs_cu_cp::rrc_meas_obj_nr meas_object, FormatContext& ctx)
-      -> decltype(std::declval<FormatContext>().out())
+  auto format(srsran::srs_cu_cp::rrc_meas_obj_nr meas_object, FormatContext& ctx) const
   {
     std::string smtc1_str;
     std::string smtc2_str;
 
     if (meas_object.smtc1.has_value()) {
       smtc1_str = fmt::format(" smtc1: periodicity={} offset={} dur={}",
-                              meas_object.smtc1.value().periodicity_and_offset.periodicity,
+                              fmt::underlying(meas_object.smtc1.value().periodicity_and_offset.periodicity),
                               meas_object.smtc1.value().periodicity_and_offset.offset,
                               meas_object.smtc1.value().dur);
     }

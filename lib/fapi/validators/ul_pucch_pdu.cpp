@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -22,7 +22,7 @@
 
 #include "ul_pucch_pdu.h"
 #include "field_checkers.h"
-#include "srsran/fapi/messages.h"
+#include "srsran/fapi/messages/ul_tti_request.h"
 #include "srsran/fapi/validator_report.h"
 
 using namespace srsran;

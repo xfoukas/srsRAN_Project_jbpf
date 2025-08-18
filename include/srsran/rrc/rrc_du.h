@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -22,9 +22,11 @@
 
 #pragma once
 
-#include "rrc_cell_context.h"
-#include "rrc_ue.h"
 #include "srsran/cu_cp/cell_meas_manager_config.h"
+#include "srsran/ran/cause/common.h"
+#include "srsran/rrc/rrc_cell_context.h"
+#include "srsran/rrc/rrc_metrics.h"
+#include "srsran/rrc/rrc_ue.h"
 
 namespace srsran {
 namespace srs_cu_cp {
@@ -72,6 +74,10 @@ public:
 
   /// Send RRC Release to all UEs connected to this DU.
   virtual void release_ues() = 0;
+
+  /// \brief Get the number of UEs registered at the RRC DU.
+  /// \return The number of UEs.
+  virtual size_t get_nof_ues() const = 0;
 };
 
 /// Interface to notify about measurement config updates
@@ -99,30 +105,57 @@ public:
   virtual void remove_ue(ue_index_t ue_index) = 0;
 };
 
-/// \brief Interface to query statistics from the RRC DU interface.
-class rrc_du_statistics_handler
+class rrc_du_connection_event_handler
 {
 public:
-  virtual ~rrc_du_statistics_handler() = default;
+  virtual ~rrc_du_connection_event_handler() = default;
 
-  /// \brief Get the number of UEs registered at the RRC DU.
-  /// \return The number of UEs.
-  virtual size_t get_nof_ues() const = 0;
+  /// \brief Add the successful RRC setup to the metrics.
+  /// \param[in] cause The establishment cause of the RRC connection. If this is given the connection establishment
+  /// metrics are increased. Otherwise the connection metrics are increased.
+  virtual void handle_successful_rrc_setup(std::optional<establishment_cause_t> cause = std::nullopt) = 0;
+
+  /// \brief Add the successful RRC release to the metrics.
+  virtual void handle_successful_rrc_release() = 0;
+
+  /// \brief Add the attempted RRC connection establishment to the metrics.
+  /// \param[in] cause The establishment cause of the RRC connection.
+  virtual void handle_attempted_rrc_setup(establishment_cause_t cause) = 0;
+
+  /// \brief Add the attempted RRC connection re-establishment to the metrics.
+  virtual void handle_attempted_rrc_reestablishment() = 0;
+
+  /// \brief Add the successful RRC connection re-establishment to the metrics.
+  virtual void handle_successful_rrc_reestablishment() = 0;
+
+  /// \brief Add the successful RRC connection re-establishment fallback to the metrics.
+  virtual void handle_successful_rrc_reestablishment_fallback() = 0;
+};
+
+class rrc_du_metrics_collector
+{
+public:
+  virtual ~rrc_du_metrics_collector() = default;
+
+  /// \brief Collect the metrics of this RRC DU.
+  /// \param[out] metrics The metrics to collect.
+  virtual void collect_metrics(rrc_du_metrics& metrics) = 0;
 };
 
 /// Combined entry point for the RRC DU handling.
 class rrc_du : public rrc_du_cell_manager,
                public rrc_du_ue_repository,
                public rrc_ue_handler,
-               public rrc_du_statistics_handler
+               public rrc_du_connection_event_handler
 {
 public:
   virtual ~rrc_du() = default;
 
-  virtual rrc_du_cell_manager&       get_rrc_du_cell_manager()       = 0;
-  virtual rrc_du_ue_repository&      get_rrc_du_ue_repository()      = 0;
-  virtual rrc_ue_handler&            get_rrc_ue_handler()            = 0;
-  virtual rrc_du_statistics_handler& get_rrc_du_statistics_handler() = 0;
+  virtual rrc_du_cell_manager&             get_rrc_du_cell_manager()             = 0;
+  virtual rrc_du_ue_repository&            get_rrc_du_ue_repository()            = 0;
+  virtual rrc_ue_handler&                  get_rrc_ue_handler()                  = 0;
+  virtual rrc_du_connection_event_handler& get_rrc_du_connection_event_handler() = 0;
+  virtual rrc_du_metrics_collector&        get_rrc_du_metrics_collector()        = 0;
 };
 
 } // namespace srs_cu_cp

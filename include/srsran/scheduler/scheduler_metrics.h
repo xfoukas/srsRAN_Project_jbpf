@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -24,43 +24,88 @@
 
 #include "srsran/adt/span.h"
 #include "srsran/ran/pci.h"
-#include "srsran/ran/phy_time_unit.h"
 #include "srsran/ran/rnti.h"
 #include "srsran/ran/sch/sch_mcs.h"
 #include "srsran/ran/slot_point.h"
-#include "srsran/support/stats.h"
+#include "srsran/support/math/stats.h"
+#include "srsran/support/zero_copy_notifier.h"
 #include <optional>
 
 namespace srsran {
 
 /// \brief Snapshot of the metrics for a UE.
 struct scheduler_ue_metrics {
-  pci_t                        pci;
-  rnti_t                       rnti;
-  sch_mcs_index                dl_mcs;
-  unsigned                     tot_dl_prbs_used;
-  double                       mean_dl_prbs_used;
-  double                       dl_brate_kbps;
-  unsigned                     dl_nof_ok;
-  unsigned                     dl_nof_nok;
-  float                        pusch_snr_db;
-  float                        pusch_rsrp_db;
-  float                        pucch_snr_db;
-  sch_mcs_index                ul_mcs;
-  unsigned                     tot_ul_prbs_used;
-  double                       mean_ul_prbs_used;
-  double                       ul_brate_kbps;
-  double                       ul_delay_ms;
-  unsigned                     ul_nof_ok;
-  unsigned                     ul_nof_nok;
-  unsigned                     bsr;
-  unsigned                     dl_bs;
-  std::optional<phy_time_unit> last_ta;
-  std::optional<int>           last_phr;
+  /// PCI of the UE's PCell.
+  pci_t pci;
+  /// Currently used C-RNTI for this UE.
+  rnti_t rnti;
+  /// Average MCS index used for DL grants.
+  sch_mcs_index dl_mcs;
+  /// Number of RBs used for PDSCH.
+  unsigned tot_pdsch_prbs_used;
+  /// \brief Experienced MAC DL bit rate in kbps, considering the size of the allocated MAC DL PDUs for which a positive
+  /// HARQ-ACK was received.
+  double dl_brate_kbps;
+  /// Number of positive HARQ-ACKs received.
+  unsigned dl_nof_ok;
+  /// Number of detected HARQ NACKs or HARQ-ACK misdetections.
+  unsigned dl_nof_nok;
+  /// SNR in dB estimated for the PUSCH.
+  float pusch_snr_db;
+  /// RSRP in dB estimated for the PUSCH.
+  float pusch_rsrp_db;
+  /// SNR in dB estimated for the PUCCH.
+  float pucch_snr_db;
+  /// Average MCS index used for UL grants.
+  sch_mcs_index ul_mcs;
+  /// Number of RBs used for PUSCH.
+  unsigned tot_pusch_prbs_used;
+  /// \brief Experienced MAC UL bit rate in kbps, considering the size of the allocated MAC UL PDUs for which the
+  /// respective CRC was decoded.
+  double ul_brate_kbps;
+  /// Number of positive CRC PDU indications received.
+  unsigned ul_nof_ok;
+  /// Number of negative CRC PDU indications received.
+  unsigned ul_nof_nok;
+  /// Sum of the last UL buffer status reports (BSRs) of all logical channel groups.
+  unsigned bsr;
+  /// Number of scheduling requests detected.
+  unsigned sr_count;
+  /// Sum of the last DL buffer occupancy reports of all logical channels.
+  unsigned dl_bs;
+  /// Invalid UCI reception metrics.
+  /// @{
+  unsigned nof_pucch_f0f1_invalid_harqs;
+  unsigned nof_pucch_f2f3f4_invalid_harqs;
+  unsigned nof_pucch_f2f3f4_invalid_csis;
+  unsigned nof_pusch_invalid_harqs;
+  unsigned nof_pusch_invalid_csis;
+  /// @}
+  /// Delay metrics.
+  /// @{
+  std::optional<float> avg_ce_delay_ms;
+  std::optional<float> max_ce_delay_ms;
+  std::optional<float> avg_crc_delay_ms;
+  std::optional<float> max_crc_delay_ms;
+  std::optional<float> avg_pusch_harq_delay_ms;
+  std::optional<float> max_pusch_harq_delay_ms;
+  std::optional<float> avg_pucch_harq_delay_ms;
+  std::optional<float> max_pucch_harq_delay_ms;
+  /// @}
+  std::optional<float> last_dl_olla;
+  std::optional<float> last_ul_olla;
+  std::optional<int>   last_phr;
+  /// Time advance statistics in seconds.
+  sample_statistics<float> ta_stats;
+  sample_statistics<float> pusch_ta_stats;
+  sample_statistics<float> pucch_ta_stats;
+  sample_statistics<float> srs_ta_stats;
   /// CQI statistics over the metrics report interval.
   sample_statistics<unsigned> cqi_stats;
-  /// RI statistics over the metrics report interval.
-  sample_statistics<unsigned> ri_stats;
+  /// DL RI statistics over the metrics report interval.
+  sample_statistics<unsigned> dl_ri_stats;
+  /// UL RI statistics over the metrics report interval.
+  sample_statistics<unsigned> ul_ri_stats;
 };
 
 /// \brief Event that occurred in the cell of the scheduler.
@@ -72,26 +117,66 @@ struct scheduler_cell_event {
   event_type type;
 };
 
+inline const char* sched_event_to_string(scheduler_cell_event::event_type ev)
+{
+  std::array<const char*, 3> names = {"ue_add", "ue_reconf", "ue_rem"};
+  return names[std::min(static_cast<size_t>(ev), names.size() - 1)];
+}
+
 /// \brief Snapshot of the metrics for a cell and its UEs.
 struct scheduler_cell_metrics {
   /// Latency histogram number of bins.
   static constexpr unsigned latency_hist_bins = 10;
   /// Distance between histogram bins.
   static constexpr unsigned nof_usec_per_bin = 50;
+
+  /// Cell PCI for which the metrics are reported.
+  pci_t pci;
+  /// Slot at which the metrics started being tracked for this report.
+  slot_point slot;
+  /// Number of slots accounted for in this report.
+  unsigned nof_slots = 0;
   /// Number of cell PRBs.
   unsigned nof_prbs = 0;
-  /// Number of full downlink slots.
+  /// Number of downlink slots.
   unsigned nof_dl_slots = 0;
-  /// Number of full uplink slots.
+  /// Number of uplink slots (only full uplink slots counted for now).
   unsigned nof_ul_slots = 0;
   /// Number of PRACH preambles detected.
   unsigned nof_prach_preambles = 0;
+  /// Counter of UE PDSCH grants (RARs, SIBs and Paging are not considered).
+  unsigned dl_grants_count = 0;
+  /// Counter of UE PUSCH grants.
+  unsigned ul_grants_count = 0;
+  /// Number of failed PDCCH allocation attempts.
+  unsigned nof_failed_pdcch_allocs = 0;
+  /// Number of failed UCI allocation attempts.
+  unsigned nof_failed_uci_allocs = 0;
+  /// Number of MSG3s.
+  unsigned nof_msg3_ok = 0;
+  /// Number of MSG3 KOs.
+  unsigned nof_msg3_nok = 0;
+  /// Average PRACH delay in ms.
+  std::optional<float> avg_prach_delay_ms;
+  /// Number of failed PDSCH allocations due to late HARQs.
+  unsigned nof_failed_pdsch_allocs_late_harqs = 0;
+  /// Number of failed PUSCH allocations due to late HARQs.
+  unsigned nof_failed_pusch_allocs_late_harqs = 0;
+  /// Number of UE events not reported because the maximum number of events was reached.
+  unsigned nof_filtered_events = 0;
 
   unsigned                                nof_error_indications = 0;
   std::chrono::microseconds               average_decision_latency{0};
+  std::chrono::microseconds               max_decision_latency{0};
+  slot_point                              max_decision_latency_slot;
   std::array<unsigned, latency_hist_bins> latency_histogram{0};
   std::vector<scheduler_cell_event>       events;
   std::vector<scheduler_ue_metrics>       ue_metrics;
+};
+
+/// Scheduler metrics report for all active cells of the DU.
+struct scheduler_metrics_report {
+  std::vector<scheduler_cell_metrics> cells;
 };
 
 /// \brief Notifier interface used by scheduler to report metrics.
@@ -102,6 +187,14 @@ public:
 
   /// \brief This method will be called periodically by the scheduler to report the latest UE metrics statistics.
   virtual void report_metrics(const scheduler_cell_metrics& report) = 0;
+};
+
+/// Interface used by the scheduler to determine whether a new metric report is required.
+class scheduler_cell_metrics_notifier : public zero_copy_notifier<scheduler_cell_metrics>
+{
+public:
+  /// Check whether a new metric report is required given the current slot.
+  virtual bool is_sched_report_required(slot_point sl_tx) const = 0;
 };
 
 } // namespace srsran

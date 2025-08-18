@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -59,8 +59,11 @@ void ng_setup_procedure::operator()(coro_context<async_task<ngap_ng_setup_result
     // Subscribe to respective publisher to receive NG SETUP RESPONSE/FAILURE message.
     transaction_sink.subscribe_to(ev_mng.ng_setup_outcome, ng_setup_response_timeout);
 
-    // Send request to AMF.
-    amf_notifier.on_new_message(request);
+    // Forward message to AMF.
+    if (!amf_notifier.on_new_message(request)) {
+      logger.warning("AMF notifier is not set. Cannot send NGSetupRequest");
+      CORO_EARLY_RETURN(ngap_ng_setup_failure{ngap_cause_misc_t::unspecified});
+    }
 
     // Await AMF response.
     CORO_AWAIT(transaction_sink);
@@ -71,10 +74,10 @@ void ng_setup_procedure::operator()(coro_context<async_task<ngap_ng_setup_result
     }
 
     // Await timer.
-    logger.info("Reinitiating NG setup in {}s (retry={}/{}). Received NGSetupFailure with Time to Wait IE",
-                time_to_wait.count(),
-                ng_setup_retry_no,
-                max_setup_retries);
+    logger.debug("Reinitiating NG setup in {}s (retry={}/{}). Received NGSetupFailure with Time to Wait IE",
+                 time_to_wait.count(),
+                 ng_setup_retry_no,
+                 max_setup_retries);
     CORO_AWAIT(
         async_wait_for(ng_setup_wait_timer, std::chrono::duration_cast<std::chrono::milliseconds>(time_to_wait)));
   }
@@ -90,7 +93,29 @@ bool ng_setup_procedure::retry_required()
     return false;
   }
 
+  if (transaction_sink.timeout_expired()) {
+    // Timeout case.
+    logger.warning("\"{}\" timed out after {}ms", name(), ng_setup_response_timeout.count());
+    fmt::print("\"{}\" timed out after {}ms", name(), ng_setup_response_timeout.count());
+    return false;
+  }
+
+  if (!transaction_sink.failed()) {
+    // No response received.
+    logger.warning("\"{}\" failed. No response received", name());
+    fmt::print("\"{}\" failed. No response received\n", name());
+    return false;
+  }
+
   const asn1::ngap::ng_setup_fail_s& ng_fail = transaction_sink.failure();
+
+  // No point in retrying when the failure is due to misconfiguration.
+  if (is_failure_misconfiguration(ng_fail->cause)) {
+    logger.warning("\"{}\": Stopping procedure. Cause: misconfiguration between gNB and AMF", name());
+    logger.warning("\"{}\" failed. AMF NGAP cause: \"{}\"", name(), get_cause_str(ng_fail->cause));
+    fmt::print("\"{}\" failed. AMF NGAP cause: \"{}\"\n", name(), get_cause_str(ng_fail->cause));
+    return false;
+  }
 
   if (not ng_fail->time_to_wait_present) {
     // AMF didn't command a waiting time.
@@ -118,17 +143,39 @@ ngap_ng_setup_result ng_setup_procedure::create_ng_setup_result()
   ngap_ng_setup_result res{};
 
   if (transaction_sink.successful()) {
-    logger.info("\"{}\" finished successfully", name());
+    logger.debug("\"{}\" finished successfully", name());
 
     fill_ngap_ng_setup_result(res, transaction_sink.response());
 
-    for (const auto& guami_item : std::get<ngap_ng_setup_response>(res).served_guami_list) {
+    auto& ng_setup_response = std::get<ngap_ng_setup_response>(res);
+    for (const auto& guami_item : ng_setup_response.served_guami_list) {
       context.served_guami_list.push_back(guami_item.guami);
     }
-
-  } else {
+    context.amf_name = ng_setup_response.amf_name;
+  } else if (transaction_sink.failed()) {
     fill_ngap_ng_setup_result(res, transaction_sink.failure());
+  } else {
+    res = ngap_ng_setup_failure{ngap_cause_misc_t::unspecified};
   }
 
   return res;
+}
+
+bool ng_setup_procedure::is_failure_misconfiguration(const cause_c& cause)
+{
+  switch (cause.type()) {
+    case cause_c::types_opts::radio_network:
+      return false;
+    case cause_c::types_opts::transport:
+      return false;
+    case cause_c::types_opts::nas:
+      return false;
+    case cause_c::types_opts::protocol:
+      return false;
+    case cause_c::types_opts::misc:
+      return cause.misc() == asn1::ngap::cause_misc_opts::unknown_plmn_or_sn_pn;
+    default:
+      break;
+  }
+  return false;
 }

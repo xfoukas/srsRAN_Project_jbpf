@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -22,24 +22,27 @@
 
 #pragma once
 
+#include "e2ap_asn1_packer.h"
+#include "lib/e2/common/e2_impl.h"
 #include "lib/e2/common/e2_subscription_manager_impl.h"
-#include "lib/e2/common/e2ap_asn1_packer.h"
 #include "lib/e2/e2sm/e2sm_kpm/e2sm_kpm_asn1_packer.h"
 #include "lib/e2/e2sm/e2sm_kpm/e2sm_kpm_impl.h"
 #include "lib/e2/e2sm/e2sm_rc/e2sm_rc_asn1_packer.h"
+#include "lib/e2/e2sm/e2sm_rc/e2sm_rc_control_action_cu_executor.h"
 #include "lib/e2/e2sm/e2sm_rc/e2sm_rc_control_action_du_executor.h"
 #include "lib/e2/e2sm/e2sm_rc/e2sm_rc_control_service_impl.h"
 #include "lib/e2/e2sm/e2sm_rc/e2sm_rc_impl.h"
 #include "srsran/asn1/e2ap/e2ap.h"
 #include "srsran/asn1/e2sm/e2sm_rc_ies.h"
+#include "srsran/cu_cp/cu_configurator.h"
+#include "srsran/cu_cp/mobility_manager_config.h"
 #include "srsran/e2/e2.h"
+#include "srsran/e2/e2_cu.h"
 #include "srsran/e2/e2_du_factory.h"
-#include "srsran/e2/e2_factory.h"
 #include "srsran/e2/e2ap_configuration_helpers.h"
 #include "srsran/e2/e2sm/e2sm.h"
-#include "srsran/e2/e2sm/e2sm_factory.h"
 #include "srsran/e2/e2sm/e2sm_manager.h"
-#include "srsran/gateways/network_gateway.h"
+#include "srsran/e2/gateways/e2_connection_client.h"
 #include "srsran/pcap/dlt_pcap.h"
 #include "srsran/support/executors/manual_task_worker.h"
 #include "srsran/support/timers.h"
@@ -69,9 +72,9 @@ public:
 class dummy_e2_pdu_notifier : public e2_message_notifier
 {
 public:
-  dummy_e2_pdu_notifier(e2_message_handler* handler_) : logger(srslog::fetch_basic_logger("TEST")), handler(handler_){};
+  dummy_e2_pdu_notifier(e2_message_handler* handler_) : logger(srslog::fetch_basic_logger("TEST")), handler(handler_) {}
 
-  void attach_handler(e2_message_handler* handler_) { handler = handler_; };
+  void attach_handler(e2_message_handler* handler_) { handler = handler_; }
   void on_new_message(const e2_message& msg) override
   {
     switch (msg.pdu.type().value) {
@@ -112,6 +115,7 @@ private:
 class dummy_e2ap_pcap : public dlt_pcap
 {
 public:
+  void flush() override {}
   void close() override {}
   bool is_write_enabled() const override { return false; }
   void push_pdu(const_span<uint8_t> pdu) override {}
@@ -165,9 +169,12 @@ inline e2_message generate_e2_setup_request(std::string oid)
   return e2_msg;
 }
 
-inline e2_message generate_ric_control_request_style2_action6(srslog::basic_logger& logger)
+inline e2_message
+generate_ric_control_request_style2_action6(srslog::basic_logger&                      logger,
+                                            const std::vector<rrm_policy_ratio_group>& rrm_policy_ratio_list_def)
 {
   using namespace asn1::e2ap;
+
   e2_message  e2_msg;
   init_msg_s& initmsg = e2_msg.pdu.set_init_msg();
   initmsg.load_info_obj(ASN1_E2AP_ID_RIC_CTRL);
@@ -186,7 +193,7 @@ inline e2_message generate_ric_control_request_style2_action6(srslog::basic_logg
   ctrl_hdr.ric_ctrl_hdr_formats.ctrl_hdr_format1().ric_ctrl_decision_present = false;
   ctrl_hdr.ric_ctrl_hdr_formats.ctrl_hdr_format1().ric_style_type            = 2;
   ctrl_hdr.ric_ctrl_hdr_formats.ctrl_hdr_format1().ric_ctrl_action_id        = 6;
-  ctrl_hdr.ric_ctrl_hdr_formats.ctrl_hdr_format1().ue_id.set_gnb_ue_id();
+  ctrl_hdr.ric_ctrl_hdr_formats.ctrl_hdr_format1().ue_id.set_gnb_du_ue_id();
   ctrl_hdr.ric_ctrl_hdr_formats.ctrl_hdr_format1().ue_id.gnb_du_ue_id().gnb_cu_ue_f1ap_id = 4;
 
   srsran::byte_buffer ctrl_hdr_buff;
@@ -195,31 +202,113 @@ inline e2_message generate_ric_control_request_style2_action6(srslog::basic_logg
     logger.error("Failed to pack E2SM RC control header\n");
   }
 
-  bool ret = ric_control_request->ric_ctrl_hdr.resize(ctrl_hdr_buff.length());
-  (void)ret;
+  (void)ric_control_request->ric_ctrl_hdr.resize(ctrl_hdr_buff.length());
   std::copy(ctrl_hdr_buff.begin(), ctrl_hdr_buff.end(), ric_control_request->ric_ctrl_hdr.begin());
 
   asn1::e2sm::e2sm_rc_ctrl_msg_s ctrl_msg;
   ctrl_msg.ric_ctrl_msg_formats.set_ctrl_msg_format1();
-  ctrl_msg.ric_ctrl_msg_formats.ctrl_msg_format1().ran_p_list.resize(2);
-  ctrl_msg.ric_ctrl_msg_formats.ctrl_msg_format1().ran_p_list[0].ran_param_id = 11;
-  ctrl_msg.ric_ctrl_msg_formats.ctrl_msg_format1()
-      .ran_p_list[0]
-      .ran_param_value_type.set_ran_p_choice_elem_false()
-      .ran_param_value_present = true;
-  ctrl_msg.ric_ctrl_msg_formats.ctrl_msg_format1()
-      .ran_p_list[0]
-      .ran_param_value_type.ran_p_choice_elem_false()
-      .ran_param_value.set_value_int()                                        = 5;
-  ctrl_msg.ric_ctrl_msg_formats.ctrl_msg_format1().ran_p_list[1].ran_param_id = 12;
-  ctrl_msg.ric_ctrl_msg_formats.ctrl_msg_format1()
-      .ran_p_list[1]
-      .ran_param_value_type.set_ran_p_choice_elem_false()
-      .ran_param_value_present = true;
-  ctrl_msg.ric_ctrl_msg_formats.ctrl_msg_format1()
-      .ran_p_list[1]
-      .ran_param_value_type.ran_p_choice_elem_false()
-      .ran_param_value.set_value_int() = 12;
+  asn1::e2sm::e2sm_rc_ctrl_msg_format1_s& ctrl_msg_f1 = ctrl_msg.ric_ctrl_msg_formats.ctrl_msg_format1();
+
+  unsigned nof_policy_groups = rrm_policy_ratio_list_def.size();
+  // 1 - RRM Policy Ratio List.
+  ctrl_msg_f1.ran_p_list.resize(nof_policy_groups);
+  for (unsigned g = 0; g < nof_policy_groups; ++g) {
+    const auto& rrm_policy_ratio_grp   = rrm_policy_ratio_list_def[g];
+    unsigned    nof_members            = rrm_policy_ratio_grp.policy_members_list.size();
+    auto&       rrm_policy_ratio_list  = ctrl_msg_f1.ran_p_list[g];
+    rrm_policy_ratio_list.ran_param_id = 1;
+    rrm_policy_ratio_list.ran_param_value_type.set_ran_p_choice_list().ran_param_list.list_of_ran_param.resize(1);
+    rrm_policy_ratio_list.ran_param_value_type.ran_p_choice_list()
+        .ran_param_list.list_of_ran_param[0]
+        .seq_of_ran_params.resize(1);
+
+    // 2 - RRM Policy Ratio Group.
+    auto& rrm_policy_ratio_list_group = rrm_policy_ratio_list.ran_param_value_type.ran_p_choice_list()
+                                            .ran_param_list.list_of_ran_param[0]
+                                            .seq_of_ran_params[0];
+    rrm_policy_ratio_list_group.ran_param_id = 2;
+    rrm_policy_ratio_list_group.ran_param_value_type.set_ran_p_choice_structure()
+        .ran_param_structure.seq_of_ran_params.resize(4); // policy, min, max, ded.
+    // 3 - RRM Policy.
+    auto& rrm_policy = rrm_policy_ratio_list_group.ran_param_value_type.ran_p_choice_structure()
+                           .ran_param_structure.seq_of_ran_params[0];
+    rrm_policy.ran_param_id = 3;
+    rrm_policy.ran_param_value_type.set_ran_p_choice_structure().ran_param_structure.seq_of_ran_params.resize(1);
+    // 5 - RRM Policy Member List.
+    auto& rrm_policy_member_list =
+        rrm_policy.ran_param_value_type.ran_p_choice_structure().ran_param_structure.seq_of_ran_params.back();
+    rrm_policy_member_list.ran_param_id = 5;
+    rrm_policy_member_list.ran_param_value_type.set_ran_p_choice_list().ran_param_list.list_of_ran_param.resize(
+        1); // 1 policy member
+    rrm_policy_member_list.ran_param_value_type.ran_p_choice_list()
+        .ran_param_list.list_of_ran_param[0]
+        .seq_of_ran_params.resize(nof_members);
+
+    for (unsigned i = 0; i < nof_members; ++i) {
+      auto& policy_member_def = rrm_policy_ratio_grp.policy_members_list[i];
+      // 6 - RRM Policy Member.
+      auto& rrm_policy_member = rrm_policy_member_list.ran_param_value_type.ran_p_choice_list()
+                                    .ran_param_list.list_of_ran_param[0]
+                                    .seq_of_ran_params[i];
+      rrm_policy_member.ran_param_id = 6;
+      rrm_policy_member.ran_param_value_type.set_ran_p_choice_structure().ran_param_structure.seq_of_ran_params.resize(
+          2); // plmn, nssai
+      // 7 - PLMN Identity.
+      auto& plmn =
+          rrm_policy_member.ran_param_value_type.ran_p_choice_structure().ran_param_structure.seq_of_ran_params[0];
+      plmn.ran_param_id = 7;
+      plmn.ran_param_value_type.set_ran_p_choice_elem_false();
+      plmn.ran_param_value_type.ran_p_choice_elem_false().ran_param_value_present = true;
+      asn1::unbounded_octstring<true> plmn_id_asn;
+      plmn_id_asn.from_bytes(policy_member_def.plmn_id.to_bytes());
+      plmn.ran_param_value_type.ran_p_choice_elem_false().ran_param_value.set_value_oct_s() = plmn_id_asn;
+      //  8 - S-NSSAI.
+      auto& nssai =
+          rrm_policy_member.ran_param_value_type.ran_p_choice_structure().ran_param_structure.seq_of_ran_params[1];
+      nssai.ran_param_id = 8;
+      nssai.ran_param_value_type.set_ran_p_choice_structure().ran_param_structure.seq_of_ran_params.resize(
+          2); // sst, sd
+      // 9 - SST.
+      auto& sst        = nssai.ran_param_value_type.ran_p_choice_structure().ran_param_structure.seq_of_ran_params[0];
+      sst.ran_param_id = 9;
+      sst.ran_param_value_type.set_ran_p_choice_elem_false();
+      sst.ran_param_value_type.ran_p_choice_elem_false().ran_param_value_present = true;
+      sst.ran_param_value_type.ran_p_choice_elem_false().ran_param_value.set_value_oct_s().from_number(
+          policy_member_def.s_nssai.sst.value());
+      // 10 - SD.
+      auto& sd        = nssai.ran_param_value_type.ran_p_choice_structure().ran_param_structure.seq_of_ran_params[1];
+      sd.ran_param_id = 10;
+      sd.ran_param_value_type.set_ran_p_choice_elem_false();
+      sd.ran_param_value_type.ran_p_choice_elem_false().ran_param_value_present = true;
+      sd.ran_param_value_type.ran_p_choice_elem_false().ran_param_value.set_value_oct_s().from_number(
+          policy_member_def.s_nssai.sd.value());
+    }
+
+    // 11 - Min PRB Policy Ratio.
+    auto& min_prb = rrm_policy_ratio_list_group.ran_param_value_type.ran_p_choice_structure()
+                        .ran_param_structure.seq_of_ran_params[1];
+    min_prb.ran_param_id = 11;
+    min_prb.ran_param_value_type.set_ran_p_choice_elem_false();
+    min_prb.ran_param_value_type.ran_p_choice_elem_false().ran_param_value_present = true;
+    min_prb.ran_param_value_type.ran_p_choice_elem_false().ran_param_value.set_value_int() =
+        *rrm_policy_ratio_grp.min_prb_policy_ratio;
+    // 12 - Max PRB Policy Ratio.
+    auto& max_prb = rrm_policy_ratio_list_group.ran_param_value_type.ran_p_choice_structure()
+                        .ran_param_structure.seq_of_ran_params[2];
+    max_prb.ran_param_id = 12;
+    max_prb.ran_param_value_type.set_ran_p_choice_elem_false();
+    max_prb.ran_param_value_type.ran_p_choice_elem_false().ran_param_value_present = true;
+    max_prb.ran_param_value_type.ran_p_choice_elem_false().ran_param_value.set_value_int() =
+        *rrm_policy_ratio_grp.max_prb_policy_ratio;
+    // 13 - Dedicated PRB Policy Ratio.
+    auto& ded_prb = rrm_policy_ratio_list_group.ran_param_value_type.ran_p_choice_structure()
+                        .ran_param_structure.seq_of_ran_params[3];
+    ded_prb.ran_param_id = 13;
+    ded_prb.ran_param_value_type.set_ran_p_choice_elem_false();
+    ded_prb.ran_param_value_type.ran_p_choice_elem_false().ran_param_value_present = true;
+    ded_prb.ran_param_value_type.ran_p_choice_elem_false().ran_param_value.set_value_int() =
+        *rrm_policy_ratio_grp.ded_prb_policy_ratio;
+  }
 
   srsran::byte_buffer ctrl_msg_buff;
   asn1::bit_ref       bref_msg1(ctrl_msg_buff);
@@ -227,8 +316,7 @@ inline e2_message generate_ric_control_request_style2_action6(srslog::basic_logg
     logger.error("Failed to pack E2SM RC control message\n");
   }
 
-  ret = ric_control_request->ric_ctrl_msg.resize(ctrl_msg_buff.length());
-  (void)ret;
+  (void)ric_control_request->ric_ctrl_msg.resize(ctrl_msg_buff.length());
   std::copy(ctrl_msg_buff.begin(), ctrl_msg_buff.end(), ric_control_request->ric_ctrl_msg.begin());
   return e2_msg;
 }
@@ -267,8 +355,7 @@ inline e2_message generate_ric_control_request(srslog::basic_logger& logger,
     logger.error("Failed to pack E2SM RC control header\n");
   }
 
-  bool ret = ric_control_request->ric_ctrl_hdr.resize(ctrl_hdr_buff.length());
-  (void)ret;
+  (void)ric_control_request->ric_ctrl_hdr.resize(ctrl_hdr_buff.length());
   std::copy(ctrl_hdr_buff.begin(), ctrl_hdr_buff.end(), ric_control_request->ric_ctrl_hdr.begin());
 
   asn1::e2sm::e2sm_rc_ctrl_msg_s ctrl_msg;
@@ -292,8 +379,7 @@ inline e2_message generate_ric_control_request(srslog::basic_logger& logger,
     logger.error("Failed to pack E2SM RC control message\n");
   }
 
-  ret = ric_control_request->ric_ctrl_msg.resize(ctrl_msg_buff.length());
-  (void)ret;
+  (void)ric_control_request->ric_ctrl_msg.resize(ctrl_msg_buff.length());
   std::copy(ctrl_msg_buff.begin(), ctrl_msg_buff.end(), ric_control_request->ric_ctrl_msg.begin());
   return e2_msg;
 }
@@ -353,27 +439,27 @@ public:
 class dummy_e2sm_kpm_du_meas_provider : public e2sm_kpm_meas_provider
 {
 public:
-  dummy_e2sm_kpm_du_meas_provider(){};
+  dummy_e2sm_kpm_du_meas_provider() {}
   std::vector<std::string> get_supported_metric_names(e2sm_kpm_metric_level_enum level) override
   {
     return supported_metrics;
-  };
-  virtual bool is_cell_supported(const asn1::e2sm::cgi_c& cell_global_id) override { return true; };
-  virtual bool is_ue_supported(const asn1::e2sm::ue_id_c& ueid) override { return true; };
-  virtual bool is_test_cond_supported(const asn1::e2sm::test_cond_type_c& test_cond_type) override { return true; };
+  }
+  virtual bool is_cell_supported(const asn1::e2sm::cgi_c& cell_global_id) override { return true; }
+  virtual bool is_ue_supported(const asn1::e2sm::ue_id_c& ueid) override { return true; }
+  virtual bool is_test_cond_supported(const asn1::e2sm::test_cond_type_c& test_cond_type) override { return true; }
 
   virtual bool get_ues_matching_test_conditions(const asn1::e2sm::matching_cond_list_l& matching_cond_list,
                                                 std::vector<asn1::e2sm::ue_id_c>&       ues) override
   {
     return get_ues_matching_cond(ues);
-  };
+  }
 
   virtual bool
   get_ues_matching_test_conditions(const asn1::e2sm::matching_ue_cond_per_sub_list_l& matching_ue_cond_list,
                                    std::vector<asn1::e2sm::ue_id_c>&                  ues) override
   {
     return get_ues_matching_cond(ues);
-  };
+  }
 
   virtual bool is_metric_supported(const asn1::e2sm::meas_type_c&   meas_type,
                                    const asn1::e2sm::meas_label_s&  label,
@@ -386,7 +472,7 @@ public:
     } else {
       return false;
     }
-  };
+  }
   /// \return Returns True if measurement collection was successful
   virtual bool get_meas_data(const asn1::e2sm::meas_type_c&               meas_type,
                              const asn1::e2sm::label_info_list_l          label_info_list,
@@ -454,7 +540,7 @@ public:
     }
 
     return false;
-  };
+  }
 
   void push_measurements_int(std::vector<uint32_t> presence_,
                              std::vector<uint32_t> cond_satisfied_,
@@ -463,7 +549,7 @@ public:
     presence        = presence_;
     cond_satisfied  = cond_satisfied_;
     meas_values_int = meas_values_int_;
-  };
+  }
 
   void push_measurements_float(std::vector<uint32_t> presence_,
                                std::vector<uint32_t> cond_satisfied_,
@@ -472,9 +558,9 @@ public:
     presence          = presence_;
     cond_satisfied    = cond_satisfied_;
     meas_values_float = meas_values_float_;
-  };
+  }
 
-  void set_ue_ids(std::vector<uint32_t> ue_ids_) { ue_ids = ue_ids_; };
+  void set_ue_ids(std::vector<uint32_t> ue_ids_) { ue_ids = ue_ids_; }
 
 private:
   bool get_ues_matching_cond(std::vector<asn1::e2sm::ue_id_c>& ues)
@@ -493,7 +579,7 @@ private:
       return true;
     }
     return false;
-  };
+  }
 
   std::vector<std::string> supported_metrics =
       {"CQI", "RSRP", "RSRQ", "DRB.UEThpDl", "DRB.UEThpUl", "DRB.RlcSduDelayDl"};
@@ -507,7 +593,7 @@ private:
 class dummy_e2_subscription_mngr : public e2_subscription_manager
 {
 public:
-  dummy_e2_subscription_mngr() : logger(srslog::fetch_basic_logger("TEST")){};
+  dummy_e2_subscription_mngr() : logger(srslog::fetch_basic_logger("TEST")) {}
   e2_subscribe_reponse_message handle_subscription_setup(const asn1::e2ap::ric_sub_request_s& request) override
   {
     last_subscription = request;
@@ -523,11 +609,12 @@ public:
   {
     e2_subscribe_delete_response_message outcome;
     return outcome;
-  };
+  }
 
   void start_subscription(const asn1::e2ap::ric_request_id_s& ric_request_id,
+                          uint16_t                            ran_func_id,
                           e2_event_manager&                   ev_mng,
-                          uint16_t                            ran_func_id) override
+                          e2_message_notifier&                tx_pdu_notifier) override
   {
   }
 
@@ -542,6 +629,8 @@ public:
   e2sm_interface* get_e2sm_interface(std::string oid) override { return nullptr; }
 
   void add_ran_function_oid(uint16_t ran_func_id, std::string oid) override {}
+
+  void stop() override {}
 
 private:
   void get_subscription_result(e2_subscribe_reponse_message& msg)
@@ -591,6 +680,16 @@ inline e2_message generate_e2_setup_response(unsigned transaction_id)
   setup->ran_functions_accepted.push_back(ran_func_item);
   setup->global_ric_id.plmn_id.from_number(131014);
   setup->global_ric_id.ric_id.from_number(699598);
+  // fill the required part with dummy data
+  setup->e2node_component_cfg_addition_ack.resize(1);
+  asn1::e2ap::e2node_component_cfg_addition_ack_item_s& e2node_component_cfg_addition_ack_item =
+      setup->e2node_component_cfg_addition_ack[0].value().e2node_component_cfg_addition_ack_item();
+  e2node_component_cfg_addition_ack_item.e2node_component_interface_type =
+      asn1::e2ap::e2node_component_interface_type_e::e2node_component_interface_type_opts::e1;
+  e2node_component_cfg_addition_ack_item.e2node_component_id.set_e2node_component_interface_type_e1().gnb_cu_up_id =
+      123;
+  e2node_component_cfg_addition_ack_item.e2node_component_cfg_ack.upd_outcome =
+      asn1::e2ap::e2node_component_cfg_ack_s::upd_outcome_opts::success;
   return e2_setup_response;
 }
 
@@ -628,8 +727,7 @@ generate_e2sm_kpm_ric_action(asn1::e2sm::e2sm_kpm_action_definition_s& action_de
     return {};
   }
 
-  bool ret = ric_action.ric_action_definition.resize(buf.length());
-  (void)ret;
+  (void)ric_action.ric_action_definition.resize(buf.length());
   std::copy(buf.begin(), buf.end(), ric_action.ric_action_definition.begin());
   return ric_action;
 }
@@ -651,8 +749,7 @@ inline e2_message generate_e2sm_kpm_subscription_request(asn1::e2ap::ric_action_
     return {};
   }
 
-  bool ret = ric_subscript_reqs->ric_sub_details.ric_event_trigger_definition.resize(buf.length());
-  (void)ret;
+  (void)ric_subscript_reqs->ric_sub_details.ric_event_trigger_definition.resize(buf.length());
   std::copy(buf.begin(), buf.end(), ric_subscript_reqs->ric_sub_details.ric_event_trigger_definition.begin());
 
   e2_message e2_msg;
@@ -677,11 +774,9 @@ inline e2_message generate_e2_ind_msg(byte_buffer& ind_hdr_bytes, byte_buffer& i
   e2_ind.indication->ric_call_process_id_present     = false;
 
   // put RIC indication content into message
-  bool ret = e2_ind.indication->ric_ind_msg.resize(ind_msg_bytes.length());
-  (void)ret;
+  (void)e2_ind.indication->ric_ind_msg.resize(ind_msg_bytes.length());
   std::copy(ind_msg_bytes.begin(), ind_msg_bytes.end(), e2_ind.indication->ric_ind_msg.begin());
-  ret = e2_ind.indication->ric_ind_hdr.resize(ind_hdr_bytes.length());
-  (void)ret;
+  (void)e2_ind.indication->ric_ind_hdr.resize(ind_hdr_bytes.length());
   std::copy(ind_hdr_bytes.begin(), ind_hdr_bytes.end(), e2_ind.indication->ric_ind_hdr.begin());
 
   e2_message e2_msg;
@@ -695,7 +790,7 @@ inline e2_message generate_e2_ind_msg(byte_buffer& ind_hdr_bytes, byte_buffer& i
 class dummy_e2_message_handler : public e2_message_handler
 {
 public:
-  dummy_e2_message_handler() : logger(srslog::fetch_basic_logger("TEST")){};
+  dummy_e2_message_handler() : logger(srslog::fetch_basic_logger("TEST")) {}
   void handle_message(const e2_message& msg) override
   {
     last_msg = msg;
@@ -708,14 +803,42 @@ private:
   srslog::basic_logger& logger;
 };
 
-/// Dummy PDU handler
-class dummy_network_gateway_data_handler : public srsran::sctp_network_gateway_data_handler
+/// Dummy handler just printing the received PDU.
+class dummy_e2_agent_mng : public e2ap_e2agent_notifier
 {
 public:
-  dummy_network_gateway_data_handler(){};
-  void handle_pdu(const byte_buffer& pdu) override { last_pdu = pdu.copy(); }
+  dummy_e2_agent_mng() : logger(srslog::fetch_basic_logger("TEST")) {}
+  void on_e2_disconnection() override { logger.info("E2 connection closed."); }
 
+private:
+  srslog::basic_logger& logger;
+};
+
+/// Dummy PDU handler
+class dummy_sctp_association_sdu_notifier : public sctp_association_sdu_notifier
+{
+public:
+  dummy_sctp_association_sdu_notifier() = default;
+  bool on_new_sdu(byte_buffer pdu) override
+  {
+    last_pdu = pdu.copy();
+    return true;
+  }
   byte_buffer last_pdu;
+};
+
+class dummy_e2_adapter : public e2_message_handler, public e2_event_handler
+{
+public:
+  dummy_e2_adapter() : logger(srslog::fetch_basic_logger("E2")) {}
+
+  void connect_e2ap(e2_interface* e2ap_) { e2ap = e2ap_; }
+  void handle_message(const e2_message& msg) override { e2ap->handle_message(msg); }
+  void handle_connection_loss() override { e2ap->handle_connection_loss(); }
+
+private:
+  srslog::basic_logger& logger;
+  e2_interface*         e2ap = nullptr;
 };
 
 class dummy_e2sm_handler : public e2sm_handler
@@ -752,7 +875,7 @@ class dummy_e2sm_handler : public e2sm_handler
     e2sm_event_trigger_def.report_period = 10;
     return e2sm_event_trigger_def;
   }
-  asn1::unbounded_octstring<true> pack_ran_function_description() override { return {}; };
+  asn1::unbounded_octstring<true> pack_ran_function_description() override { return {}; }
 };
 
 class dummy_e2_connection_client final : public e2_connection_client
@@ -771,18 +894,75 @@ private:
   std::unique_ptr<e2_message_notifier> e2_rx_pdu_notifier;
 };
 
+class dummy_e2_mobility_notifier : public srs_cu_cp::mobility_manager_cu_cp_notifier
+{
+public:
+  virtual async_task<srs_cu_cp::cu_cp_intra_cu_handover_response>
+  on_intra_cu_handover_required(const srs_cu_cp::cu_cp_intra_cu_handover_request& request,
+                                srs_cu_cp::du_index_t                             source_du_index,
+                                srs_cu_cp::du_index_t                             target_du_index) override
+  {
+    return launch_async([](coro_context<async_task<srs_cu_cp::cu_cp_intra_cu_handover_response>>& ctx) {
+      CORO_BEGIN(ctx);
+      CORO_RETURN(srs_cu_cp::cu_cp_intra_cu_handover_response{true});
+    });
+  }
+};
+
 class dummy_du_configurator : public srs_du::du_configurator
 {
 public:
-  dummy_du_configurator(){};
+  dummy_du_configurator() {}
   async_task<srs_du::du_mac_sched_control_config_response>
   configure_ue_mac_scheduler(srs_du::du_mac_sched_control_config reconf) override
   {
-    srs_du::du_mac_sched_control_config config;
     config = reconf;
     return launch_async([](coro_context<async_task<srs_du::du_mac_sched_control_config_response>>& ctx) {
       CORO_BEGIN(ctx);
       CORO_RETURN(srs_du::du_mac_sched_control_config_response{true, true, true});
+    });
+  }
+  srs_du::du_param_config_response handle_operator_config_request(const srs_du::du_param_config_request& req) override
+  {
+    return srs_du::du_param_config_response{};
+  }
+  void handle_si_pdu_update(const srs_du::du_si_pdu_update_request& req) override {}
+
+  srs_du::du_mac_sched_control_config config;
+};
+
+/// Dummy implementation of the CU configurator interface.
+class dummy_cu_configurator : public cu_configurator
+{
+public:
+  dummy_cu_configurator() {}
+
+  srs_cu_cp::ue_index_t get_ue_index(const srs_cu_cp::amf_ue_id_t& amf_ue_id,
+                                     const srs_cu_cp::guami_t&     guami,
+                                     const gnb_cu_ue_f1ap_id_t&    gnb_cu_ue_f1ap_id) const override
+  {
+    return srs_cu_cp::uint_to_ue_index(1);
+  }
+
+  srs_cu_cp::du_index_t get_du_index(const srs_cu_cp::ue_index_t& ue_index) const override
+  {
+    return srs_cu_cp::uint_to_du_index(1);
+  }
+
+  srs_cu_cp::du_index_t get_du_index(const nr_cell_global_id_t& nr_cgi) const override
+  {
+    return srs_cu_cp::uint_to_du_index(1);
+  }
+
+  pci_t get_pci(const nr_cell_global_id_t& nr_cgi) const override { return pci_t(1); }
+
+  async_task<srs_cu_cp::cu_cp_intra_cu_handover_response>
+  trigger_handover(const srs_cu_cp::du_index_t&                      source_du_index,
+                   const srs_cu_cp::cu_cp_intra_cu_handover_request& handover_req) override
+  {
+    return launch_async([](coro_context<async_task<srs_cu_cp::cu_cp_intra_cu_handover_response>>& ctx) {
+      CORO_BEGIN(ctx);
+      CORO_RETURN(srs_cu_cp::cu_cp_intra_cu_handover_response{true});
     });
   }
 };
@@ -796,29 +976,35 @@ protected:
     timers.tick();
     task_worker.run_pending_tasks();
   }
-  e2ap_configuration                                  cfg = {};
-  timer_factory                                       factory;
-  timer_manager                                       timers;
-  std::unique_ptr<dummy_network_gateway_data_handler> gw;
-  std::unique_ptr<e2_interface>                       e2;
-  std::unique_ptr<dummy_e2ap_pcap>                    pcap;
-  std::unique_ptr<srsran::e2ap_asn1_packer>           packer;
-  std::unique_ptr<e2sm_interface>                     e2sm_kpm_iface;
-  std::unique_ptr<e2sm_interface>                     e2sm_rc_iface;
-  std::unique_ptr<e2sm_control_service>               e2sm_rc_control_service_style2;
-  std::unique_ptr<e2sm_control_action_executor>       rc_control_action_2_6_executor;
-  std::unique_ptr<e2sm_handler>                       e2sm_kpm_packer;
-  std::unique_ptr<e2sm_rc_asn1_packer>                e2sm_rc_packer;
-  std::unique_ptr<srs_du::du_configurator>            rc_param_configurator;
-  std::unique_ptr<e2_subscription_manager>            e2_subscription_mngr;
-  std::unique_ptr<e2_du_metrics_interface>            du_metrics;
-  std::unique_ptr<srs_du::f1ap_ue_id_translator>      f1ap_ue_id_mapper;
-  std::unique_ptr<dummy_e2sm_kpm_du_meas_provider>    du_meas_provider;
-  manual_task_worker                                  task_worker{64};
-  std::unique_ptr<dummy_e2_pdu_notifier>              msg_notifier;
-  std::unique_ptr<dummy_e2_connection_client>         e2_client;
-  std::unique_ptr<e2sm_manager>                       e2sm_mngr;
-  srslog::basic_logger&                               test_logger = srslog::fetch_basic_logger("TEST");
+  e2ap_configuration                                          cfg = {};
+  timer_factory                                               factory;
+  timer_manager                                               timers;
+  std::unique_ptr<e2ap_e2agent_notifier>                      agent_notifier;
+  std::unique_ptr<dummy_sctp_association_sdu_notifier>        gw;
+  std::unique_ptr<dummy_e2ap_pcap>                            pcap;
+  std::unique_ptr<e2ap_asn1_packer>                           packer;
+  std::unique_ptr<e2sm_interface>                             e2sm_kpm_iface;
+  std::unique_ptr<e2sm_interface>                             e2sm_rc_iface;
+  std::unique_ptr<e2sm_control_service>                       e2sm_rc_control_service_style2;
+  std::unique_ptr<e2sm_control_service>                       e2sm_rc_control_service_style3;
+  std::unique_ptr<e2sm_control_action_executor>               rc_control_action_2_6_executor;
+  std::unique_ptr<e2sm_control_action_executor>               rc_control_action_3_1_executor;
+  std::unique_ptr<srs_cu_cp::mobility_manager_cu_cp_notifier> mobility_notifier;
+  std::unique_ptr<e2sm_handler>                               e2sm_kpm_packer;
+  std::unique_ptr<e2sm_rc_asn1_packer>                        e2sm_rc_packer;
+  std::unique_ptr<dummy_du_configurator>                      du_rc_param_configurator;
+  std::unique_ptr<cu_configurator>                            cu_rc_param_configurator;
+  std::unique_ptr<e2_subscription_manager>                    e2_subscription_mngr;
+  std::unique_ptr<e2_du_metrics_interface>                    du_metrics;
+  std::unique_ptr<srs_du::f1ap_ue_id_translator>              f1ap_ue_id_mapper;
+  std::unique_ptr<dummy_e2sm_kpm_du_meas_provider>            du_meas_provider;
+  manual_task_worker                                          task_worker{64};
+  std::unique_ptr<dummy_e2_pdu_notifier>                      msg_notifier;
+  std::unique_ptr<dummy_e2_connection_client>                 e2_client;
+  std::unique_ptr<e2sm_manager>                               e2sm_mngr;
+  std::unique_ptr<e2_interface>                               e2;
+  std::unique_ptr<e2_agent>                                   e2agent;
+  srslog::basic_logger&                                       test_logger = srslog::fetch_basic_logger("TEST");
 };
 
 class e2_test_base : public e2_base, public ::testing::Test
@@ -834,16 +1020,18 @@ class e2_test : public e2_test_base
     srslog::fetch_basic_logger("TEST").set_level(srslog::basic_levels::debug);
     srslog::init();
 
-    msg_notifier         = std::make_unique<dummy_e2_pdu_notifier>(nullptr);
+    e2_client            = std::make_unique<dummy_e2_connection_client>();
     e2_subscription_mngr = std::make_unique<dummy_e2_subscription_mngr>();
     du_metrics           = std::make_unique<dummy_e2_du_metrics>();
     factory              = timer_factory{timers, task_worker};
     e2sm_mngr            = std::make_unique<e2sm_manager>(test_logger);
-    e2                   = create_e2(cfg, factory, *msg_notifier, *e2_subscription_mngr, *e2sm_mngr);
-    gw                   = std::make_unique<dummy_network_gateway_data_handler>();
-    pcap                 = std::make_unique<dummy_e2ap_pcap>();
-    packer               = std::make_unique<srsran::e2ap_asn1_packer>(*gw, *e2, *pcap);
-    msg_notifier->attach_handler(packer.get());
+    agent_notifier       = std::make_unique<dummy_e2_agent_mng>();
+    e2                   = std::make_unique<e2_impl>(
+        test_logger, cfg, *agent_notifier, factory, *e2_client, *e2_subscription_mngr, *e2sm_mngr, task_worker);
+    // Packer allows to inject packed message into E2 interface.
+    gw     = std::make_unique<dummy_sctp_association_sdu_notifier>();
+    pcap   = std::make_unique<dummy_e2ap_pcap>();
+    packer = std::make_unique<e2ap_asn1_packer>(*gw, *e2, *pcap);
   }
 
   void TearDown() override
@@ -863,16 +1051,17 @@ class e2_entity_test : public e2_test_base
     cfg                  = config_helpers::make_default_e2ap_config();
     cfg.e2sm_kpm_enabled = true;
 
-    gw                    = std::make_unique<dummy_network_gateway_data_handler>();
-    pcap                  = std::make_unique<dummy_e2ap_pcap>();
-    packer                = std::make_unique<srsran::e2ap_asn1_packer>(*gw, *e2, *pcap);
-    e2_client             = std::make_unique<dummy_e2_connection_client>();
-    du_metrics            = std::make_unique<dummy_e2_du_metrics>();
-    f1ap_ue_id_mapper     = std::make_unique<dummy_f1ap_ue_id_translator>();
-    factory               = timer_factory{timers, task_worker};
-    rc_param_configurator = std::make_unique<dummy_du_configurator>();
-    e2                    = create_e2_du_entity(
-        cfg, e2_client.get(), &(*du_metrics), &(*f1ap_ue_id_mapper), &(*rc_param_configurator), factory, task_worker);
+    e2_client                = std::make_unique<dummy_e2_connection_client>();
+    du_metrics               = std::make_unique<dummy_e2_du_metrics>();
+    f1ap_ue_id_mapper        = std::make_unique<dummy_f1ap_ue_id_translator>();
+    factory                  = timer_factory{timers, task_worker};
+    du_rc_param_configurator = std::make_unique<dummy_du_configurator>();
+    e2agent                  = create_e2_du_agent(
+        cfg, *e2_client, &(*du_metrics), &(*f1ap_ue_id_mapper), &(*du_rc_param_configurator), factory, task_worker);
+    // Packer allows to inject packed message into E2 interface.
+    gw     = std::make_unique<dummy_sctp_association_sdu_notifier>();
+    pcap   = std::make_unique<dummy_e2ap_pcap>();
+    packer = std::make_unique<e2ap_asn1_packer>(*gw, e2agent->get_e2_interface(), *pcap);
   }
 
   void TearDown() override
@@ -893,6 +1082,7 @@ class e2_test_subscriber : public e2_test_base
 
     factory          = timer_factory{timers, task_worker};
     msg_notifier     = std::make_unique<dummy_e2_pdu_notifier>(nullptr);
+    e2_client        = std::make_unique<dummy_e2_connection_client>();
     e2sm_kpm_packer  = std::make_unique<dummy_e2sm_handler>();
     du_metrics       = std::make_unique<dummy_e2_du_metrics>();
     du_meas_provider = std::make_unique<dummy_e2sm_kpm_du_meas_provider>();
@@ -900,13 +1090,17 @@ class e2_test_subscriber : public e2_test_base
     e2sm_mngr        = std::make_unique<e2sm_manager>(test_logger);
     e2sm_mngr->add_e2sm_service("1.3.6.1.4.1.53148.1.2.2.2", std::move(e2sm_kpm_iface));
     e2sm_mngr->add_supported_ran_function(1, "1.3.6.1.4.1.53148.1.2.2.2");
-    e2_subscription_mngr = std::make_unique<e2_subscription_manager_impl>(*msg_notifier, *e2sm_mngr);
+    e2_subscription_mngr = std::make_unique<e2_subscription_manager_impl>(*e2sm_mngr);
     e2_subscription_mngr->add_ran_function_oid(1, "1.3.6.1.4.1.53148.1.2.2.2");
-    e2     = create_e2(cfg, factory, *msg_notifier, *e2_subscription_mngr, *e2sm_mngr);
-    gw     = std::make_unique<dummy_network_gateway_data_handler>();
+    agent_notifier = std::make_unique<dummy_e2_agent_mng>();
+    e2             = std::make_unique<e2_impl>(
+        test_logger, cfg, *agent_notifier, factory, *e2_client, *e2_subscription_mngr, *e2sm_mngr, task_worker);
+    // Packer allows to inject packed message into E2 interface.
+    gw     = std::make_unique<dummy_sctp_association_sdu_notifier>();
     pcap   = std::make_unique<dummy_e2ap_pcap>();
-    packer = std::make_unique<srsran::e2ap_asn1_packer>(*gw, *e2, *pcap);
-    msg_notifier->attach_handler(&(*packer));
+    packer = std::make_unique<e2ap_asn1_packer>(*gw, *e2, *pcap);
+
+    report_fatal_error_if_not(e2->handle_e2_tnl_connection_request(), "Unable to create dummy SCTP connection");
   }
 
   void TearDown() override
@@ -924,35 +1118,111 @@ class e2_test_setup : public e2_test_base
     cfg.e2sm_kpm_enabled = true;
 
     factory                        = timer_factory{timers, task_worker};
-    msg_notifier                   = std::make_unique<dummy_e2_pdu_notifier>(nullptr);
+    e2_client                      = std::make_unique<dummy_e2_connection_client>();
     du_metrics                     = std::make_unique<dummy_e2_du_metrics>();
     du_meas_provider               = std::make_unique<dummy_e2sm_kpm_du_meas_provider>();
     e2sm_kpm_packer                = std::make_unique<e2sm_kpm_asn1_packer>(*du_meas_provider);
     e2sm_kpm_iface                 = std::make_unique<e2sm_kpm_impl>(test_logger, *e2sm_kpm_packer, *du_meas_provider);
     e2sm_rc_packer                 = std::make_unique<e2sm_rc_asn1_packer>();
-    rc_param_configurator          = std::make_unique<dummy_du_configurator>();
+    mobility_notifier              = std::make_unique<dummy_e2_mobility_notifier>();
+    du_rc_param_configurator       = std::make_unique<dummy_du_configurator>();
+    cu_rc_param_configurator       = std::make_unique<dummy_cu_configurator>();
     e2sm_rc_iface                  = std::make_unique<e2sm_rc_impl>(test_logger, *e2sm_rc_packer);
     e2sm_rc_control_service_style2 = std::make_unique<e2sm_rc_control_service>(2);
-    rc_control_action_2_6_executor = std::make_unique<e2sm_rc_control_action_2_6_du_executor>(*rc_param_configurator);
+    e2sm_rc_control_service_style3 = std::make_unique<e2sm_rc_control_service>(3);
+    f1ap_ue_id_mapper              = std::make_unique<dummy_f1ap_ue_id_translator>();
+    rc_control_action_2_6_executor =
+        std::make_unique<e2sm_rc_control_action_2_6_du_executor>(*du_rc_param_configurator, *f1ap_ue_id_mapper);
+    rc_control_action_3_1_executor =
+        std::make_unique<e2sm_rc_control_action_3_1_cu_executor>(*cu_rc_param_configurator);
     e2sm_rc_control_service_style2->add_e2sm_rc_control_action_executor(std::move(rc_control_action_2_6_executor));
+    e2sm_rc_control_service_style3->add_e2sm_rc_control_action_executor(std::move(rc_control_action_3_1_executor));
     e2sm_rc_packer->add_e2sm_control_service(e2sm_rc_control_service_style2.get());
+    e2sm_rc_packer->add_e2sm_control_service(e2sm_rc_control_service_style3.get());
     e2sm_rc_iface->add_e2sm_control_service(std::move(e2sm_rc_control_service_style2));
+    e2sm_rc_iface->add_e2sm_control_service(std::move(e2sm_rc_control_service_style3));
     e2sm_mngr = std::make_unique<e2sm_manager>(test_logger);
     e2sm_mngr->add_e2sm_service("1.3.6.1.4.1.53148.1.2.2.2", std::move(e2sm_kpm_iface));
     e2sm_mngr->add_e2sm_service("1.3.6.1.4.1.53148.1.1.2.3", std::move(e2sm_rc_iface));
     e2sm_mngr->add_supported_ran_function(3, "1.3.6.1.4.1.53148.1.1.2.3");
-    e2_subscription_mngr = std::make_unique<e2_subscription_manager_impl>(*msg_notifier, *e2sm_mngr);
-    e2                   = create_e2(cfg, factory, *msg_notifier, *e2_subscription_mngr, *e2sm_mngr);
-    gw                   = std::make_unique<dummy_network_gateway_data_handler>();
-    pcap                 = std::make_unique<dummy_e2ap_pcap>();
-    packer               = std::make_unique<srsran::e2ap_asn1_packer>(*gw, *e2, *pcap);
-    msg_notifier->attach_handler(&(*packer));
+    e2_subscription_mngr = std::make_unique<e2_subscription_manager_impl>(*e2sm_mngr);
+    agent_notifier       = std::make_unique<dummy_e2_agent_mng>();
+    e2                   = std::make_unique<e2_impl>(
+        test_logger, cfg, *agent_notifier, factory, *e2_client, *e2_subscription_mngr, *e2sm_mngr, task_worker);
+    // Packer allows to inject packed message into E2 interface.
+    gw     = std::make_unique<dummy_sctp_association_sdu_notifier>();
+    pcap   = std::make_unique<dummy_e2ap_pcap>();
+    packer = std::make_unique<e2ap_asn1_packer>(*gw, *e2, *pcap);
   }
   void TearDown() override
   {
     // flush logger after each test
     srslog::flush();
   }
+};
+
+class dummy_e2_interface : public e2_interface
+{
+public:
+  dummy_e2_interface() : logger(srslog::fetch_basic_logger("TEST")) {}
+
+  // e2_message_handler interface
+  void handle_message(const e2_message& msg) override
+  {
+    logger.info("Received E2 message of type {}", msg.pdu.type().to_string());
+    last_msg = msg;
+  }
+
+  // e2_event_handler interface
+  void handle_connection_loss() override { logger.info("E2 connection lost"); }
+
+  // e2_connection_manager interface
+  bool handle_e2_tnl_connection_request() override
+  {
+    logger.info("E2 TNL connection request received");
+    return true;
+  }
+
+  async_task<void> handle_e2_disconnection_request() override
+  {
+    logger.info("E2 disconnection request received");
+    return launch_async([](coro_context<async_task<void>>& ctx) {
+      CORO_BEGIN(ctx);
+      CORO_RETURN();
+    });
+  }
+
+  async_task<e2_setup_response_message> handle_e2_setup_request(e2_setup_request_message& request) override
+  {
+    logger.info("E2 setup request received");
+    return launch_async([](coro_context<async_task<e2_setup_response_message>>& ctx) {
+      CORO_BEGIN(ctx);
+      e2_setup_response_message response;
+      response.success = true;
+      CORO_RETURN(response);
+    });
+  }
+
+  async_task<e2_setup_response_message> start_initial_e2_setup_routine() override
+  {
+    logger.info("Starting initial E2 setup routine");
+    return launch_async([](coro_context<async_task<e2_setup_response_message>>& ctx) {
+      CORO_BEGIN(ctx);
+      e2_setup_response_message response;
+      response.success = true;
+      CORO_RETURN(response);
+    });
+  }
+
+  // e2_interface interface
+  void start() override { logger.info("Starting dummy E2 interface"); }
+
+  void stop() override { logger.info("Stopping dummy E2 interface"); }
+
+  e2_message last_msg;
+
+private:
+  srslog::basic_logger& logger;
 };
 
 } // namespace srsran

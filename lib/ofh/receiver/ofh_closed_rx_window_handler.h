@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -26,6 +26,7 @@
 #include "../support/uplink_context_repository.h"
 #include "srsran/ofh/ofh_uplane_rx_symbol_notifier.h"
 #include "srsran/ofh/receiver/ofh_receiver_timing_parameters.h"
+#include "srsran/ofh/receiver/ofh_receiver_warn_unreceived_frames_parameters.h"
 #include "srsran/ofh/timing/ofh_ota_symbol_boundary_notifier.h"
 #include "srsran/ofh/timing/slot_symbol_point.h"
 #include "srsran/srslog/logger.h"
@@ -38,13 +39,15 @@ namespace ofh {
 
 /// Closed reception window handler configuration.
 struct closed_rx_window_handler_config {
+  /// Radio sector identifier.
+  unsigned sector;
   /// Time in number of symbols that the decoder needs to process an Open Fronthaul message. It delays closing the
   /// reception window.
   unsigned nof_symbols_to_process_uplink = 0;
   /// Open Fronthaul receive window parameters.
   rx_window_timing_parameters rx_timing_params;
   /// Warn unreceived Open Fronthaul messages.
-  bool warn_unreceived_ru_frames = true;
+  warn_unreceived_ru_frames warn_unreceived_frames = warn_unreceived_ru_frames::after_traffic_detection;
 };
 
 /// Closed reception window handler dependencies.
@@ -64,7 +67,15 @@ public:
                            closed_rx_window_handler_dependencies&& dependencies);
 
   // See interface for documentation.
-  void on_new_symbol(slot_symbol_point symbol_point) override;
+  void on_new_symbol(const slot_symbol_point_context& symbol_point_context) override;
+
+  /// Starts logging unreceived OFH messages.
+  void start_logging_unreceived_messages()
+  {
+    if (warn_unreceived_frames == warn_unreceived_ru_frames::after_traffic_detection && !log_unreceived_messages) {
+      log_unreceived_messages = true;
+    }
+  }
 
 private:
   /// \brief Handles the uplink context for the closed reception window given by symbol point.
@@ -85,7 +96,9 @@ private:
   /// This delay is calculated with the T4a_max parameter plus the number of symbols that takes to decode a received
   /// Open Fronthaul message.
   const unsigned                             notification_delay_in_symbols;
-  const bool                                 log_unreceived_messages;
+  const unsigned                             sector_id;
+  const warn_unreceived_ru_frames            warn_unreceived_frames;
+  bool                                       log_unreceived_messages;
   srslog::basic_logger&                      logger;
   task_executor&                             executor;
   std::shared_ptr<prach_context_repository>  prach_repo;

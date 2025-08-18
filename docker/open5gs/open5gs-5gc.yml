@@ -1,5 +1,5 @@
 #
-# Copyright 2013-2024 Software Radio Systems Limited
+# Copyright 2013-2025 Software Radio Systems Limited
 #
 # By using this file, you agree to the terms and conditions set
 # forth in the LICENSE file which can be found at the top level of
@@ -44,14 +44,14 @@ mme:
     listen_on: 127.0.0.2
     no_fwd: true
     load_extension:
-      - module: "/open5gs/install/lib/x86_64-linux-gnu/freeDiameter/dbg_msg_dumps.fdx"
+      - module: "/open5gs/install/lib/${INSTALL_ARCH}/freeDiameter/dbg_msg_dumps.fdx"
         conf: 0x8888
-      - module: "/open5gs/install/lib/x86_64-linux-gnu/freeDiameter/dict_rfc5777.fdx"
-      - module: "/open5gs/install/lib/x86_64-linux-gnu/freeDiameter/dict_mip6i.fdx"
-      - module: "/open5gs/install/lib/x86_64-linux-gnu/freeDiameter/dict_nasreq.fdx"
-      - module: "/open5gs/install/lib/x86_64-linux-gnu/freeDiameter/dict_nas_mipv6.fdx"
-      - module: "/open5gs/install/lib/x86_64-linux-gnu/freeDiameter/dict_dcca.fdx"
-      - module: "/open5gs/install/lib/x86_64-linux-gnu/freeDiameter/dict_dcca_3gpp.fdx"
+      - module: "/open5gs/install/lib/${INSTALL_ARCH}/freeDiameter/dict_rfc5777.fdx"
+      - module: "/open5gs/install/lib/${INSTALL_ARCH}/freeDiameter/dict_mip6i.fdx"
+      - module: "/open5gs/install/lib/${INSTALL_ARCH}/freeDiameter/dict_nasreq.fdx"
+      - module: "/open5gs/install/lib/${INSTALL_ARCH}/freeDiameter/dict_nas_mipv6.fdx"
+      - module: "/open5gs/install/lib/${INSTALL_ARCH}/freeDiameter/dict_dcca.fdx"
+      - module: "/open5gs/install/lib/${INSTALL_ARCH}/freeDiameter/dict_dcca_3gpp.fdx"
     connect:
       - identity: hss.localdomain
         address: 127.0.0.8
@@ -124,7 +124,9 @@ smf:
       - address: 127.0.0.4
         port: 9090
   session:
-    - subnet: ${UE_GATEWAY_IP}
+    - subnet: ${UE_IP_RANGE}
+      gateway: ${UE_GATEWAY_IP}
+
   dns:
     - 8.8.8.8
     - 8.8.4.4
@@ -135,17 +137,21 @@ smf:
     listen_on: 127.0.0.4
     no_fwd: true
     load_extension:
-      - module: "/open5gs/install/lib/x86_64-linux-gnu/freeDiameter/dbg_msg_dumps.fdx"
+      - module: "/open5gs/install/lib/${INSTALL_ARCH}/freeDiameter/dbg_msg_dumps.fdx"
         conf: 0x8888
-      - module: "/open5gs/install/lib/x86_64-linux-gnu/freeDiameter/dict_rfc5777.fdx"
-      - module: "/open5gs/install/lib/x86_64-linux-gnu/freeDiameter/dict_mip6i.fdx"
-      - module: "/open5gs/install/lib/x86_64-linux-gnu/freeDiameter/dict_nasreq.fdx"
-      - module: "/open5gs/install/lib/x86_64-linux-gnu/freeDiameter/dict_nas_mipv6.fdx"
-      - module: "/open5gs/install/lib/x86_64-linux-gnu/freeDiameter/dict_dcca.fdx"
-      - module: "/open5gs/install/lib/x86_64-linux-gnu/freeDiameter/dict_dcca_3gpp.fdx"
+      - module: "/open5gs/install/lib/${INSTALL_ARCH}/freeDiameter/dict_rfc5777.fdx"
+      - module: "/open5gs/install/lib/${INSTALL_ARCH}/freeDiameter/dict_mip6i.fdx"
+      - module: "/open5gs/install/lib/${INSTALL_ARCH}/freeDiameter/dict_nasreq.fdx"
+      - module: "/open5gs/install/lib/${INSTALL_ARCH}/freeDiameter/dict_nas_mipv6.fdx"
+      - module: "/open5gs/install/lib/${INSTALL_ARCH}/freeDiameter/dict_dcca.fdx"
+      - module: "/open5gs/install/lib/${INSTALL_ARCH}/freeDiameter/dict_dcca_3gpp.fdx"
     connect:
       - identity: pcrf.localdomain
         address: 127.0.0.9
+  security_indication:
+    # Uncomment to enable UP integrity protection
+    #integrity_protection_indication: preferred
+    #confidentiality_protection_indication: preferred
 
 amf:
   sbi:
@@ -204,7 +210,8 @@ upf:
       - address: ${OPEN5GS_IP}
         advertise: ${UPF_ADVERTISE_IP}
   session:
-    - subnet: ${UE_GATEWAY_IP}
+    - subnet: ${UE_IP_RANGE}
+      gateway: ${UE_GATEWAY_IP}
 
 hss:
   freeDiameter:
@@ -213,14 +220,14 @@ hss:
     listen_on: 127.0.0.8
     no_fwd: true
     load_extension:
-      - module: "/open5gs/install/lib/x86_64-linux-gnu/freeDiameter/dbg_msg_dumps.fdx"
+      - module: "/open5gs/install/lib/${INSTALL_ARCH}/freeDiameter/dbg_msg_dumps.fdx"
         conf: 0x8888
-      - module: "/open5gs/install/lib/x86_64-linux-gnu/freeDiameter/dict_rfc5777.fdx"
-      - module: "/open5gs/install/lib/x86_64-linux-gnu/freeDiameter/dict_mip6i.fdx"
-      - module: "/open5gs/install/lib/x86_64-linux-gnu/freeDiameter/dict_nasreq.fdx"
-      - module: "/open5gs/install/lib/x86_64-linux-gnu/freeDiameter/dict_nas_mipv6.fdx"
-      - module: "/open5gs/install/lib/x86_64-linux-gnu/freeDiameter/dict_dcca.fdx"
-      - module: "/open5gs/install/lib/x86_64-linux-gnu/freeDiameter/dict_dcca_3gpp.fdx"
+      - module: "/open5gs/install/lib/${INSTALL_ARCH}/freeDiameter/dict_rfc5777.fdx"
+      - module: "/open5gs/install/lib/${INSTALL_ARCH}/freeDiameter/dict_mip6i.fdx"
+      - module: "/open5gs/install/lib/${INSTALL_ARCH}/freeDiameter/dict_nasreq.fdx"
+      - module: "/open5gs/install/lib/${INSTALL_ARCH}/freeDiameter/dict_nas_mipv6.fdx"
+      - module: "/open5gs/install/lib/${INSTALL_ARCH}/freeDiameter/dict_dcca.fdx"
+      - module: "/open5gs/install/lib/${INSTALL_ARCH}/freeDiameter/dict_dcca_3gpp.fdx"
     connect:
       - identity: mme.localdomain
         address: 127.0.0.2
@@ -231,14 +238,14 @@ pcrf:
     listen_on: 127.0.0.9
     no_fwd: true
     load_extension:
-      - module: "/open5gs/install/lib/x86_64-linux-gnu/freeDiameter/dbg_msg_dumps.fdx"
+      - module: "/open5gs/install/lib/${INSTALL_ARCH}/freeDiameter/dbg_msg_dumps.fdx"
         conf: 0x8888
-      - module: "/open5gs/install/lib/x86_64-linux-gnu/freeDiameter/dict_rfc5777.fdx"
-      - module: "/open5gs/install/lib/x86_64-linux-gnu/freeDiameter/dict_mip6i.fdx"
-      - module: "/open5gs/install/lib/x86_64-linux-gnu/freeDiameter/dict_nasreq.fdx"
-      - module: "/open5gs/install/lib/x86_64-linux-gnu/freeDiameter/dict_nas_mipv6.fdx"
-      - module: "/open5gs/install/lib/x86_64-linux-gnu/freeDiameter/dict_dcca.fdx"
-      - module: "/open5gs/install/lib/x86_64-linux-gnu/freeDiameter/dict_dcca_3gpp.fdx"
+      - module: "/open5gs/install/lib/${INSTALL_ARCH}/freeDiameter/dict_rfc5777.fdx"
+      - module: "/open5gs/install/lib/${INSTALL_ARCH}/freeDiameter/dict_mip6i.fdx"
+      - module: "/open5gs/install/lib/${INSTALL_ARCH}/freeDiameter/dict_nasreq.fdx"
+      - module: "/open5gs/install/lib/${INSTALL_ARCH}/freeDiameter/dict_nas_mipv6.fdx"
+      - module: "/open5gs/install/lib/${INSTALL_ARCH}/freeDiameter/dict_dcca.fdx"
+      - module: "/open5gs/install/lib/${INSTALL_ARCH}/freeDiameter/dict_dcca_3gpp.fdx"
     connect:
       - identity: smf.localdomain
         address: 127.0.0.4

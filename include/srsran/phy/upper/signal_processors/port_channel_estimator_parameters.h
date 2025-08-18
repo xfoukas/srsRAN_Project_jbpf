@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -32,6 +32,14 @@ enum class port_channel_estimator_fd_smoothing_strategy {
   mean,
   /// Filters in the frequency domain with a low pass filter.
   filter,
+};
+
+/// Port channel estimator time domain interpolation strategy.
+enum class port_channel_estimator_td_interpolation_strategy {
+  /// Performs linear interpolation between the symbols containing DM-RS.
+  interpolate = 0,
+  /// Averages all time domain estimates.
+  average
 };
 
 } // namespace srsran

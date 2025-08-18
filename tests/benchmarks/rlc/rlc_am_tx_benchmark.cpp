@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -56,7 +56,7 @@ public:
   void on_max_retx() override {}
 
   // rlc_tx_buffer_state_update_notifier interface
-  void on_buffer_state_update(unsigned bsr_) override {}
+  void on_buffer_state_update(const rlc_buffer_state& bs) override {}
 
   // rlc_rx_am_status_provider interface
   rlc_am_status_pdu& get_status_pdu() override { return status; }
@@ -125,7 +125,7 @@ push_sdus(bench_params params, const rlc_tx_am_config& config, rlc_tx_am_entity*
 void benchmark_tx_pdu(const bench_params& params)
 {
   fmt::memory_buffer buffer;
-  fmt::format_to(buffer, "Benchmark RLC AM TX PDUs");
+  fmt::format_to(std::back_inserter(buffer), "Benchmark RLC AM TX PDUs");
   std::unique_ptr<benchmarker> bm = std::make_unique<benchmarker>(to_c_str(buffer), params.nof_repetitions);
 
   // Set Tx config
@@ -148,7 +148,7 @@ void benchmark_tx_pdu(const bench_params& params)
 
   null_rlc_pcap pcap;
 
-  auto metrics_agg = std::make_unique<rlc_metrics_aggregator>(
+  auto metrics_coll = std::make_unique<rlc_bearer_metrics_collector>(
       gnb_du_id_t{}, du_ue_index_t{}, rb_id_t{}, timer_duration{1}, tester.get(), ue_worker);
 
   // Create RLC AM TX entity
@@ -159,7 +159,7 @@ void benchmark_tx_pdu(const bench_params& params)
                                                    *tester,
                                                    *tester,
                                                    *tester,
-                                                   *metrics_agg,
+                                                   *metrics_coll,
                                                    pcap,
                                                    pcell_worker,
                                                    ue_worker,

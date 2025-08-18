@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -22,11 +22,13 @@
 
 #pragma once
 
-#include "scheduler_configurator.h"
-#include "scheduler_dl_buffer_state_indication_handler.h"
-#include "scheduler_feedback_handler.h"
-#include "scheduler_paging_handler.h"
-#include "scheduler_slot_handler.h"
+#include "srsran/scheduler/scheduler_configurator.h"
+#include "srsran/scheduler/scheduler_dl_buffer_state_indication_handler.h"
+#include "srsran/scheduler/scheduler_feedback_handler.h"
+#include "srsran/scheduler/scheduler_paging_handler.h"
+#include "srsran/scheduler/scheduler_positioning_handler.h"
+#include "srsran/scheduler/scheduler_slot_handler.h"
+#include "srsran/scheduler/scheduler_sys_info_handler.h"
 
 namespace srsran {
 
@@ -35,7 +37,9 @@ class mac_scheduler : public scheduler_configurator,
                       public scheduler_feedback_handler,
                       public scheduler_slot_handler,
                       public scheduler_dl_buffer_state_indication_handler,
-                      public scheduler_paging_handler
+                      public scheduler_paging_handler,
+                      public scheduler_sys_info_handler,
+                      public scheduler_positioning_handler
 {
 public:
   virtual ~mac_scheduler() = default;

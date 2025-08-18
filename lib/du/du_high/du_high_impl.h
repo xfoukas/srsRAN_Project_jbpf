@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -25,8 +25,6 @@
 #include "srsran/du/du_high/du_high.h"
 #include "srsran/du/du_high/du_high_configuration.h"
 #include "srsran/du/du_high/du_manager/du_manager.h"
-#include "srsran/e2/e2_du.h"
-#include "srsran/e2/e2_du_factory.h"
 #include "srsran/f1ap/du/f1ap_du.h"
 #include "srsran/mac/mac.h"
 #include "srsran/scheduler/scheduler_metrics.h"
@@ -38,14 +36,14 @@ namespace srs_du {
 class du_high_impl final : public du_high
 {
 public:
-  explicit du_high_impl(const du_high_configuration& cfg_);
-  ~du_high_impl();
+  explicit du_high_impl(const du_high_configuration& cfg_, const du_high_dependencies& dependencies);
+  ~du_high_impl() override;
 
   void start() override;
 
   void stop() override;
 
-  f1ap_message_handler& get_f1ap_message_handler() override;
+  f1ap_du& get_f1ap_du() override;
 
   mac_cell_slot_handler& get_slot_handler(du_cell_index_t cell_index) override;
 
@@ -56,6 +54,8 @@ public:
   mac_cell_control_information_handler& get_control_info_handler(du_cell_index_t cell_index) override;
 
   du_configurator& get_du_configurator() override;
+
+  du_manager_time_mapper_accessor& get_du_manager_time_mapper_accessor() override;
 
 private:
   class layer_connector;
@@ -72,17 +72,11 @@ private:
   std::unique_ptr<layer_connector> adapters;
 
   std::unique_ptr<scheduler_metrics_notifier> hub_metrics;
-  std::unique_ptr<scheduler_metrics_notifier> metrics_notifier;
 
   // DU-high Layers.
   std::unique_ptr<du_manager_interface> du_manager;
   std::unique_ptr<f1ap_du>              f1ap;
   std::unique_ptr<mac_interface>        mac;
-
-  std::unique_ptr<mac_cell_slot_handler> main_cell_slot_handler;
-
-  // E2 interface
-  std::unique_ptr<e2_interface> e2ap_entity;
 };
 
 } // namespace srs_du

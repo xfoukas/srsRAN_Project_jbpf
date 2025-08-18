@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -34,7 +34,7 @@ namespace {
 ///
 /// On destruction, this class will signal to the CU-CP NGAP that the N2 Rx path has been shut down (e.g. due to
 /// peer connection drop).
-class n2_rx_channel final : public ngap_message_notifier
+class n2_rx_channel final : public ngap_rx_message_notifier
 {
 public:
   n2_rx_channel(ngap_message_handler& msg_handler_, std::function<void()> on_connection_loss_) :
@@ -69,13 +69,13 @@ public:
     n2_notifier.reset();
   }
 
-  void on_new_message(const ngap_message& msg) override
+  [[nodiscard]] bool on_new_message(const ngap_message& msg) override
   {
     if (n2_notifier == nullptr) {
       logger.warning("Dropping NGAP Tx PDU. Cause: The N2 TNL association is down");
-      return;
+      return false;
     }
-    n2_notifier->on_new_message(msg);
+    return n2_notifier->on_new_message(msg);
   }
 
 private:
@@ -85,10 +85,12 @@ private:
 
 } // namespace
 
-ngap_connection_handler::ngap_connection_handler(n2_connection_client& client_handler_,
+ngap_connection_handler::ngap_connection_handler(amf_index_t           amf_index_,
+                                                 n2_connection_client& client_handler_,
                                                  ngap_message_handler& rx_pdu_handler_,
                                                  ngap_cu_cp_notifier&  cu_cp_notifier_,
                                                  task_executor&        ctrl_exec_) :
+  amf_index(amf_index_),
   client_handler(client_handler_),
   rx_pdu_handler(rx_pdu_handler_),
   cu_cp_notifier(cu_cp_notifier_),
@@ -117,7 +119,8 @@ std::unique_ptr<ngap_message_notifier> ngap_connection_handler::connect_to_amf()
 
   // Create NGAP Rx PDU notifier.
   rx_path_disconnected.reset();
-  auto rx_notifier = std::make_unique<n2_rx_channel>(rx_pdu_handler, [this]() { handle_connection_loss(); });
+  std::unique_ptr<n2_rx_channel> rx_notifier =
+      std::make_unique<n2_rx_channel>(rx_pdu_handler, [this]() { handle_connection_loss(); });
 
   // Start N2 TNL association and get NGAP Tx PDU notifier.
   tx_pdu_notifier = client_handler.handle_cu_cp_connection_request(std::move(rx_notifier));
@@ -156,7 +159,7 @@ void ngap_connection_handler::handle_connection_loss_impl()
     tx_pdu_notifier.reset();
 
     // Signal to DU that the N2 connection is lost.
-    cu_cp_notifier.on_n2_disconnection();
+    cu_cp_notifier.on_n2_disconnection(amf_index);
   }
 
   // Signal back that the N2 Rx path has been successfully shutdown to any awaiting coroutine.

@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -28,7 +28,8 @@
 #include "srsran/support/benchmark_utils.h"
 #include "srsran/support/executors/task_worker_pool.h"
 #include "srsran/support/executors/unique_thread.h"
-#include "srsran/support/math_utils.h"
+#include "srsran/support/math/math_utils.h"
+#include "srsran/support/rtsan.h"
 #include "srsran/support/srsran_test.h"
 #ifdef HWACC_PDSCH_ENABLED
 #include "srsran/hal/dpdk/bbdev/bbdev_acc.h"
@@ -84,21 +85,25 @@ benchmark_modes to_benchmark_mode(const char* string)
 // Maximum number of threads given the CPU hardware.
 static const unsigned max_nof_threads = std::thread::hardware_concurrency();
 
+// Executor queue type.
+static constexpr concurrent_queue_policy queue_policy = concurrent_queue_policy::lockfree_mpmc;
+
 // General test configuration parameters.
 static uint64_t                           nof_repetitions             = 10;
 static uint64_t                           nof_threads                 = max_nof_threads;
 static uint64_t                           batch_size_per_thread       = 100;
 static std::string                        selected_profile_name       = "default";
 static std::string                        ldpc_encoder_type           = "auto";
-static std::string                        pdsch_processor_type        = "generic";
+static std::string                        pdsch_processor_type        = "flexible";
 static benchmark_modes                    benchmark_mode              = benchmark_modes::throughput_total;
 static dmrs_type                          dmrs                        = dmrs_type::TYPE1;
 static unsigned                           nof_cdm_groups_without_data = 2;
 static bounded_bitset<MAX_NSYMB_PER_SLOT> dmrs_symbol_mask =
     {false, false, true, false, false, false, false, true, false, false, false, true, false, false};
-static unsigned nof_pdsch_processor_concurrent_threads                                               = 4;
-static std::unique_ptr<task_worker_pool<concurrent_queue_policy::locking_mpmc>>          worker_pool = nullptr;
-static std::unique_ptr<task_worker_pool_executor<concurrent_queue_policy::locking_mpmc>> executor    = nullptr;
+static unsigned                                                 nof_pdsch_processor_concurrent_threads = 0;
+static unsigned                                                 cb_batch_length = std::numeric_limits<unsigned>::max();
+static std::unique_ptr<task_worker_pool<queue_policy>>          worker_pool     = nullptr;
+static std::unique_ptr<task_worker_pool_executor<queue_policy>> executor        = nullptr;
 
 // Thread shared variables.
 static std::mutex              mutex_pending_count;
@@ -295,7 +300,11 @@ static void usage(const char* prog)
   fmt::print("\t-B Batch size [Default {}]\n", batch_size_per_thread);
   fmt::print("\t-T Number of threads [Default {}, max. {}]\n", nof_threads, max_nof_threads);
   fmt::print("\t-D LDPC encoder type. [Default {}]\n", ldpc_encoder_type);
-  fmt::print("\t-t PDSCH processor type (generic, concurrent:nof_threads). [Default {}]\n", pdsch_processor_type);
+  fmt::print("\t-t PDSCH processor type. [Default {}]\n", pdsch_processor_type);
+  fmt::print("\t\t generic        Unoptimized generic implementation.\n");
+  fmt::print("\t\t lite           Flexible implementation configured for memory-optimized single thread.\n");
+  fmt::print("\t\t flexible:N.M   Flexible implementation configured for performance using N threads and batches of M "
+             "codeblocks.\n");
   fmt::print("\t-P Benchmark profile. [Default {}]\n", selected_profile_name);
   for (const test_profile& profile : profile_set) {
     fmt::print("\t\t {:<30}{}\n", profile.name, profile.description);
@@ -305,7 +314,7 @@ static void usage(const char* prog)
              dedicated_queue ? "dedicated_queue" : "shared_queue");
   fmt::print("\t-x       Force TB mode [Default {}]\n", cb_mode ? "cb_mode" : "tb_mode");
   fmt::print("\t-y       Force logging output written to a file [Default {}]\n", std_out_sink ? "std_out" : "file");
-  fmt::print("\t-z       Set logging level for the HAL [Default {}]\n", hal_log_level);
+  fmt::print("\t-z       Set logging level for the HAL [Default {}]\n", fmt::underlying(hal_log_level));
   fmt::print("\teal_args EAL arguments\n");
 #endif // HWACC_PDSCH_ENABLED
   fmt::print("\t-h Show this message\n");
@@ -363,6 +372,24 @@ static int parse_args(int argc, char** argv)
         break;
       case 't':
         pdsch_processor_type = std::string(optarg);
+        if ((pdsch_processor_type.find("flexible") != std::string::npos)) {
+          std::size_t pos = pdsch_processor_type.find(":");
+          if (pos < pdsch_processor_type.size() - 1) {
+            std::string str   = pdsch_processor_type.substr(pos + 1);
+            std::size_t pos_d = str.find(".");
+            if (pos_d < str.size() - 1) {
+              std::string substr                     = str.substr(0, pos_d);
+              nof_pdsch_processor_concurrent_threads = std::strtol(substr.c_str(), nullptr, 10);
+              substr                                 = str.substr(pos_d + 1);
+              cb_batch_length                        = std::strtol(substr.c_str(), nullptr, 10);
+            } else {
+              nof_pdsch_processor_concurrent_threads = std::strtol(str.c_str(), nullptr, 10);
+            }
+          }
+        } else if (pdsch_processor_type == "lite") {
+          nof_pdsch_processor_concurrent_threads = 0;
+          cb_batch_length                        = std::numeric_limits<unsigned>::max();
+        }
         break;
       case 'P':
         selected_profile_name = std::string(optarg);
@@ -505,23 +532,24 @@ create_sw_pdsch_encoder_factory(std::shared_ptr<crc_calculator_factory> crc_calc
 static std::shared_ptr<hal::hw_accelerator_pdsch_enc_factory> create_hw_accelerator_pdsch_enc_factory()
 {
 #ifdef HWACC_PDSCH_ENABLED
-  // Create a bbdev accelerator factory.
-  static std::unique_ptr<dpdk::bbdev_acc_factory> bbdev_acc_factory = nullptr;
-  if (!bbdev_acc_factory) {
-    bbdev_acc_factory = srsran::dpdk::create_bbdev_acc_factory("srs");
-    TESTASSERT(bbdev_acc_factory, "Failed to create the bbdev accelerator factory.");
-  }
-
   // Intefacing to the bbdev-based hardware-accelerator.
   srslog::basic_logger& logger = srslog::fetch_basic_logger("HWACC", false);
   logger.set_level(hal_log_level);
+  unsigned nof_ldpc_enc_cores = nof_threads;
+  if (nof_pdsch_processor_concurrent_threads > 0) {
+    nof_ldpc_enc_cores *= nof_pdsch_processor_concurrent_threads;
+  }
+  TESTASSERT(nof_ldpc_enc_cores <= dpdk::MAX_NOF_BBDEV_VF_INSTANCES,
+             "Requested {} accelerated LDPC encoder functions, but only {} are supported.",
+             nof_ldpc_enc_cores,
+             dpdk::MAX_NOF_BBDEV_VF_INSTANCES);
   dpdk::bbdev_acc_configuration bbdev_config;
   bbdev_config.id                                    = 0;
-  bbdev_config.nof_ldpc_enc_lcores                   = nof_threads;
+  bbdev_config.nof_ldpc_enc_lcores                   = nof_ldpc_enc_cores;
   bbdev_config.nof_ldpc_dec_lcores                   = 0;
   bbdev_config.nof_fft_lcores                        = 0;
   bbdev_config.nof_mbuf                              = static_cast<unsigned>(pow2(log2_ceil(MAX_NOF_SEGMENTS)));
-  std::shared_ptr<dpdk::bbdev_acc> bbdev_accelerator = bbdev_acc_factory->create(bbdev_config, logger);
+  std::shared_ptr<dpdk::bbdev_acc> bbdev_accelerator = create_bbdev_acc(bbdev_config, logger);
   TESTASSERT(bbdev_accelerator);
 
   // Set the PDSCH encoder hardware-accelerator factory configuration for the ACC100.
@@ -533,7 +561,7 @@ static std::shared_ptr<hal::hw_accelerator_pdsch_enc_factory> create_hw_accelera
   hw_encoder_config.dedicated_queue   = dedicated_queue;
 
   // ACC100 hardware-accelerator implementation.
-  return srsran::hal::create_bbdev_pdsch_enc_acc_factory(hw_encoder_config, "srs");
+  return srsran::hal::create_bbdev_pdsch_enc_acc_factory(hw_encoder_config);
 #else  // HWACC_PDSCH_ENABLED
   return nullptr;
 #endif // HWACC_PDSCH_ENABLED
@@ -580,7 +608,7 @@ static pdsch_processor_factory& get_processor_factory()
   TESTASSERT(prg_factory);
 
   // Create demodulator mapper factory.
-  std::shared_ptr<channel_modulation_factory> chan_modulation_factory = create_channel_modulation_sw_factory();
+  std::shared_ptr<modulation_mapper_factory> chan_modulation_factory = create_modulation_mapper_factory();
   TESTASSERT(chan_modulation_factory);
 
   // Create CRC calculator factory.
@@ -595,73 +623,98 @@ static pdsch_processor_factory& get_processor_factory()
   std::shared_ptr<ldpc_rate_matcher_factory> ldpc_rm_factory = create_ldpc_rate_matcher_factory_sw();
   TESTASSERT(ldpc_rm_factory);
 
-  // Create LDPC desegmenter factory.
+  // Create LDPC segmenter factory.
   std::shared_ptr<ldpc_segmenter_tx_factory> ldpc_segm_tx_factory =
       create_ldpc_segmenter_tx_factory_sw(crc_calc_factory);
   TESTASSERT(ldpc_segm_tx_factory);
 
+  // Create channel precoder factory.
+  std::shared_ptr<channel_precoder_factory> precoding_factory = create_channel_precoder_factory("auto");
+  TESTASSERT(precoding_factory);
+
+  // Create resource grid mapper factory.
+  std::shared_ptr<resource_grid_mapper_factory> rg_mapper_factory =
+      create_resource_grid_mapper_factory(precoding_factory);
+  TESTASSERT(rg_mapper_factory);
+
   // Create DM-RS for PDSCH channel estimator.
   std::shared_ptr<dmrs_pdsch_processor_factory> dmrs_pdsch_gen_factory =
-      create_dmrs_pdsch_processor_factory_sw(prg_factory);
+      create_dmrs_pdsch_processor_factory_sw(prg_factory, rg_mapper_factory);
   TESTASSERT(dmrs_pdsch_gen_factory);
+
+  // Create PT-RS for PDSCH channel estimator.
+  std::shared_ptr<ptrs_pdsch_generator_factory> ptrs_pdsch_gen_factory =
+      create_ptrs_pdsch_generator_generic_factory(prg_factory, rg_mapper_factory);
+  TESTASSERT(ptrs_pdsch_gen_factory);
 
   // Create PDSCH demodulator factory.
   std::shared_ptr<pdsch_modulator_factory> pdsch_mod_factory =
-      create_pdsch_modulator_factory_sw(chan_modulation_factory, prg_factory);
+      create_pdsch_modulator_factory_sw(chan_modulation_factory, prg_factory, rg_mapper_factory);
   TESTASSERT(pdsch_mod_factory);
 
-  // Create PDSCH encoder factory.
-  std::shared_ptr<pdsch_encoder_factory> pdsch_enc_factory = create_pdsch_encoder_factory(crc_calc_factory);
-  TESTASSERT(pdsch_enc_factory);
-
-  // Create generic PDSCH processor.
+  std::shared_ptr<pdsch_encoder_factory>         pdsch_enc_factory;
+  std::shared_ptr<pdsch_block_processor_factory> block_processor_factory;
   if (pdsch_processor_type == "generic") {
-    pdsch_proc_factory =
-        create_pdsch_processor_factory_sw(pdsch_enc_factory, pdsch_mod_factory, dmrs_pdsch_gen_factory);
+    // Create PDSCH encoder factory and generic PDSCH processor.
+    pdsch_enc_factory = create_pdsch_encoder_factory(crc_calc_factory);
+    TESTASSERT(pdsch_enc_factory);
+
+    pdsch_proc_factory = create_pdsch_processor_factory_sw(
+        pdsch_enc_factory, pdsch_mod_factory, dmrs_pdsch_gen_factory, ptrs_pdsch_gen_factory);
+    TESTASSERT(pdsch_proc_factory);
+
+    // When required create a synchronous PDSCH processor pool.
+    if (nof_threads > 1) {
+      pdsch_proc_factory = create_pdsch_processor_pool(std::move(pdsch_proc_factory), nof_threads);
+      TESTASSERT(pdsch_proc_factory);
+    }
+
+    return *pdsch_proc_factory;
   }
 
-  // Note that currently hardware-acceleration is limited to "generic" processor types.
-  if (pdsch_processor_type == "lite" && ldpc_encoder_type != "acc100") {
-    pdsch_proc_factory = create_pdsch_lite_processor_factory_sw(ldpc_segm_tx_factory,
-                                                                ldpc_enc_factory,
-                                                                ldpc_rm_factory,
-                                                                prg_factory,
-                                                                chan_modulation_factory,
-                                                                dmrs_pdsch_gen_factory);
+  // Create PDSCH block processor factory.
+  if (ldpc_encoder_type != "acc100") {
+    block_processor_factory = create_pdsch_block_processor_factory_sw(
+        ldpc_enc_factory, ldpc_rm_factory, prg_factory, chan_modulation_factory);
+  } else {
+    std::shared_ptr<hal::hw_accelerator_pdsch_enc_factory> hw_encoder_factory =
+        create_hw_accelerator_pdsch_enc_factory();
+    TESTASSERT(hw_encoder_factory, "Failed to create a HW acceleration encoder factory.");
+
+    block_processor_factory =
+        create_pdsch_block_processor_factory_hw(hw_encoder_factory, prg_factory, chan_modulation_factory);
+  }
+  TESTASSERT(block_processor_factory, "Failed to create a PDSCH block processor factory.");
+
+  // Initialize task executors for asynchronous PDSCH processors only.
+  unsigned nof_concurrent_pdsch = nof_threads;
+  if (nof_pdsch_processor_concurrent_threads > 0) {
+    worker_pool =
+        std::make_unique<task_worker_pool<queue_policy>>("pdsch_proc", nof_pdsch_processor_concurrent_threads, 1024);
+    executor             = std::make_unique<task_worker_pool_executor<queue_policy>>(*worker_pool);
+    nof_concurrent_pdsch = nof_pdsch_processor_concurrent_threads;
+  } else {
+    worker_pool = std::make_unique<task_worker_pool<queue_policy>>("pdsch_proc", 1, 1024);
+    executor    = std::make_unique<task_worker_pool_executor<queue_policy>>(*worker_pool);
   }
 
-  // Create synchronous PDSCH processor pool if the processor is synchronous.
-  if (pdsch_proc_factory && (nof_threads > 1)) {
-    // Only valid for generic and lite.
+  // Create flexible PDSCH processor.
+  pdsch_proc_factory = create_pdsch_flexible_processor_factory_sw(ldpc_segm_tx_factory,
+                                                                  block_processor_factory,
+                                                                  rg_mapper_factory,
+                                                                  dmrs_pdsch_gen_factory,
+                                                                  ptrs_pdsch_gen_factory,
+                                                                  *executor,
+                                                                  nof_concurrent_pdsch,
+                                                                  cb_batch_length);
+
+  // When required create either an asynchronous or a synchronous PDSCH processor pool.
+  if (nof_pdsch_processor_concurrent_threads > 1) {
+    pdsch_proc_factory = create_pdsch_processor_asynchronous_pool(std::move(pdsch_proc_factory), nof_threads);
+  } else if (nof_threads > 1) {
     pdsch_proc_factory = create_pdsch_processor_pool(std::move(pdsch_proc_factory), nof_threads);
   }
 
-  // Create concurrent PDSCH processor.
-  // Note that currently hardware-acceleration is limited to "generic" processor types.
-  if ((pdsch_processor_type.find("concurrent") != std::string::npos) && ldpc_encoder_type != "acc100") {
-    std::size_t pos = pdsch_processor_type.find(":");
-    if (pos < pdsch_processor_type.size() - 1) {
-      std::string str                        = pdsch_processor_type.substr(pos + 1);
-      nof_pdsch_processor_concurrent_threads = std::strtol(str.c_str(), nullptr, 10);
-    }
-
-    worker_pool = std::make_unique<task_worker_pool<concurrent_queue_policy::locking_mpmc>>(
-        "pdsch_proc", nof_pdsch_processor_concurrent_threads, 1024);
-    executor = std::make_unique<task_worker_pool_executor<concurrent_queue_policy::locking_mpmc>>(*worker_pool);
-
-    pdsch_proc_factory = create_pdsch_concurrent_processor_factory_sw(crc_calc_factory,
-                                                                      ldpc_enc_factory,
-                                                                      ldpc_rm_factory,
-                                                                      prg_factory,
-                                                                      chan_modulation_factory,
-                                                                      dmrs_pdsch_gen_factory,
-                                                                      *executor,
-                                                                      nof_pdsch_processor_concurrent_threads);
-
-    // Create asynchronous PDSCH processor pool.
-    pdsch_proc_factory = create_pdsch_processor_asynchronous_pool(std::move(pdsch_proc_factory), nof_threads);
-    TESTASSERT(pdsch_proc_factory);
-  }
   TESTASSERT(pdsch_proc_factory);
 
   return *pdsch_proc_factory;
@@ -682,19 +735,16 @@ static std::unique_ptr<pdsch_processor> create_processor()
 // Creates a resource grid.
 static std::unique_ptr<resource_grid> create_resource_grid(unsigned nof_ports, unsigned nof_symbols, unsigned nof_subc)
 {
-  std::shared_ptr<channel_precoder_factory> precoding_factory = create_channel_precoder_factory("auto");
-  TESTASSERT(precoding_factory != nullptr, "Invalid channel precoder factory.");
-  std::shared_ptr<resource_grid_factory> rg_factory = create_resource_grid_factory(precoding_factory);
+  std::shared_ptr<resource_grid_factory> rg_factory = create_resource_grid_factory();
   TESTASSERT(rg_factory != nullptr, "Invalid resource grid factory.");
 
   return rg_factory->create(nof_ports, nof_symbols, nof_subc);
 }
 
-static void thread_process(pdsch_processor& proc, const pdsch_processor::pdu_t& config, span<const uint8_t> data)
+static void thread_process(pdsch_processor& proc, const pdsch_processor::pdu_t& config, span<const uint8_t>& data)
 {
   // Create grid.
-  std::unique_ptr<resource_grid> grid =
-      create_resource_grid(config.precoding.get_nof_ports(), MAX_NSYMB_PER_SLOT, MAX_RB * NRE);
+  std::unique_ptr<resource_grid> grid = create_resource_grid(MAX_PORTS, MAX_NSYMB_PER_SLOT, MAX_RB * NRE);
   TESTASSERT(grid);
 
   // Notify finish count.
@@ -724,14 +774,17 @@ static void thread_process(pdsch_processor& proc, const pdsch_processor::pdu_t& 
     // Reset any notification.
     notifier.reset();
 
+    // Create asynchronous task - memory allocation and thread blocking are not allowed.
+    unique_function<void(), default_unique_task_buffer_size, true> task =
+        [&proc, &grid, &notifier, &data, &config]() SRSRAN_RTSAN_NONBLOCKING {
+          proc.process(grid->get_writer(), notifier, {shared_transport_block(data)}, config);
+        };
+
     // Process PDU.
     if (worker_pool) {
-      bool success = worker_pool->push_task([&proc, &grid, &notifier, &data, &config]() mutable {
-        proc.process(grid->get_mapper(), notifier, {data}, config);
-      });
-      (void)success;
+      (void)worker_pool->push_task(std::move(task));
     } else {
-      proc.process(grid->get_mapper(), notifier, {data}, config);
+      task();
     }
 
     // Wait for the processor to finish.
@@ -800,43 +853,52 @@ int main(int argc, char** argv)
   // Create processor.
   std::unique_ptr<pdsch_processor> proc = create_processor();
 
+  // Reference configuration.
+  pdsch_processor::pdu_t config;
+
+  // Reference data.
+  span<const uint8_t> data;
+
+  // Reset finish counter.
+  finish_count = 0;
+  thread_quit  = false;
+
+  // Prepare threads for all benchmark cases.
+  std::vector<unique_thread> threads(nof_threads);
+  for (unsigned thread_id = 0; thread_id != nof_threads; ++thread_id) {
+    // Select thread.
+    unique_thread& thread = threads[thread_id];
+
+    // Create thread.
+    thread = unique_thread("thread_" + std::to_string(thread_id),
+                           [&proc, &config, &data] { thread_process(*proc, config, data); });
+  }
+
+  // Wait for finish thread init.
+  {
+    std::unique_lock lock(mutex_finish_count);
+    while (finish_count != nof_threads) {
+      cvar_count.wait_until(lock, std::chrono::system_clock::now() + std::chrono::milliseconds(2));
+    }
+  }
+
   for (const test_case_type& test_case : test_case_set) {
     // Get the PDSCH configuration.
-    const pdsch_processor::pdu_t& config = std::get<0>(test_case);
+    config = std::get<0>(test_case);
     // Get the TBS in bits.
     unsigned tbs = std::get<1>(test_case);
 
     // Create transport block.
-    std::vector<uint8_t> data(tbs / 8);
-    std::generate(data.begin(), data.end(), [&rgen]() { return static_cast<uint8_t>(rgen() & 0xff); });
+    std::vector<uint8_t> data_vector(tbs / 8);
+    std::generate(data_vector.begin(), data_vector.end(), [&rgen]() { return static_cast<uint8_t>(rgen() & 0xff); });
+
+    // Update data reference.
+    data = data_vector;
 
     std::unique_ptr<pdsch_pdu_validator> validator = create_validator();
 
     // Make sure the configuration is valid.
     TESTASSERT(validator->is_valid(config));
-
-    // Reset finish counter.
-    finish_count = 0;
-    thread_quit  = false;
-
-    // Prepare threads for the current case.
-    std::vector<unique_thread> threads(nof_threads);
-    for (unsigned thread_id = 0; thread_id != nof_threads; ++thread_id) {
-      // Select thread.
-      unique_thread& thread = threads[thread_id];
-
-      // Create thread.
-      thread = unique_thread("thread_" + std::to_string(thread_id),
-                             [&proc, &config, &data] { thread_process(*proc, config, data); });
-    }
-
-    // Wait for finish thread init.
-    {
-      std::unique_lock<std::mutex> lock(mutex_finish_count);
-      while (finish_count != nof_threads) {
-        cvar_count.wait_until(lock, std::chrono::system_clock::now() + std::chrono::milliseconds(2));
-      }
-    }
 
     // Calculate the peak throughput, considering that the number of bits is for a slot.
     double slot_duration_us     = 1e3 / static_cast<double>(pow2(config.slot.numerology()));
@@ -844,7 +906,7 @@ int main(int argc, char** argv)
 
     // Measurement description.
     fmt::memory_buffer meas_description;
-    fmt::format_to(meas_description,
+    fmt::format_to(std::back_inserter(meas_description),
                    "PDSCH RB={:<3} Mod={:<6} rv={} - {:>5.1f} Mbps",
                    config.freq_alloc.get_nof_rb(),
                    to_string(config.codewords.front().modulation),
@@ -869,12 +931,14 @@ int main(int argc, char** argv)
         }
       }
     });
+  }
 
-    thread_quit = true;
+  // Signal quiting for the asynchronous threads.
+  thread_quit = true;
 
-    for (unique_thread& thread : threads) {
-      thread.join();
-    }
+  // Join the asynchronous threads.
+  for (unique_thread& thread : threads) {
+    thread.join();
   }
 
   // Print latency.

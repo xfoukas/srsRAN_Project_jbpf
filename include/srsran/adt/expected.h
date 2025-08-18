@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -43,11 +43,9 @@ using expected = tl::expected<T, E>;
 
 namespace detail {
 template <typename T>
-struct is_expected : std::false_type {
-};
+struct is_expected : std::false_type {};
 template <typename V, typename E>
-struct is_expected<expected<V, E>> : std::true_type {
-};
+struct is_expected<expected<V, E>> : std::true_type {};
 } // namespace detail
 
 template <typename E>

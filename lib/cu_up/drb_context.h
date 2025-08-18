@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -28,7 +28,7 @@
 #include "qos_flow_context.h"
 #include "srsran/f1u/cu_up/f1u_config.h"
 #include "srsran/pdcp/pdcp_entity.h"
-#include "srsran/ran/lcid.h"
+#include "srsran/ran/rb_id.h"
 #include <map>
 
 namespace srsran {
@@ -36,10 +36,11 @@ namespace srs_cu_up {
 
 /// \brief DRB context with map to all QoS flows.
 struct drb_context {
-  drb_context(const drb_id_t& drb_id_) : drb_id(drb_id_){};
+  drb_context(const drb_id_t& drb_id_) : drb_id(drb_id_) {}
 
   void stop()
   {
+    pdcp->stop();
     f1u->stop();
     f1u_gw_bearer->stop();
   }

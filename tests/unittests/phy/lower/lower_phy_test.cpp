@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -207,14 +207,14 @@ static std::ostream& operator<<(std::ostream& os, const prach_buffer_context& co
              context.ports,
              context.slot,
              context.start_symbol,
-             context.format,
+             fmt::underlying(context.format),
              context.rb_offset,
              context.nof_td_occasions,
              context.nof_fd_occasions,
              context.nof_prb_ul_grid,
-             context.pusch_scs,
+             fmt::underlying(context.pusch_scs),
              context.root_sequence_index,
-             context.restricted_set,
+             fmt::underlying(context.restricted_set),
              context.zero_correlation_zone,
              context.start_preamble_index,
              context.nof_preamble_indices);
@@ -270,6 +270,11 @@ protected:
     config.sector_id                      = 0U;
     config.scs                            = scs;
     config.cp                             = cp;
+    config.bandwidth_rb                   = bandwidth_rb;
+    config.dl_freq_hz                     = dl_freq_hz;
+    config.ul_freq_hz                     = ul_freq_hz;
+    config.nof_tx_ports                   = nof_tx_ports;
+    config.nof_rx_ports                   = nof_rx_ports;
     config.dft_window_offset              = dft_window_offset;
     config.max_processing_delay_slots     = max_processing_delay_slots;
     config.srate                          = srate;
@@ -278,23 +283,17 @@ protected:
     config.baseband_tx_buffer_size_policy = lower_phy_baseband_buffer_size_policy::slot;
     config.baseband_rx_buffer_size_policy = lower_phy_baseband_buffer_size_policy::slot;
     config.amplitude_config               = {};
-    config.sectors.emplace_back();
-    config.sectors.back().bandwidth_rb = bandwidth_rb;
-    config.sectors.back().dl_freq_hz   = dl_freq_hz;
-    config.sectors.back().ul_freq_hz   = ul_freq_hz;
-    config.sectors.back().nof_tx_ports = nof_tx_ports;
-    config.sectors.back().nof_rx_ports = nof_rx_ports;
-    config.bb_gateway                  = &bb_gateway_spy;
-    config.rx_symbol_notifier          = &rx_symbol_notifier_spy;
-    config.timing_notifier             = &timing_notifier_spy;
-    config.error_notifier              = &error_notifier_spy;
-    config.metric_notifier             = &metrics_notifier_spy;
-    config.tx_task_executor            = &tx_task_executor;
-    config.rx_task_executor            = &rx_task_executor;
-    config.dl_task_executor            = &dl_task_executor;
-    config.ul_task_executor            = &ul_task_executor;
-    config.prach_async_executor        = &prach_task_executor;
-    config.system_time_throttling      = 0.1;
+    config.bb_gateway                     = &bb_gateway_spy;
+    config.rx_symbol_notifier             = &rx_symbol_notifier_spy;
+    config.timing_notifier                = &timing_notifier_spy;
+    config.error_notifier                 = &error_notifier_spy;
+    config.metric_notifier                = &metrics_notifier_spy;
+    config.tx_task_executor               = &tx_task_executor;
+    config.rx_task_executor               = &rx_task_executor;
+    config.dl_task_executor               = &dl_task_executor;
+    config.ul_task_executor               = &ul_task_executor;
+    config.prach_async_executor           = &prach_task_executor;
+    config.system_time_throttling         = 0.1;
 
     // Prepare downlink processor factory.
     std::shared_ptr<lower_phy_downlink_processor_factory_spy> lphy_dl_proc_factory =

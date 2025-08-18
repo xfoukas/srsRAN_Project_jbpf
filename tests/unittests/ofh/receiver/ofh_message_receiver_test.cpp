@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -21,11 +21,13 @@
  */
 
 #include "../../../../lib/ofh/receiver/ofh_closed_rx_window_handler.h"
-#include "../../../../lib/ofh/receiver/ofh_message_receiver.h"
+#include "../../../../lib/ofh/receiver/ofh_message_receiver_impl.h"
 #include "../../../../lib/ofh/receiver/ofh_rx_window_checker.h"
 #include "../../../../lib/ofh/receiver/ofh_sequence_id_checker_dummy_impl.h"
 #include "../../support/task_executor_test_doubles.h"
 #include "../compression/ofh_iq_decompressor_test_doubles.h"
+#include "srsran/ofh/ethernet/ethernet_controller.h"
+#include "srsran/ofh/ethernet/ethernet_receiver_metrics_collector.h"
 #include "srsran/ofh/ethernet/ethernet_unique_buffer.h"
 #include "srsran/ofh/ofh_factories.h"
 #include "srsran/phy/support/shared_resource_grid.h"
@@ -51,7 +53,7 @@ class dummy_eth_rx_buffer : public ether::rx_buffer
 public:
   explicit dummy_eth_rx_buffer(std::vector<uint8_t>&& init_values) { buffer = init_values; }
 
-  span<const uint8_t> data() const override { return buffer; };
+  span<const uint8_t> data() const override { return buffer; }
 
 private:
   std::vector<uint8_t> buffer;
@@ -130,11 +132,19 @@ public:
 };
 
 /// Dummy Ethernet receiver class.
-class dummy_eth_receiver : public ether::receiver
+class dummy_eth_receiver : public ether::receiver, public ether::receiver_operation_controller
 {
+  // See interface for documentation.
   void start(ether::frame_notifier& notifier) override {}
 
+  // See interface for documentation.
   void stop() override {}
+
+  // See interface for documentation.
+  ether::receiver_operation_controller& get_operation_controller() override { return *this; }
+
+  // See interface for documentation.
+  ether::receiver_metrics_collector* get_metrics_collector() override { return nullptr; }
 };
 
 } // namespace
@@ -167,10 +177,10 @@ public:
                            std::make_shared<prach_context_repository>(20),
                            std::make_shared<uplink_context_repository>(20),
                            std::make_shared<dummy_uplane_rx_symbol_notifier>()}),
-    window_checker(srslog::fetch_basic_logger("TEST"), {}, {}),
+    window_checker(false, {}),
     ul_handler(generate_config(), generate_dependencies())
   {
-    window_checker.on_new_symbol({{1, 0}, 0, 14});
+    window_checker.on_new_symbol({{{1, 0}, 0, 14}, {}});
   }
 
   message_receiver_config generate_config()
@@ -190,6 +200,7 @@ public:
     message_receiver_dependencies dependencies;
     dependencies.logger         = &srslog::fetch_basic_logger("TEST");
     dependencies.window_checker = &window_checker;
+    dependencies.window_handler = &closed_window_handler;
 
     {
       auto temp                    = std::make_unique<data_flow_uplane_uplink_prach_spy>();

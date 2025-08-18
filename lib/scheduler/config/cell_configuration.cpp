@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -23,7 +23,7 @@
 #include "cell_configuration.h"
 #include "srsran/ran/band_helper.h"
 #include "srsran/ran/resource_block.h"
-#include "srsran/ran/ssb_mapping.h"
+#include "srsran/ran/ssb/ssb_mapping.h"
 
 using namespace srsran;
 
@@ -35,8 +35,11 @@ cell_configuration::cell_configuration(const scheduler_expert_config&           
   cell_index(msg.cell_index),
   cell_group_index(msg.cell_group_index),
   pci(msg.pci),
-  nof_dl_prbs(get_max_Nprb(msg.dl_carrier.carrier_bw_mhz, msg.scs_common, frequency_range::FR1)),
-  nof_ul_prbs(get_max_Nprb(msg.ul_carrier.carrier_bw_mhz, msg.scs_common, frequency_range::FR1)),
+  scs_common(msg.scs_common),
+  nof_dl_prbs(
+      get_max_Nprb(msg.dl_carrier.carrier_bw_mhz, scs_common, band_helper::get_freq_range(msg.dl_carrier.band))),
+  nof_ul_prbs(
+      get_max_Nprb(msg.ul_carrier.carrier_bw_mhz, scs_common, band_helper::get_freq_range(msg.dl_carrier.band))),
   nof_slots_per_frame(get_nof_slots_per_subframe(msg.dl_cfg_common.init_dl_bwp.generic_params.scs) *
                       NOF_SUBFRAMES_PER_FRAME),
   dl_cfg_common(msg.dl_cfg_common),
@@ -46,11 +49,14 @@ cell_configuration::cell_configuration(const scheduler_expert_config&           
   ssb_cfg(msg.ssb_config),
   dmrs_typeA_pos(msg.dmrs_typeA_pos),
   ul_carrier(msg.ul_carrier),
+  coreset0(msg.coreset0),
+  searchspace0(msg.searchspace0),
   pucch_guardbands(msg.pucch_guardbands),
   zp_csi_rs_list(msg.zp_csi_rs_list),
   nzp_csi_rs_list(msg.nzp_csi_rs_res_list),
   dl_data_to_ul_ack(msg.dl_data_to_ul_ack),
   rrm_policy_members(msg.rrm_policy_members),
+  cfra_enabled(msg.cfra_enabled),
   // SSB derived params.
   ssb_case(band_helper::get_ssb_pattern(msg.dl_carrier.band, msg.ssb_config.scs)),
   paired_spectrum(band_helper::is_paired_spectrum(msg.dl_carrier.band)),

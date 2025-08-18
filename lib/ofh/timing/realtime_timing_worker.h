@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -50,9 +50,9 @@ struct realtime_worker_cfg {
 };
 
 /// Realtime worker that generates OTA symbol notifications.
-class realtime_timing_worker : public controller, public ota_symbol_boundary_notifier_manager
+class realtime_timing_worker : public operation_controller, public ota_symbol_boundary_notifier_manager
 {
-  enum class worker_status { idle, running, stop_requested, stopped };
+  enum class worker_status { running, stop_requested, stopped };
 
   srslog::basic_logger&                          logger;
   std::vector<ota_symbol_boundary_notifier*>     ota_notifiers;
@@ -63,7 +63,7 @@ class realtime_timing_worker : public controller, public ota_symbol_boundary_not
   const std::chrono::duration<double, std::nano> symbol_duration;
   const std::chrono::nanoseconds                 sleep_time;
   unsigned                                       previous_symb_index = 0;
-  std::atomic<worker_status>                     status{worker_status::idle};
+  std::atomic<worker_status>                     status{worker_status::running};
 
 public:
   realtime_timing_worker(srslog::basic_logger& logger_, task_executor& executor_, const realtime_worker_cfg& cfg);
@@ -85,7 +85,7 @@ private:
   void poll();
 
   /// Notifies the given slot symbol point through the registered notifiers.
-  void notify_slot_symbol_point(slot_symbol_point slot);
+  void notify_slot_symbol_point(const slot_symbol_point_context& slot_context);
 };
 
 } // namespace ofh

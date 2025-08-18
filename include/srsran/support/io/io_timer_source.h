@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -31,20 +31,21 @@ namespace srsran {
 /// \brief Interface for a timer source.
 class io_timer_source
 {
+  const std::chrono::milliseconds tick_period;
+  timer_manager&                  tick_sink;
+  srslog::basic_logger&           logger;
+  io_broker::subscriber           io_sub;
+  std::atomic<bool>               stop_requested{false};
+
 public:
   io_timer_source(timer_manager&            tick_sink_,
                   io_broker&                broker_,
-                  std::chrono::milliseconds tick_period = std::chrono::milliseconds{1});
+                  task_executor&            executor,
+                  std::chrono::milliseconds tick_period);
+  ~io_timer_source();
 
 private:
   void read_time();
-
-  timer_manager&        tick_sink;
-  srslog::basic_logger& logger;
-
-  unique_fd timer_fd;
-
-  io_broker::subscriber io_sub;
 };
 
 } // namespace srsran

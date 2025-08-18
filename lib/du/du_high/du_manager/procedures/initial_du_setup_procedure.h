@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -22,6 +22,7 @@
 
 #pragma once
 
+#include "../du_metrics_aggregator_impl.h"
 #include "srsran/f1ap/du/f1ap_du_connection_manager.h"
 #include "srsran/srslog/srslog.h"
 
@@ -34,19 +35,27 @@ struct du_manager_params;
 class initial_du_setup_procedure
 {
 public:
-  initial_du_setup_procedure(const du_manager_params& params_, du_cell_manager& cell_mng_);
+  initial_du_setup_procedure(const du_manager_params&            params_,
+                             du_cell_manager&                    cell_mng_,
+                             du_manager_metrics_aggregator_impl& metrics_);
 
   void operator()(coro_context<async_task<void>>& ctx);
 
 private:
-  async_task<f1_setup_response_message> start_f1_setup_request();
-  void                                  handle_f1_setup_response(const f1_setup_response_message& resp);
+  // Handle passed DU unit config.
+  void configure_du_cells();
 
-  const du_manager_params& params;
-  du_cell_manager&         cell_mng;
-  srslog::basic_logger&    logger;
+  async_task<f1_setup_result> start_f1_setup_request();
 
-  f1_setup_response_message response_msg = {};
+  // Handle F1 setup response with list of cells to activate.
+  async_task<void> handle_f1_setup_response(const f1_setup_result& resp);
+
+  const du_manager_params&            params;
+  du_cell_manager&                    cell_mng;
+  du_manager_metrics_aggregator_impl& metrics;
+  srslog::basic_logger&               logger;
+
+  f1_setup_result response_msg = {};
 };
 
 } // namespace srs_du

@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -58,18 +58,28 @@ protected:
 TEST_F(du_ue_ric_config_tester,
        when_new_ric_config_is_started_then_du_manager_starts_mac_config_and_waits_for_mac_response)
 {
-  std::vector<control_config_params> param_list;
-  rrm_policy_ratio_group             pol;
-  pol.max_prb_policy_ratio = 10;
+  du_mac_sched_control_config config_req;
+  config_req.ue_id = test_ue->f1ap_ue_id;
+  rrm_policy_ratio_group pol;
+  pol.max_prb_policy_ratio = 50;
   pol.min_prb_policy_ratio = 5;
-  param_list.emplace_back(control_config_params{std::nullopt, std::nullopt, pol});
-  start_procedure(du_mac_sched_control_config{(uint64_t)test_ue->f1ap_ue_id, param_list});
+  pol.ded_prb_policy_ratio = 100;
+  config_req.rrm_policy_ratio_list.push_back(pol);
+
+  unsigned int nof_prbs         = get_max_Nprb(params.ran.cells[0].dl_carrier.carrier_bw_mhz,
+                                       params.ran.cells[0].scs_common,
+                                       band_helper::get_freq_range(params.ran.cells[0].dl_carrier.band));
+  int          expected_min_prb = static_cast<int>((1.0 * pol.min_prb_policy_ratio.value() / 100) * nof_prbs);
+  int          expected_max_prb = static_cast<int>((1.0 * pol.max_prb_policy_ratio.value() / 100) * nof_prbs);
+
+  start_procedure(config_req);
 
   ASSERT_TRUE(mac.last_ue_reconf_msg.has_value()) << "MAC should have received new configuration";
   ASSERT_EQ(mac.last_ue_reconf_msg->ue_index, test_ue->ue_index);
   ASSERT_TRUE(mac.last_ue_reconf_msg->sched_cfg.res_alloc_cfg.has_value());
-  prb_interval expected_prbs{5, 10};
+  prb_interval expected_prbs{expected_min_prb, expected_max_prb};
   ASSERT_EQ(mac.last_ue_reconf_msg->sched_cfg.res_alloc_cfg->pdsch_grant_size_limits, expected_prbs);
+  ASSERT_EQ(mac.last_ue_reconf_msg->sched_cfg.res_alloc_cfg->pusch_grant_size_limits, expected_prbs);
   ASSERT_FALSE(mac.last_ue_reconf_msg->sched_cfg.cells.has_value()) << "Cells should not have been configured";
   ASSERT_FALSE(mac.last_ue_reconf_msg->sched_cfg.lc_config_list.has_value())
       << "Logical channels should not have been configured";
@@ -78,10 +88,11 @@ TEST_F(du_ue_ric_config_tester,
 
 TEST_F(du_ue_ric_config_tester, when_mac_finished_configuration_then_procedure_finishes)
 {
-  std::vector<control_config_params> param_list;
-  rrm_policy_ratio_group             pol;
-  param_list.emplace_back(control_config_params{std::nullopt, std::nullopt, pol});
-  start_procedure(du_mac_sched_control_config{(uint64_t)test_ue->f1ap_ue_id, param_list});
+  du_mac_sched_control_config config_req;
+  config_req.ue_id = test_ue->f1ap_ue_id;
+  rrm_policy_ratio_group pol;
+  config_req.rrm_policy_ratio_list.push_back(pol);
+  start_procedure(config_req);
 
   ASSERT_FALSE(proc_result().has_value()) << "The procedure should wait for MAC response";
   mac.wait_ue_reconf.result = mac_ue_reconfiguration_response{test_ue->ue_index, true};
@@ -104,10 +115,11 @@ TEST_F(du_ue_ric_config_tester,
                              }));
 
   // Start RIC UE config.
-  std::vector<control_config_params> param_list;
-  rrm_policy_ratio_group             pol;
-  param_list.emplace_back(control_config_params{std::nullopt, std::nullopt, pol});
-  start_procedure(du_mac_sched_control_config{(uint64_t)test_ue->f1ap_ue_id, param_list});
+  du_mac_sched_control_config config_req;
+  config_req.ue_id = test_ue->f1ap_ue_id;
+  rrm_policy_ratio_group pol;
+  config_req.rrm_policy_ratio_list.push_back(pol);
+  start_procedure(config_req);
 
   // Status: RIC config procedure is waiting for previous procedure.
   ASSERT_FALSE(mac.last_ue_reconf_msg.has_value())

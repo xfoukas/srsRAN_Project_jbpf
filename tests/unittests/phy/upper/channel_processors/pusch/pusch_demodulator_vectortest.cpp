@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -24,6 +24,7 @@
 #include "pusch_demodulator_notifier_test_doubles.h"
 #include "pusch_demodulator_test_data.h"
 #include "srsran/phy/upper/channel_processors/pusch/factories.h"
+#include "srsran/phy/upper/channel_processors/pusch/pusch_processor_phy_capabilities.h"
 #include "srsran/phy/upper/equalization/equalization_factories.h"
 #include "srsran/srsvec/conversion.h"
 #include "fmt/ostream.h"
@@ -95,8 +96,11 @@ protected:
     std::shared_ptr<channel_equalizer_factory> equalizer_factory = create_channel_equalizer_generic_factory();
     ASSERT_TRUE(equalizer_factory);
 
-    std::shared_ptr<channel_modulation_factory> demod_factory = create_channel_modulation_sw_factory();
+    std::shared_ptr<demodulation_mapper_factory> demod_factory = create_demodulation_mapper_factory();
     ASSERT_TRUE(demod_factory);
+
+    std::shared_ptr<evm_calculator_factory> evm_calc_factory = create_evm_calculator_factory();
+    ASSERT_TRUE(evm_calc_factory);
 
     std::shared_ptr<pseudo_random_generator_factory> prg_factory = create_pseudo_random_generator_sw_factory();
     ASSERT_TRUE(prg_factory);
@@ -109,7 +113,7 @@ protected:
     ASSERT_TRUE(precoding_factory);
 
     std::shared_ptr<pusch_demodulator_factory> pusch_demod_factory = create_pusch_demodulator_factory_sw(
-        equalizer_factory, precoding_factory, demod_factory, prg_factory, MAX_RB, true, true);
+        equalizer_factory, precoding_factory, demod_factory, evm_calc_factory, prg_factory, MAX_RB, true);
     ASSERT_TRUE(pusch_demod_factory);
 
     // Create actual PUSCH demodulator.
@@ -128,8 +132,6 @@ protected:
     // Prepare descrambled codeword data.
     codeword = test_case.codeword.read();
   }
-
-  ~PuschDemodulatorFixture() = default;
 };
 
 TEST_P(PuschDemodulatorFixture, PuschDemodulatorUnittest)
@@ -157,11 +159,15 @@ TEST_P(PuschDemodulatorFixture, PuschDemodulatorUnittest)
   ce_dims.nof_tx_layers = estimates.get_dimension_size(ch_dims::tx_layer);
   channel_estimate chan_estimates(ce_dims);
 
+  if ((ce_dims.nof_tx_layers > 1) && (get_pusch_processor_phy_capabilities().max_nof_layers < 2)) {
+    GTEST_SKIP() << "The PUSCH demodulator for 2 or more layers is not supported in this version - skipping the test.";
+  }
+
   // Populate channel estimate.
   for (unsigned i_rx_port = 0; i_rx_port != ce_dims.nof_rx_ports; ++i_rx_port) {
     for (unsigned i_layer = 0; i_layer != ce_dims.nof_tx_layers; ++i_layer) {
       // Set noise variance.
-      chan_estimates.set_noise_variance(test_case.context.noise_var, config.rx_ports[i_rx_port], i_layer);
+      chan_estimates.set_noise_variance(test_case.context.noise_var, config.rx_ports[i_rx_port]);
 
       // Copy port channel estimates.
       srsvec::convert(chan_estimates.get_path_ch_estimate(config.rx_ports[i_rx_port], i_layer),

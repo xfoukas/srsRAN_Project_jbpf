@@ -1,5 +1,5 @@
 #
-# Copyright 2013-2024 Software Radio Systems Limited
+# Copyright 2013-2025 Software Radio Systems Limited
 #
 # By using this file, you agree to the terms and conditions set
 # forth in the LICENSE file which can be found at the top level of
@@ -8,13 +8,13 @@
 
 include:
   - project: softwareradiosystems/ci/tools
-    ref: "20"
+    ref: "22"
     file: .gitlab/ci-shared/setup/all.yml
   - project: softwareradiosystems/ci/tools
-    ref: "20"
+    ref: "22"
     file: .gitlab/ci-shared/tools/python.yml
   - project: softwareradiosystems/ci/tools
-    ref: "20"
+    ref: "22"
     file: .gitlab/ci-shared/tools/docker.yml
 
 ################################################################################
@@ -26,24 +26,11 @@ stages:
   - compose
   - publish
 
-variables:
-  PY_DIR: docker/metrics_server
-
 .gnb-docker:
   - changes: &srs_container_changes
       paths:
         - docker/scripts/**/*
         - docker/Dockerfile
-
-.uhd_params:
-  variables: &uhd_params
-    LIB: uhd
-    LIB_VERSION: "4.7.0.0"
-
-.dpdk_params:
-  variables: &dpdk_params
-    LIB: dpdk
-    LIB_VERSION: "23.11.1"
 
 ################################################################################
 # Static
@@ -51,14 +38,16 @@ variables:
 no docker changes:
   stage: static
   image: alpine:3.16.0
+  variables:
+    GIT_STRATEGY: none
   rules:
     - if: $ON_MR
       changes:
         - docker/docker-compose.yml
         - docker/.env
         - docker/Dockerfile
-        - docker/metrics_server/**/*
         - docker/open5gs/**/*
+        - docker/telegraf/**/*
         - docker/grafana/**/*
         - docker/scripts/**/*
       when: never
@@ -66,54 +55,66 @@ no docker changes:
   script:
     - echo "Nothing to check"
 
-metrics tox:
-  extends: .tox
-  stage: static
-  rules:
-    - if: $ON_MR
-      changes:
-        - docker/metrics_server/**/*
-
 grafana version changed:
   extends: .version_changed_pyproject
+  variables:
+    GIT_LFS_SKIP_SMUDGE: 1
   stage: static
   rules:
     - if: $ON_MR
       changes:
         - docker/grafana/**/*
   script:
-    - NEW_VERSION=$(cat docker/grafana/version.yml | grep SRS_GRAFANA_VERSION | cut -d'"' -f2)
+    - NEW_VERSION=$(cat docker/grafana/version.yml | grep SRS_GF_VERSION | cut -d'"' -f2)
     - export NEW_VERSION
     - |
       git checkout $CI_MERGE_REQUEST_DIFF_BASE_SHA
       if [ ! -e "docker/grafana/version.yml" ]; then
           exit 0
       fi
-    - OLD_VERSION=$(cat docker/grafana/version.yml | grep SRS_GRAFANA_VERSION | cut -d'"' -f2)
+      if [ ! $(cat docker/grafana/version.yml | grep SRS_GF_VERSION) ]; then
+          exit 0
+      fi
+    - OLD_VERSION=$(cat docker/grafana/version.yml | grep SRS_GF_VERSION | cut -d'"' -f2)
     - export OLD_VERSION
     - |
       echo "OLD version: $OLD_VERSION -- NEW version: $NEW_VERSION"
     - python3 -c "import semver; import os; exit(0) if (semver.compare(os.environ['NEW_VERSION'], os.environ['OLD_VERSION']) > 0) else exit(1)"
 
-metrics version changed:
+telegraf version changed:
   extends: .version_changed_pyproject
   stage: static
+  variables:
+    GIT_LFS_SKIP_SMUDGE: 1
   rules:
     - if: $ON_MR
       changes:
-        - docker/metrics_server/**/*
+        - docker/telegraf/**/*
+  script:
+    - NEW_VERSION=$(cat docker/telegraf/version.yml | grep  SRS_TELEGRAF_VERSION | cut -d'"' -f2)
+    - export NEW_VERSION
+    - |
+      git checkout $CI_MERGE_REQUEST_DIFF_BASE_SHA
+      if [ ! $(cat docker/telegraf/version.yml | grep  SRS_TELEGRAF_VERSION) ]; then
+          exit 0
+      fi
+    - OLD_VERSION=$(cat docker/telegraf/version.yml | grep  SRS_TELEGRAF_VERSION | cut -d'"' -f2)
+    - export OLD_VERSION
+    - |
+      echo "OLD version: $OLD_VERSION -- NEW version: $NEW_VERSION"
+    - python3 -c "import semver; import os; exit(0) if (semver.compare(os.environ['NEW_VERSION'], os.environ['OLD_VERSION']) > 0) else exit(1)"
 
-metrics version check in retina:
-  extends: metrics version changed
+telegraf version check in retina:
+  extends: telegraf version changed
   script:
     - |
-      VERSION_IN_PYPROJECT=$(cat docker/metrics_server/pyproject.toml | grep '^version' | cut -d'"' -f2)
-      VERSION_IN_RETINA=$(cat .gitlab/ci/e2e/.env | grep METRICS_SERVER_VERSION | cut -d'=' -f2)
-      echo "pyproject.toml version: $VERSION_IN_PYPROJECT -- retina .env version: $VERSION_IN_RETINA"
+      VERSION_IN_COMPOSE=$(cat docker/telegraf/version.yml | grep  SRS_TELEGRAF_VERSION | cut -d'"' -f2)
+      VERSION_IN_RETINA=$(cat .gitlab/ci/e2e/.env | grep TELEGRAF_VERSION | cut -d'=' -f2)
+      echo "compose version: $VERSION_IN_COMPOSE -- retina version: $VERSION_IN_RETINA"
     - |
-      export VERSION_IN_PYPROJECT
+      export VERSION_IN_COMPOSE
       export VERSION_IN_RETINA
-    - python3 -c "import semver; import os; exit(semver.compare(os.environ['VERSION_IN_RETINA'], os.environ['VERSION_IN_PYPROJECT']))"
+    - python3 -c "import semver; import os; exit(semver.compare(os.environ['VERSION_IN_RETINA'], os.environ['VERSION_IN_COMPOSE']))"
 
 ################################################################################
 # Docker Compose
@@ -124,6 +125,13 @@ metrics version check in retina:
   tags:
     - amd64-avx2
   timeout: 2h
+  retry: 2
+  variables:
+    GIT_LFS_SKIP_SMUDGE: 1
+    KUBERNETES_CPU_REQUEST: ${SRS_CPU_LIMIT}
+    KUBERNETES_CPU_LIMIT: ${SRS_CPU_LIMIT}
+    KUBERNETES_MEMORY_REQUEST: ${SRS_MEMORY_LIMIT}
+    KUBERNETES_MEMORY_LIMIT: ${SRS_MEMORY_LIMIT}
   before_script: &docker_setup
     - dockerd-entrypoint.sh &
     - |
@@ -132,13 +140,11 @@ metrics version check in retina:
           sleep 1
       done
 
-.gnb docker compose:
+gnb docker compose:
   extends: .docker compose
-  variables: &build_in_compose_variables
-    KUBERNETES_CPU_REQUEST: 6
-    KUBERNETES_CPU_LIMIT: 6
-    KUBERNETES_MEMORY_REQUEST: 12Gi
-    KUBERNETES_MEMORY_LIMIT: 12Gi
+  variables:
+    DOCKER_UHD_VERSION: "4.7.0.0"
+    DOCKER_DPDK_VERSION: "23.11.1"
   rules:
     - if: $ON_MR
       changes:
@@ -151,29 +157,21 @@ metrics version check in retina:
       interruptible: false
   before_script:
     - *docker_setup
-    - docker compose -f docker/docker-compose.yml build --build-arg NUM_CORES=${KUBERNETES_CPU_LIMIT} --build-arg LIB=${LIB} --build-arg LIB_VERSION=${LIB_VERSION} gnb
+  script:
+    - docker compose -f docker/docker-compose.yml build --build-arg NUM_JOBS=${KUBERNETES_CPU_LIMIT} --build-arg UHD_VERSION=${DOCKER_UHD_VERSION} --build-arg DPDK_VERSION=${DOCKER_DPDK_VERSION} gnb
     - sh -c "docker compose -f docker/docker-compose.yml run --no-deps gnb which srscu"
     - sh -c "docker compose -f docker/docker-compose.yml run --no-deps gnb which srsdu"
-
-gnb docker compose uhd:
-  extends: .gnb docker compose
-  variables:
-    <<: *uhd_params
-  script:
-    - sh -c "docker compose -f docker/docker-compose.yml run --no-deps gnb gnb cu_cp amf --no_core=true ru_sdr --device_driver uhd | grep 'Failed to open device with address'"
-
-gnb docker compose dpdk:
-  extends: .gnb docker compose
-  variables:
-    <<: *dpdk_params
-  script:
+    - sh -c "docker compose -f docker/docker-compose.yml run --no-deps gnb which srsdu_split_8"
+    - sh -c "docker compose -f docker/docker-compose.yml run --no-deps gnb which srsdu_split_7_2"
+    - sh -c "docker compose -f docker/docker-compose.yml run --no-deps gnb which gnb"
+    - sh -c "docker compose -f docker/docker-compose.yml run --no-deps gnb which gnb_split_8"
+    - sh -c "docker compose -f docker/docker-compose.yml run --no-deps gnb which gnb_split_7_2"
     - sh -c "docker compose -f docker/docker-compose.yml run --no-deps gnb which ru_emulator"
+    - sh -c "docker compose -f docker/docker-compose.yml run --no-deps gnb gnb cu_cp amf --no_core=true ru_sdr --device_driver uhd | grep 'Failed to open device with address'"
     - sh -c "docker compose -f docker/docker-compose.yml run --no-deps gnb gnb cu_cp amf --no_core=true hal --eal_args='--help'"
 
 5gc docker compose:
   extends: .docker compose
-  variables:
-    <<: *build_in_compose_variables
   rules:
     - if: $ON_MR
       changes:
@@ -183,7 +181,7 @@ gnb docker compose dpdk:
     - if: $CI_DESCRIPTION =~ /Weekly/
       interruptible: false
   script:
-    - docker compose -f docker/docker-compose.yml build --build-arg NUM_CORES=${KUBERNETES_CPU_LIMIT} 5gc
+    - docker compose -f docker/docker-compose.yml build --build-arg NUM_JOBS=${KUBERNETES_CPU_LIMIT} 5gc
     - docker compose -f docker/docker-compose.yml run 5gc 5gc -v
 
 grafana docker compose:
@@ -200,62 +198,59 @@ grafana docker compose:
   script:
     - docker compose -f docker/docker-compose.yml run --no-deps grafana --version
 
-influxdb docker compose:
+influxdb and telegraf docker compose:
   extends: .docker compose
   rules:
     - if: $ON_MR
       changes:
         paths:
           - docker/.env
+          - docker/telegraf/**/*
           - docker/docker-compose.yml
     - if: $CI_DESCRIPTION =~ /Weekly/
       interruptible: false
   script:
-    - docker compose -f docker/docker-compose.yml run influxdb influx version
-
-metrics-server docker compose:
-  extends: .docker compose
-  rules:
-    - if: $ON_MR
-      changes:
-        paths:
-          - docker/.env
-          - docker/metrics_server/**/*
-          - docker/docker-compose.yml
-    - if: $CI_DESCRIPTION =~ /Weekly/
-      interruptible: false
-  script:
-    - docker compose -f docker/docker-compose.yml run metrics-server metrics-server --help
+    - docker compose -f docker/docker-compose.yml up influxdb telegraf -d --wait
+    - |
+      echo '{"timestamp": 1750248119.559, "fake_metric": {"field": 0}}' | nc -u -w1 localhost 55555
+    - |
+      if docker compose -f docker/docker-compose.yml logs telegraf | grep -E 'E!|error'; then
+        docker compose -f docker/docker-compose.yml down --volumes
+        exit 1
+      fi
+    - docker compose -f docker/docker-compose.yml logs
+    - docker compose -f docker/docker-compose.yml down --volumes
 
 ################################################################################
 # Publish
 ################################################################################
-metrics server image:
+telegraf image:
   extends: .docker-builder
   stage: publish
   rules:
     - if: $ON_MR
       changes:
         paths:
-          - docker/metrics_server/**/*
+          - docker/telegraf/**/*
   variables:
+    GIT_LFS_SKIP_SMUDGE: 1
     REGISTRY_URI: $GITLAB_REGISTRY_URI
-    NAME: metrics_server
-    CONTEXT: ${CI_PROJECT_DIR}/docker/metrics_server
+    NAME: telegraf
+    CONTEXT: ${CI_PROJECT_DIR}/docker/telegraf
     MODE: publish
   before_script:
     - |
-      export VERSION=$(cat ${CONTEXT}/pyproject.toml | grep '^version' | cut -d'"' -f2)
+      export VERSION=$(cat ${CONTEXT}/version.yml | grep SRS_TELEGRAF_VERSION | cut -d'"' -f2)
 
-metrics server image latest:
-  extends: metrics server image
+telegraf image latest:
+  extends: telegraf image
   variables:
     OVERWRITE: "true"
   before_script:
     - |
       export VERSION=latest
 
-grafana server image:
+grafana image:
   extends: .docker-builder
   stage: publish
   rules:
@@ -264,120 +259,31 @@ grafana server image:
         paths:
           - docker/grafana/**/*
   variables:
+    GIT_LFS_SKIP_SMUDGE: 1
     REGISTRY_URI: $GITLAB_REGISTRY_URI
     NAME: grafana
     CONTEXT: ${CI_PROJECT_DIR}/docker/grafana
     MODE: publish
-  before_script:
+  before_script: &grafana_before_script
     - |
-      export VERSION=$(cat docker/grafana/version.yml | grep SRS_GRAFANA_VERSION | cut -d'"' -f2)
+      if [ -n "$LOGO_URL" ]; then
+        DEBIAN_FRONTEND=noninteractive apt-get update && apt-get install -y --no-install-recommends ca-certificates wget
+        wget --header="PRIVATE-TOKEN: $CODEBOT_TOKEN" -O ${CONTEXT}/provisioning/logo.png ${LOGO_URL}
+        export BUILD_ARGS="LOGO_SRC=/etc/grafana/provisioning/logo.png"
+      fi
+    - |
+      export VERSION=$(cat docker/grafana/version.yml | grep SRS_GF_VERSION | cut -d'"' -f2)
+  parallel:
+    matrix:
+      - REGISTRY_ORG: /${CI_PROJECT_NAME}
+      - REGISTRY_ORG: /${SRSRAN_IMAGE_PREFIX}
+        LOGO_URL: ${SRSRAN_IMAGE_LOGO_URL}
 
-grafana server image latest:
-  extends: grafana server image
+grafana image latest:
+  extends: grafana image
   variables:
     OVERWRITE: "true"
   before_script:
+    - *grafana_before_script
     - |
       export VERSION=latest
-
-.srsran image:
-  extends: .docker-builder
-  stage: publish
-  rules:
-    - if: $ON_MR
-      changes:
-        <<: *srs_container_changes
-      variables:
-    - if: $CI_DESCRIPTION =~ /Nightly Build Unit Tests/
-      interruptible: false
-  variables:
-    KUBERNETES_CPU_REQUEST: 6
-    KUBERNETES_CPU_LIMIT: 6
-    KUBERNETES_MEMORY_REQUEST: 12Gi
-    KUBERNETES_MEMORY_LIMIT: 12Gi
-    REGISTRY_URI: $GITLAB_REGISTRY_URI
-    CONTEXT: ${CI_PROJECT_DIR}
-    DOCKERFILE: docker
-    MODE: build
-  timeout: 2 hours
-  tags:
-    - ${TAG}
-  before_script:
-    - |
-      export NAME="srsran-project"
-      export VERSION="${SPLIT}_${SUFFIX}"
-      export BUILD_ARGS="LIB=${LIB};LIB_VERSION=${LIB_VERSION};MARCH=${MARCH};NUM_CORES=${KUBERNETES_CPU_LIMIT};EXTRA_CMAKE_ARGS=\"${EXTRA_CMAKE_ARGS}\""
-
-srsran image split72:
-  extends: .srsran image
-  variables:
-    SPLIT: split72
-    <<: *dpdk_params
-  parallel:
-    matrix:
-      # AMD AVX2
-      - SUFFIX: release_avx2
-        MARCH: x86-64-v3
-        TAG: amd64-avx2
-        PLATFORM: amd64
-      - SUFFIX: release_with_debug_avx2
-        EXTRA_CMAKE_ARGS: -DFORCE_DEBUG_INFO=On
-        MARCH: x86-64-v3
-        TAG: amd64-avx2
-        PLATFORM: amd64
-      # AMD AVX512
-      - SUFFIX: release_avx512
-        MARCH: x86-64-v4
-        TAG: amd64-avx2-avx512
-        PLATFORM: amd64
-      - SUFFIX: release_with_debug_avx512
-        EXTRA_CMAKE_ARGS: -DFORCE_DEBUG_INFO=On
-        MARCH: x86-64-v4
-        TAG: amd64-avx2-avx512
-        PLATFORM: amd64
-      # ARM
-      - SUFFIX: release_arm
-        MARCH: armv8.2-a+crypto+fp16+dotprod
-        TAG: arm64
-        PLATFORM: arm64
-      - SUFFIX: release_with_debug_arm
-        EXTRA_CMAKE_ARGS: -DFORCE_DEBUG_INFO=On
-        MARCH: armv8.2-a+crypto+fp16+dotprod
-        TAG: arm64
-        PLATFORM: arm64
-  needs:
-    - job: gnb docker compose dpdk
-      optional: true
-      artifacts: false
-
-srsran image split8:
-  extends: .srsran image
-  variables:
-    SPLIT: split8
-    <<: *uhd_params
-  parallel:
-    matrix:
-      # AMD AVX2
-      - SUFFIX: release_avx2
-        MARCH: x86-64-v3
-        TAG: amd64-avx2
-        PLATFORM: amd64
-      - SUFFIX: release_with_debug_avx2
-        EXTRA_CMAKE_ARGS: -DFORCE_DEBUG_INFO=On
-        MARCH: x86-64-v3
-        TAG: amd64-avx2
-        PLATFORM: amd64
-      # ARM
-      - SUFFIX: release_arm
-        MARCH: armv8.2-a+crypto+fp16+dotprod
-        TAG: arm64
-        PLATFORM: arm64
-      - SUFFIX: release_with_debug_arm
-        EXTRA_CMAKE_ARGS: -DFORCE_DEBUG_INFO=On
-        MARCH: armv8.2-a+crypto+fp16+dotprod
-        TAG: arm64
-        PLATFORM: arm64
-  needs:
-    - job: gnb docker compose uhd
-      optional: true
-      artifacts: false

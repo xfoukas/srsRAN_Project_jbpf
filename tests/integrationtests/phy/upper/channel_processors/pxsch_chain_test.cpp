@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -36,7 +36,7 @@
 #include "srsran/ran/sch/sch_mcs.h"
 #include "srsran/ran/sch/tbs_calculator.h"
 #include "srsran/srsvec/bit.h"
-#include "srsran/support/complex_normal_random.h"
+#include "srsran/support/math/complex_normal_random.h"
 #include "srsran/support/srsran_test.h"
 #include "fmt/ostream.h"
 #include <gtest/gtest.h>
@@ -164,8 +164,11 @@ protected:
     std::shared_ptr<pusch_decoder_factory> pusch_dec_factory = create_sw_pusch_decoder_factory();
     TESTASSERT(pusch_dec_factory);
 
-    std::shared_ptr<channel_modulation_factory> modulation_factory = create_channel_modulation_sw_factory();
+    std::shared_ptr<modulation_mapper_factory> modulation_factory = create_modulation_mapper_factory();
     TESTASSERT(modulation_factory);
+
+    std::shared_ptr<demodulation_mapper_factory> demodulation_factory = create_demodulation_mapper_factory();
+    TESTASSERT(demodulation_factory);
 
     encoder = pdsch_enc_factory->create();
     TESTASSERT(encoder);
@@ -173,10 +176,10 @@ protected:
     decoder = pusch_dec_factory->create();
     TESTASSERT(decoder);
 
-    modulator = modulation_factory->create_modulation_mapper();
+    modulator = modulation_factory->create();
     TESTASSERT(modulator);
 
-    demodulator = modulation_factory->create_demodulation_mapper();
+    demodulator = demodulation_factory->create();
     TESTASSERT(demodulator);
   }
 

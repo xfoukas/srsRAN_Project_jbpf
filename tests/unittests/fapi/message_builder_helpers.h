@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -22,7 +22,17 @@
 
 #pragma once
 
-#include "srsran/fapi/messages.h"
+#include "srsran/fapi/messages/crc_indication.h"
+#include "srsran/fapi/messages/dl_tti_request.h"
+#include "srsran/fapi/messages/error_indication.h"
+#include "srsran/fapi/messages/rach_indication.h"
+#include "srsran/fapi/messages/rx_data_indication.h"
+#include "srsran/fapi/messages/slot_indication.h"
+#include "srsran/fapi/messages/srs_indication.h"
+#include "srsran/fapi/messages/tx_data_request.h"
+#include "srsran/fapi/messages/uci_indication.h"
+#include "srsran/fapi/messages/ul_dci_request.h"
+#include "srsran/fapi/messages/ul_tti_request.h"
 
 namespace unittest {
 /// Builds and returns a valid CRC.indication message. Every parameter is within the range defined in SCF-222 v4.0
@@ -40,6 +50,10 @@ srsran::fapi::dl_pdcch_pdu build_valid_dl_pdcch_pdu();
 /// Builds and returns a valid DL PDSCH PDU. Every parameter is within the range defined in SCF-222 v4.0
 /// Section 3.4.2.2.
 srsran::fapi::dl_pdsch_pdu build_valid_dl_pdsch_pdu();
+
+/// Builds and returns a valid DL PRS pdu. Every parameter is within the range defined in SCF-222 v8.0
+/// Section 3.4.2.4a.
+srsran::fapi::dl_prs_pdu build_valid_dl_prs_pdu();
 
 /// Builds and returns a valid DL SSB pdu. Every parameter is within the range defined in SCF-222 v4.0
 /// Section 3.4.2.4.
@@ -63,7 +77,7 @@ srsran::fapi::error_indication_message build_valid_invalid_sfn_error_indication(
 
 /// Builds and returns a valid MSG_SLOT_ERR ERROR.indication message. Every parameter is within the range defined in
 /// SCF-222 v4.0 Section 3.3.6.1.
-srsran::fapi::error_indication_message build_valid_msg_slot_error_indication();
+srsran::fapi::error_indication_message build_valid_msg_error_indication();
 
 /// Builds and returns a valid MSG_TX_ERR ERROR.indication message. Every parameter is within the range defined in
 /// SCF-222 v4.0 Section 3.3.6.1.

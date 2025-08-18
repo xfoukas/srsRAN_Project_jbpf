@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -22,22 +22,22 @@
 
 #pragma once
 
-#include "f1ap_du_ue_config.h"
-#include "f1c_bearer.h"
-#include "srsran/adt/expected.h"
+#include "f1ap_du_metrics_collector.h"
 #include "srsran/f1ap/du/f1ap_du_connection_manager.h"
+#include "srsran/f1ap/du/f1ap_du_ue_config.h"
 #include "srsran/f1ap/du/f1ap_du_ue_context_update.h"
+#include "srsran/f1ap/du/f1c_bearer.h"
 #include "srsran/f1ap/f1ap_message_handler.h"
-#include "srsran/f1u/du/f1u_bearer.h"
-#include "srsran/mac/mac_paging_information_handler.h"
 #include "srsran/ran/du_types.h"
-#include "srsran/ran/lcid.h"
-#include "srsran/ran/rnti.h"
+#include "srsran/ran/paging_information.h"
+#include "srsran/ran/rb_id.h"
 #include "srsran/support/async/async_task.h"
 #include "srsran/support/timers.h"
 
 namespace srsran {
 namespace srs_du {
+
+class f1ap_du_positioning_handler;
 
 struct f1ap_rrc_delivery_report_msg {
   du_cell_index_t cell_index          = INVALID_DU_CELL_INDEX;
@@ -166,13 +166,18 @@ public:
 
 /// The F1AP uses this interface to notify the DU of new required updates (e.g. UE config modification, etc.) and to
 /// request services such as timers, scheduling of async tasks, etc.
-class f1ap_du_configurator : public f1ap_task_scheduler
+class f1ap_du_configurator : public f1ap_interface_update_notifier, public f1ap_task_scheduler
 {
 public:
   virtual ~f1ap_du_configurator() = default;
 
   /// Called when the F1-C interface shutdowns unexpectedly.
   virtual void on_f1c_disconnection() = 0;
+
+  /// Request the reset of UE transaction information.
+  ///
+  /// \param[in] List of UEs for which to reset the context. If list is empty, all UEs are removed.
+  virtual async_task<void> request_reset(const std::vector<du_ue_index_t>& ues_to_reset) = 0;
 
   /// \brief Search for an unused DU UE index.
   virtual du_ue_index_t find_free_ue_index() = 0;
@@ -201,6 +206,9 @@ public:
   /// Confirm that the UE applied the pending configuration.
   virtual void on_ue_config_applied(du_ue_index_t ue_index) = 0;
 
+  /// Retrieve handling of positioning information.
+  virtual f1ap_du_positioning_handler& get_positioning_handler() = 0;
+
   /// \brief Retrieve task scheduler specific to a given UE.
   virtual f1ap_ue_task_scheduler& get_ue_handler(du_ue_index_t ue_index) = 0;
 };
@@ -221,7 +229,13 @@ class f1ap_du : public f1ap_message_handler,
                 public f1ap_connection_manager,
                 public f1ap_ue_context_manager,
                 public f1ap_ue_id_translator
-{};
+{
+public:
+  virtual ~f1ap_du() = default;
+
+  /// \brief Retrieve the F1AP metrics collector.
+  virtual f1ap_metrics_collector& get_metrics_collector() = 0;
+};
 
 } // namespace srs_du
 } // namespace srsran

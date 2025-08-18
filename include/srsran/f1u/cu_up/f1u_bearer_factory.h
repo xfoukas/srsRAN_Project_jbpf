@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -22,16 +22,15 @@
 
 #pragma once
 
-#include "f1u_bearer.h"
-#include "f1u_rx_delivery_notifier.h"
-#include "f1u_rx_sdu_notifier.h"
-#include "f1u_tx_pdu_notifier.h"
+#include "srsran/f1u/cu_up/f1u_bearer.h"
 #include "srsran/f1u/cu_up/f1u_config.h"
-#include "srsran/ran/lcid.h"
+#include "srsran/f1u/cu_up/f1u_rx_delivery_notifier.h"
+#include "srsran/f1u/cu_up/f1u_rx_sdu_notifier.h"
+#include "srsran/f1u/cu_up/f1u_tx_pdu_notifier.h"
+#include "srsran/ran/rb_id.h"
 #include "srsran/support/timers.h"
 
-namespace srsran {
-namespace srs_cu_up {
+namespace srsran::srs_cu_up {
 
 /// \brief Creates an F1-U bearer for the CU-UP.
 std::unique_ptr<f1u_bearer> create_f1u_bearer(uint32_t                       ue_index,
@@ -41,9 +40,9 @@ std::unique_ptr<f1u_bearer> create_f1u_bearer(uint32_t                       ue_
                                               f1u_tx_pdu_notifier&           tx_pdu_notifier,
                                               f1u_rx_delivery_notifier&      rx_delivery_notifier,
                                               f1u_rx_sdu_notifier&           rx_sdu_notifier,
-                                              timer_factory                  ue_dl_timer_factory,
+                                              timer_factory                  ue_ctrl_timer_factory,
                                               unique_timer&                  ue_inactivity_timer,
+                                              task_executor&                 dl_exec,
                                               task_executor&                 ul_exec);
 
-} // namespace srs_cu_up
-} // namespace srsran
+} // namespace srsran::srs_cu_up

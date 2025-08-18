@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -23,6 +23,7 @@
 #pragma once
 
 #include "srsran/support/srsran_assert.h"
+#include <algorithm>
 #include <string>
 
 namespace srsran {
@@ -105,10 +106,10 @@ inline compression_type to_compression_type(const std::string& compr)
   }
 
   srsran_assert(0, "Unknown compression method={}", compr);
-  return ofh::compression_type::none;
+  return compression_type::none;
 }
 
-inline std::string to_string(ofh::compression_type c)
+inline std::string to_string(compression_type c)
 {
   switch (c) {
     case compression_type::none:

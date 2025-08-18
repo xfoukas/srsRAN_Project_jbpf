@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -32,15 +32,17 @@ void uplane_rx_symbol_data_flow_writer::write_to_resource_grid(unsigned         
 {
   trace_point access_repo_tp = ofh_tracer.now();
 
-  slot_point            slot       = results.params.slot;
-  unsigned              symbol     = results.params.symbol_id;
-  const uplink_context& ul_context = ul_context_repo->get(slot, symbol);
-  if (ul_context.empty()) {
-    logger.warning("Dropped received Open Fronthaul message as no uplink slot context was found for slot '{}', symbol "
-                   "'{}' and eAxC '{}'",
-                   results.params.slot,
-                   results.params.symbol_id,
-                   eaxc);
+  slot_point     slot       = results.params.slot;
+  unsigned       symbol     = results.params.symbol_id;
+  uplink_context ul_context = ul_context_repo->get(slot, symbol);
+  if (SRSRAN_UNLIKELY(ul_context.empty())) {
+    logger.warning(
+        "Sector#{}: dropped received Open Fronthaul message as no uplink slot context was found for slot '{}', symbol "
+        "'{}' and eAxC '{}'",
+        sector_id,
+        results.params.slot,
+        results.params.symbol_id,
+        eaxc);
 
     return;
   }
@@ -81,11 +83,15 @@ void uplane_rx_symbol_data_flow_writer::write_to_resource_grid(unsigned         
 
     ofh_tracer << trace_event("ofh_receiver_write_rg", write_rg_tp);
 
-    logger.debug("Written IQ data into UL resource grid PRB range [{},{}), for slot '{}', symbol '{}' and port '{}'",
-                 section.start_prb,
-                 section.start_prb + nof_prbs_to_write,
-                 slot,
-                 symbol,
-                 rg_port);
+    if (SRSRAN_UNLIKELY(logger.debug.enabled())) {
+      logger.debug("Sector#{}: written IQ data into UL resource grid PRB range [{},{}), for slot '{}', symbol '{}' and "
+                   "port '{}'",
+                   sector_id,
+                   section.start_prb,
+                   section.start_prb + nof_prbs_to_write,
+                   slot,
+                   symbol,
+                   rg_port);
+    }
   }
 }

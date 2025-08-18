@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -153,4 +153,12 @@ void radio_session_zmq_impl::start(baseband_gateway_timestamp start_time)
 baseband_gateway_timestamp radio_session_zmq_impl::read_current_time()
 {
   return 0;
+}
+bool radio_session_zmq_impl::set_tx_freq(unsigned stream_id, double center_freq_Hz)
+{
+  return false;
+}
+bool radio_session_zmq_impl::set_rx_freq(unsigned stream_id, double center_freq_Hz)
+{
+  return false;
 }

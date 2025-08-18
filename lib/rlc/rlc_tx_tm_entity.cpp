@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -35,7 +35,7 @@ rlc_tx_tm_entity::rlc_tx_tm_entity(gnb_du_id_t                          du_id_,
                                    rlc_tx_upper_layer_data_notifier&    upper_dn_,
                                    rlc_tx_upper_layer_control_notifier& upper_cn_,
                                    rlc_tx_lower_layer_notifier&         lower_dn_,
-                                   rlc_metrics_aggregator&              metrics_agg_,
+                                   rlc_bearer_metrics_collector&        metrics_coll_,
                                    rlc_pcap&                            pcap_,
                                    task_executor&                       pcell_executor_,
                                    task_executor&                       ue_executor_,
@@ -46,7 +46,7 @@ rlc_tx_tm_entity::rlc_tx_tm_entity(gnb_du_id_t                          du_id_,
                 upper_dn_,
                 upper_cn_,
                 lower_dn_,
-                metrics_agg_,
+                metrics_coll_,
                 pcap_,
                 pcell_executor_,
                 ue_executor_,
@@ -63,6 +63,7 @@ rlc_tx_tm_entity::rlc_tx_tm_entity(gnb_du_id_t                          du_id_,
 void rlc_tx_tm_entity::handle_sdu(byte_buffer sdu_buf, bool is_retx)
 {
   rlc_sdu sdu_;
+  sdu_.time_of_arrival = std::chrono::steady_clock::now();
 
   sdu_.buf = std::move(sdu_buf);
 
@@ -111,7 +112,7 @@ void rlc_tx_tm_entity::discard_sdu(uint32_t pdcp_sn)
 }
 
 // TS 38.322 v16.2.0 Sec. 5.2.1.1
-size_t rlc_tx_tm_entity::pull_pdu(span<uint8_t> mac_sdu_buf)
+size_t rlc_tx_tm_entity::pull_pdu(span<uint8_t> mac_sdu_buf) noexcept SRSRAN_RTSAN_NONBLOCKING
 {
   size_t grant_len = mac_sdu_buf.size();
   logger.log_debug("MAC opportunity. grant_len={}", grant_len);
@@ -161,8 +162,14 @@ size_t rlc_tx_tm_entity::pull_pdu(span<uint8_t> mac_sdu_buf)
   size_t pdu_len = out_it - mac_sdu_buf.begin();
   logger.log_info(mac_sdu_buf.data(), pdu_len, "TX PDU. pdu_len={} grant_len={}", pdu_len, grant_len);
 
-  // Release SDU
-  sdu.buf.clear();
+  // Recycle SDU buffer in non real-time UE executor
+  auto release_sdu_func = TRACE_TASK([sdu = std::move(sdu.buf)]() mutable {
+    // leaving this scope will implicitly delete the SDU
+  });
+  if (!ue_executor.defer(std::move(release_sdu_func))) {
+    logger.log_warning("Cannot release transmitted SDU in UE executor. Releasing from pcell executor.");
+    sdu.buf.clear();
+  }
 
   // Push PDU into PCAP.
   pcap.push_pdu(pcap_context, mac_sdu_buf.subspan(0, pdu_len));
@@ -203,7 +210,7 @@ void rlc_tx_tm_entity::handle_changed_buffer_state()
   if (not pending_buffer_state.test_and_set(std::memory_order_seq_cst)) {
     logger.log_debug("Triggering buffer state update to lower layer");
     // Redirect handling of status to pcell_executor
-    if (not pcell_executor.defer([this]() { update_mac_buffer_state(); })) {
+    if (not pcell_executor.defer(TRACE_TASK([this]() { update_mac_buffer_state(); }))) {
       logger.log_error("Failed to enqueue buffer state update");
     }
   } else {
@@ -211,15 +218,27 @@ void rlc_tx_tm_entity::handle_changed_buffer_state()
   }
 }
 
-void rlc_tx_tm_entity::update_mac_buffer_state()
+void rlc_tx_tm_entity::update_mac_buffer_state() noexcept SRSRAN_RTSAN_NONBLOCKING
 {
   pending_buffer_state.clear(std::memory_order_seq_cst);
-  unsigned bs = get_buffer_state();
+  rlc_buffer_state bs = get_buffer_state();
   logger.log_debug("Sending buffer state update to lower layer. bs={}", bs);
   lower_dn.on_buffer_state_update(bs);
 }
 
-uint32_t rlc_tx_tm_entity::get_buffer_state()
+rlc_buffer_state rlc_tx_tm_entity::get_buffer_state()
 {
-  return sdu_queue.get_state().n_bytes + sdu.buf.length();
+  rlc_buffer_state bs = {};
+
+  if (not sdu.buf.empty()) {
+    bs.hol_toa = sdu.time_of_arrival;
+  } else {
+    const rlc_sdu* next_sdu = sdu_queue.front();
+    if (next_sdu != nullptr) {
+      bs.hol_toa = next_sdu->time_of_arrival;
+    }
+  }
+
+  bs.pending_bytes = sdu_queue.get_state().n_bytes + sdu.buf.length();
+  return bs;
 }

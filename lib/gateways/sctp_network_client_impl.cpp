@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -128,8 +128,10 @@ private:
   std::shared_ptr<std::atomic<bool>> closed_flag;
 };
 
-sctp_network_client_impl::sctp_network_client_impl(const sctp_network_gateway_config& sctp_cfg, io_broker& broker_) :
-  sctp_network_gateway_common_impl(sctp_cfg), broker(broker_), temp_recv_buffer(network_gateway_sctp_max_len)
+sctp_network_client_impl::sctp_network_client_impl(const sctp_network_gateway_config& sctp_cfg,
+                                                   io_broker&                         broker_,
+                                                   task_executor&                     io_rx_executor_) :
+  sctp_network_gateway_common_impl(sctp_cfg), broker(broker_), io_rx_executor(io_rx_executor_)
 {
 }
 
@@ -183,6 +185,13 @@ sctp_network_client_impl::connect_to(const std::string&                         
                    node_cfg.if_name,
                    dest_addr,
                    dest_port);
+      return nullptr;
+    }
+  }
+
+  // If a bind address is provided, create a socket here and bind it.
+  if (not node_cfg.bind_address.empty()) {
+    if (not create_and_bind_common()) {
       return nullptr;
     }
   }
@@ -254,12 +263,14 @@ sctp_network_client_impl::connect_to(const std::string&                         
   }
 
   // Register the socket in the IO broker.
+  socket.release();
   io_sub = broker.register_fd(
-      socket.fd().value(),
+      unique_fd(socket.fd().value()),
+      io_rx_executor,
       [this]() { receive(); },
       [this](io_broker::error_code code) {
         std::string cause = fmt::format("IO error code={}", (int)code);
-        handle_connection_close(cause.c_str());
+        handle_connection_terminated(cause);
       });
   if (not io_sub.registered()) {
     // IO subscription failed.
@@ -282,8 +293,10 @@ sctp_network_client_impl::connect_to(const std::string&                         
 
 void sctp_network_client_impl::receive()
 {
-  struct sctp_sndrcvinfo sri       = {};
-  int                    msg_flags = 0;
+  struct sctp_sndrcvinfo                            sri       = {};
+  int                                               msg_flags = 0;
+  std::array<uint8_t, network_gateway_sctp_max_len> temp_recv_buffer;
+
   // fromlen is an in/out variable in sctp_recvmsg.
   sockaddr_storage msg_src_addr;
   socklen_t        msg_src_addrlen = sizeof(msg_src_addr);
@@ -300,7 +313,7 @@ void sctp_network_client_impl::receive()
   if (rx_bytes == -1) {
     if (errno != EAGAIN) {
       std::string cause = fmt::format("Error reading from SCTP socket: {}", strerror(errno));
-      handle_connection_close(cause.c_str());
+      handle_connection_terminated(cause.c_str());
     } else {
       if (!node_cfg.non_blocking_mode) {
         logger.debug("{}: Socket timeout reached", node_cfg.if_name);
@@ -317,7 +330,7 @@ void sctp_network_client_impl::receive()
   }
 }
 
-void sctp_network_client_impl::handle_connection_close(const char* cause)
+void sctp_network_client_impl::handle_connection_shutdown(const char* cause)
 {
   // Signal that the upper layer sender should stop sending new SCTP data (including the EOF, which would fail anyway).
   bool prev = shutdown_received->exchange(true);
@@ -328,8 +341,10 @@ void sctp_network_client_impl::handle_connection_close(const char* cause)
   }
 }
 
-void sctp_network_client_impl::handle_sctp_shutdown_comp()
+void sctp_network_client_impl::handle_connection_terminated(const std::string& cause)
 {
+  logger.info("{}: {}. Notifying connection drop to upper layers", node_cfg.if_name, cause);
+
   // Notify SCTP sender that there is no need to send EOF.
   shutdown_received->store(true);
 
@@ -338,11 +353,6 @@ void sctp_network_client_impl::handle_sctp_shutdown_comp()
 
   // Unsubscribe from listening to new IO events.
   io_sub.reset();
-
-  // Make sure to close any socket created and implicitly bound for any previous connection.
-  if (node_cfg.bind_address.empty()) {
-    socket.close();
-  }
 
   // Erase server_addr and notify dtor that connection is closed.
   std::unique_lock<std::mutex> lock(connection_mutex);
@@ -366,7 +376,7 @@ void sctp_network_client_impl::handle_notification(span<const uint8_t>          
 {
   if (not validate_and_log_sctp_notification(payload)) {
     // Handle error.
-    handle_connection_close("The received message is invalid");
+    handle_connection_terminated("Received invalid message");
     return;
   }
 
@@ -378,13 +388,13 @@ void sctp_network_client_impl::handle_notification(span<const uint8_t>          
         case SCTP_COMM_UP:
           break;
         case SCTP_COMM_LOST:
-          handle_connection_close("Communication to the server was lost");
+          handle_connection_terminated("Communication to the server was lost");
           break;
         case SCTP_SHUTDOWN_COMP:
-          handle_sctp_shutdown_comp();
+          handle_connection_terminated("Received SCTP shutdown completed");
           break;
         case SCTP_CANT_STR_ASSOC:
-          handle_connection_close("Can't start association");
+          handle_connection_terminated("Can't start association");
           break;
         default:
           break;
@@ -392,7 +402,7 @@ void sctp_network_client_impl::handle_notification(span<const uint8_t>          
       break;
     }
     case SCTP_SHUTDOWN_EVENT: {
-      handle_connection_close("Server closed SCTP association");
+      handle_connection_shutdown("Server closed SCTP association");
       break;
     }
     default:
@@ -401,7 +411,8 @@ void sctp_network_client_impl::handle_notification(span<const uint8_t>          
 }
 
 std::unique_ptr<sctp_network_client> sctp_network_client_impl::create(const sctp_network_gateway_config& sctp_cfg,
-                                                                      io_broker&                         broker_)
+                                                                      io_broker&                         broker_,
+                                                                      task_executor&                     io_rx_executor)
 {
   // Validate arguments.
   if (sctp_cfg.if_name.empty()) {
@@ -410,14 +421,6 @@ std::unique_ptr<sctp_network_client> sctp_network_client_impl::create(const sctp
   }
 
   // Create a SCTP client instance.
-  std::unique_ptr<sctp_network_client_impl> client{new sctp_network_client_impl(sctp_cfg, broker_)};
-
-  // If a bind address is provided, create a socket here and bind it.
-  if (not sctp_cfg.bind_address.empty()) {
-    if (not client->create_and_bind_common()) {
-      return nullptr;
-    }
-  }
-
+  std::unique_ptr<sctp_network_client_impl> client{new sctp_network_client_impl(sctp_cfg, broker_, io_rx_executor)};
   return client;
 }

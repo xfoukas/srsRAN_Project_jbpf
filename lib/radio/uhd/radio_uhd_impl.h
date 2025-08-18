@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -139,6 +139,12 @@ public:
 
   // See interface for documentation.
   bool set_rx_gain(unsigned port_idx, double gain_dB) override { return set_rx_gain_unprotected(port_idx, gain_dB); }
+
+  // See interface for documentation.
+  bool set_tx_freq(unsigned stream_id, double center_freq_Hz) override;
+
+  // See interface for documentation.
+  bool set_rx_freq(unsigned stream_id, double center_freq_Hz) override;
 };
 
 /// Factory for UHD radio session.
@@ -146,7 +152,7 @@ class radio_factory_uhd_impl : public radio_factory
 {
 public:
   // See interface for documentation.
-  const radio_configuration::validator& get_configuration_validator() override { return config_validator; };
+  const radio_configuration::validator& get_configuration_validator() override { return config_validator; }
 
   // See interface for documentation.
   std::unique_ptr<radio_session> create(const radio_configuration::radio& config,

@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -27,7 +27,7 @@
 #include "srsran/phy/support/resource_grid_pool.h"
 #include "srsran/phy/support/shared_resource_grid.h"
 #include "srsran/srslog/srslog.h"
-#include "srsran/support/event_tracing.h"
+#include "srsran/support/tracing/event_tracing.h"
 #include <memory>
 #include <vector>
 
@@ -58,7 +58,7 @@ public:
   ~resource_grid_pool_impl() override;
 
   // See resource_grid_pool interface for documentation.
-  shared_resource_grid allocate_resource_grid(const resource_grid_context& context) override;
+  shared_resource_grid allocate_resource_grid(slot_point slot) override;
 
 private:
   /// Reference counter value to indicate the availability of a resource grid.
@@ -79,7 +79,7 @@ private:
   /// \brief Resource grid scope count.
   ///
   /// A resource grid is available when the counter is equal to \c ref_counter_available.
-  std::vector<std::atomic<unsigned>> grids_scope_count;
+  span<std::atomic<unsigned>> grids_scope_count;
   /// Pool of resource grid zero set string for tracing.
   std::vector<std::string> grids_str_zero;
   /// Pool of resource grid reservation string for tracing.

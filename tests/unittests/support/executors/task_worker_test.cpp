@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -36,15 +36,15 @@ using namespace srsran;
 #pragma GCC diagnostic ignored "-Wsuggest-override"
 #endif // __clang__
 
-static_assert(not detail::is_task_executor_ptr<task_worker_executor>::value, "A task_worker_executor is not a pointer");
-static_assert(detail::is_task_executor_ptr<task_worker_executor*>::value, "A task_worker_executor* is a pointer");
-static_assert(detail::is_task_executor_ptr<const task_worker_executor*>::value, "A task_worker_executor* is a pointer");
-static_assert(detail::is_task_executor_ptr<std::unique_ptr<task_worker_executor>>::value,
+static_assert(not is_task_executor_ptr<task_worker_executor>::value, "A task_worker_executor is not a pointer");
+static_assert(is_task_executor_ptr<task_worker_executor*>::value, "A task_worker_executor* is a pointer");
+static_assert(is_task_executor_ptr<const task_worker_executor*>::value, "A task_worker_executor* is a pointer");
+static_assert(is_task_executor_ptr<std::unique_ptr<task_worker_executor>>::value,
               "A unique_ptr<task_worker_executor> is a pointer");
-static_assert(detail::is_task_executor_ptr<const std::unique_ptr<task_worker_executor>>::value,
-              "A unique_ptr<task_worker_executor> is a pointer");
-static_assert(detail::is_task_executor_ptr<std::shared_ptr<task_worker_executor>&>::value,
-              "A shared_ptr<task_worker_executor> is a pointer");
+static_assert(is_task_executor_ptr<const std::unique_ptr<task_worker_executor>>::value,
+              "A const unique_ptr<task_worker_executor> is a pointer");
+static_assert(is_task_executor_ptr<std::shared_ptr<task_worker_executor>&>::value,
+              "A shared_ptr<task_worker_executor>& is a pointer");
 
 static_assert(detail::task_executor_has_can_run_task_inline<task_worker_executor>::value,
               "Task worker executor should allow running tasks inline");
@@ -92,7 +92,8 @@ protected:
   pool_type pool;
 };
 using worker_pool_types = ::testing::Types<task_worker_pool<concurrent_queue_policy::lockfree_mpmc>,
-                                           task_worker_pool<concurrent_queue_policy::locking_mpmc>>;
+                                           task_worker_pool<concurrent_queue_policy::locking_mpmc>,
+                                           task_worker_pool<concurrent_queue_policy::moodycamel_lockfree_mpmc>>;
 TYPED_TEST_SUITE(task_worker_pool_test, worker_pool_types);
 
 TYPED_TEST(task_worker_pool_test, correct_initialization)
@@ -170,7 +171,10 @@ INSTANTIATE_TEST_SUITE_P(priority_task_worker_different_policies,
                          testing::Values(std::vector<concurrent_queue_policy>{concurrent_queue_policy::lockfree_mpmc,
                                                                               concurrent_queue_policy::lockfree_mpmc},
                                          std::vector<concurrent_queue_policy>{concurrent_queue_policy::locking_mpmc,
-                                                                              concurrent_queue_policy::locking_mpmc}));
+                                                                              concurrent_queue_policy::locking_mpmc},
+                                         std::vector<concurrent_queue_policy>{
+                                             concurrent_queue_policy::moodycamel_lockfree_mpmc,
+                                             concurrent_queue_policy::moodycamel_lockfree_mpmc}));
 
 TEST_P(prio_task_worker_pool_test, correct_initialization)
 {

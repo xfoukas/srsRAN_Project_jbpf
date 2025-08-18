@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -179,7 +179,7 @@ public:
       }
     }
     return false;
-  };
+  }
 
   /// Checks if the queue contains an element with a given SN and also includes a specified segment interval given by a
   /// segment offset and segment length.
@@ -200,7 +200,7 @@ public:
       }
     }
     return false;
-  };
+  }
 
   /// \brief Removes all elements with a given SN from queue and removes any invalid elements at the front.
   ///
@@ -250,13 +250,13 @@ namespace fmt {
 template <>
 struct formatter<srsran::rlc_tx_amd_retx> {
   template <typename ParseContext>
-  auto parse(ParseContext& ctx) -> decltype(ctx.begin())
+  auto parse(ParseContext& ctx)
   {
     return ctx.begin();
   }
 
   template <typename FormatContext>
-  auto format(const srsran::rlc_tx_amd_retx retx, FormatContext& ctx) -> decltype(std::declval<FormatContext>().out())
+  auto format(const srsran::rlc_tx_amd_retx retx, FormatContext& ctx) const
   {
     return format_to(ctx.out(), "sn={} so={} len={}", retx.sn, retx.so, retx.length);
   }

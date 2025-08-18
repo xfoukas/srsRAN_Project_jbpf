@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -28,9 +28,10 @@
 
 using namespace srsran;
 
-bool nzp_csi_rs_configuration_validator_impl::is_valid(const nzp_csi_rs_generator::config_t& config)
+error_type<std::string>
+nzp_csi_rs_configuration_validator_impl::is_valid(const nzp_csi_rs_generator::config_t& config) const
 {
-  return true;
+  return default_success_t();
 }
 
 const std::array<const nzp_csi_rs_generator_impl::cdm_sequence, 2> nzp_csi_rs_generator_impl::fd_cdm2_table = {{
@@ -171,7 +172,7 @@ static unsigned get_seq_len(const nzp_csi_rs_generator::config_t& config)
   return seq_len;
 }
 
-void nzp_csi_rs_generator_impl::map(resource_grid_mapper& mapper, const config_t& config)
+void nzp_csi_rs_generator_impl::map(resource_grid_writer& grid, const config_t& config)
 {
   unsigned nof_ports = csi_rs::get_nof_csi_rs_ports(config.csi_rs_mapping_table_row);
 
@@ -283,7 +284,7 @@ void nzp_csi_rs_generator_impl::map(resource_grid_mapper& mapper, const config_t
       }
     }
 
-    mapper.map(data, pattern, cdm_group_precoding);
+    mapper->map(grid, data, pattern, cdm_group_precoding);
   }
 }
 

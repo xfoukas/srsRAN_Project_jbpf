@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -52,7 +52,8 @@ using namespace srsran;
 using test_case_type = std::tuple<segmenter_config, unsigned, unsigned, unsigned>;
 
 static std::string                        hwacc_decoder_type          = "acc100";
-static bool                               ext_softbuffer              = true;
+static bool                               force_local_harq            = false;
+static bool                               external_harq               = false;
 static bool                               use_early_stop              = true;
 static unsigned                           nof_ldpc_iterations         = 2;
 static dmrs_type                          dmrs                        = dmrs_type::TYPE1;
@@ -95,9 +96,9 @@ static void usage(const char* prog)
 #ifdef DPDK_FOUND
   fmt::print("\t-w       Force shared hardware-queue use [Default {}]\n",
              dedicated_queue ? "dedicated_queue" : "shared_queue");
-  fmt::print("\t-x       Use the host's memory for the soft-buffer [Default {}]\n", !ext_softbuffer);
+  fmt::print("\t-x       Force using the host memory to implement the soft-buffer [Default {}]\n", force_local_harq);
   fmt::print("\t-y       Force logging output written to a file [Default {}]\n", std_out_sink ? "std_out" : "file");
-  fmt::print("\t-z       Force DEBUG logging level for the HAL [Default {}]\n", hal_log_level);
+  fmt::print("\t-z       Force DEBUG logging level for the HAL [Default {}]\n", fmt::underlying(hal_log_level));
   fmt::print("\teal_args EAL arguments\n");
 #endif // DPDK_FOUND
   fmt::print("\t-h This help\n");
@@ -155,7 +156,7 @@ static int parse_args(int argc, char** argv)
         dedicated_queue = false;
         break;
       case 'x':
-        ext_softbuffer = false;
+        force_local_harq = true;
         break;
       case 'y':
         std_out_sink = false;
@@ -217,13 +218,6 @@ static std::shared_ptr<hal::hw_accelerator_pusch_dec_factory> create_hw_accelera
     TESTASSERT(dpdk_interface, "Failed to open DPDK EAL with arguments.");
   }
 
-  // Create a bbdev accelerator factory.
-  static std::unique_ptr<dpdk::bbdev_acc_factory> bbdev_acc_factory = nullptr;
-  if (!bbdev_acc_factory) {
-    bbdev_acc_factory = srsran::dpdk::create_bbdev_acc_factory("srs");
-    TESTASSERT(bbdev_acc_factory, "Failed to create the bbdev accelerator factory.");
-  }
-
   // Intefacing to the bbdev-based hardware-accelerator.
   dpdk::bbdev_acc_configuration bbdev_config;
   bbdev_config.id                                    = 0;
@@ -231,12 +225,15 @@ static std::shared_ptr<hal::hw_accelerator_pusch_dec_factory> create_hw_accelera
   bbdev_config.nof_ldpc_dec_lcores                   = dpdk::MAX_NOF_BBDEV_VF_INSTANCES;
   bbdev_config.nof_fft_lcores                        = 0;
   bbdev_config.nof_mbuf                              = static_cast<unsigned>(pow2(log2_ceil(MAX_NOF_SEGMENTS)));
-  std::shared_ptr<dpdk::bbdev_acc> bbdev_accelerator = bbdev_acc_factory->create(bbdev_config, logger);
+  std::shared_ptr<dpdk::bbdev_acc> bbdev_accelerator = create_bbdev_acc(bbdev_config, logger);
   TESTASSERT(bbdev_accelerator);
 
   // Interfacing to a shared external HARQ buffer context repository.
   unsigned nof_cbs                   = MAX_NOF_SEGMENTS;
   uint64_t acc100_ext_harq_buff_size = bbdev_accelerator->get_harq_buff_size_bytes();
+  if (acc100_ext_harq_buff_size > 0) {
+    external_harq = !force_local_harq;
+  }
   std::shared_ptr<hal::ext_harq_buffer_context_repository> harq_buffer_context =
       hal::create_ext_harq_buffer_context_repository(nof_cbs, acc100_ext_harq_buff_size, test_harq);
   TESTASSERT(harq_buffer_context);
@@ -245,12 +242,12 @@ static std::shared_ptr<hal::hw_accelerator_pusch_dec_factory> create_hw_accelera
   hal::bbdev_hwacc_pusch_dec_factory_configuration hw_decoder_config;
   hw_decoder_config.acc_type            = "acc100";
   hw_decoder_config.bbdev_accelerator   = bbdev_accelerator;
-  hw_decoder_config.ext_softbuffer      = ext_softbuffer;
+  hw_decoder_config.force_local_harq    = force_local_harq;
   hw_decoder_config.harq_buffer_context = harq_buffer_context;
   hw_decoder_config.dedicated_queue     = dedicated_queue;
 
   // ACC100 hardware-accelerator implementation.
-  return srsran::hal::create_bbdev_pusch_dec_acc_factory(hw_decoder_config, "srs");
+  return srsran::hal::create_bbdev_pusch_dec_acc_factory(hw_decoder_config);
 #else  // DPDK_FOUND
   return nullptr;
 #endif // DPDK_FOUND
@@ -413,7 +410,7 @@ int main(int argc, char** argv)
     pool_config.nof_buffers          = 1;
     pool_config.nof_codeblocks       = nof_codeblocks;
     pool_config.expire_timeout_slots = 10;
-    pool_config.external_soft_bits   = ext_softbuffer;
+    pool_config.external_soft_bits   = external_harq;
 
     // Call the hardware-accelerator PUSCH decoder function.
     uint64_t total_hwacc_time = 0;
@@ -501,7 +498,7 @@ int main(int argc, char** argv)
     fmt::print(
         "PUSCH RB={:<3} Mod={:<2} tbs={:<8}: latency gain {:<3.2f}%% (generic {:<10.2f} us, {:<5} {:<10.2f} us)\n",
         nof_prb,
-        cfg.mod,
+        fmt::underlying(cfg.mod),
         tbs,
         perf_gain,
         gen_lat,

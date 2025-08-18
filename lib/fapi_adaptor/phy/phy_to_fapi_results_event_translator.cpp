@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -24,7 +24,7 @@
 #include "srsran/fapi/message_builders.h"
 #include "srsran/fapi/message_validators.h"
 #include "srsran/srsvec/bit.h"
-#include "srsran/support/math_utils.h"
+#include "srsran/support/math/math_utils.h"
 
 using namespace srsran;
 using namespace fapi_adaptor;
@@ -47,8 +47,9 @@ public:
 /// actual data-specific notifier, which will be later set up through the \ref set_slot_data_message_notifier() method.
 static slot_data_message_notifier_dummy dummy_data_notifier;
 
-phy_to_fapi_results_event_translator::phy_to_fapi_results_event_translator(srslog::basic_logger& logger_) :
-  logger(logger_), data_notifier(dummy_data_notifier)
+phy_to_fapi_results_event_translator::phy_to_fapi_results_event_translator(unsigned              sector_id_,
+                                                                           srslog::basic_logger& logger_) :
+  sector_id(sector_id_), logger(logger_), data_notifier(dummy_data_notifier)
 {
 }
 
@@ -71,9 +72,10 @@ void phy_to_fapi_results_event_translator::on_new_prach_results(const ul_prach_r
           result.result.preambles.begin(),
           result.result.preambles.end(),
           [](const prach_detection_result::preamble_indication& ind) { return ind.time_advance.to_seconds() < 0.0; })) {
-    logger.warning(
-        "All detected PRACH preambles have a negative TA value in slot={}, no PRACH.ind message will be generated",
-        slot);
+    logger.warning("Sector#{}: All detected PRACH preambles have a negative TA value in slot={}, no PRACH.ind message "
+                   "will be generated",
+                   sector_id,
+                   slot);
     return;
   }
 
@@ -109,7 +111,10 @@ void phy_to_fapi_results_event_translator::on_new_prach_results(const ul_prach_r
     double TA_ns = preamble.time_advance.to_seconds() * 1e9;
     // Ignore preambles with a negative TA value.
     if (TA_ns < 0.0) {
-      logger.warning("Detected PRACH preamble in slot={} has a negative TA value of {}ns, skipping it", slot, TA_ns);
+      logger.warning("Sector#{}: Detected PRACH preamble in slot={} has a negative TA value of {}ns, skipping it",
+                     sector_id,
+                     slot,
+                     TA_ns);
       continue;
     }
 
@@ -125,7 +130,7 @@ void phy_to_fapi_results_event_translator::on_new_prach_results(const ul_prach_r
 
   error_type<fapi::validator_report> validation_result = validate_rach_indication(msg);
   if (!validation_result) {
-    log_validator_report(validation_result.error(), logger);
+    log_validator_report(validation_result.error(), logger, sector_id);
     return;
   }
 
@@ -251,7 +256,7 @@ void phy_to_fapi_results_event_translator::notify_pusch_uci_indication(const ul_
 
   error_type<fapi::validator_report> validation_result = validate_uci_indication(msg);
   if (!validation_result) {
-    log_validator_report(validation_result.error(), logger);
+    log_validator_report(validation_result.error(), logger, sector_id);
     return;
   }
 
@@ -294,8 +299,8 @@ void phy_to_fapi_results_event_translator::notify_crc_indication(const ul_pusch_
   // Extract the RSRP which is optional and clamp it if available.
   std::optional<float> rsrp = result.csi.get_rsrp_dB();
   if (rsrp.has_value()) {
-    rsrp = convert_to_dBFS(std::clamp(rsrp.value(), MIN_UL_RSRP_VALUE_DBFS, MAX_UL_RSRP_VALUE_DBFS),
-                           dBFS_calibration_value);
+    rsrp = std::clamp(
+        convert_to_dBFS(rsrp.value(), dBFS_calibration_value), MIN_UL_RSRP_VALUE_DBFS, MAX_UL_RSRP_VALUE_DBFS);
   }
 
   builder.add_pdu(handle,
@@ -314,7 +319,7 @@ void phy_to_fapi_results_event_translator::notify_crc_indication(const ul_pusch_
 
   error_type<fapi::validator_report> validation_result = validate_crc_indication(msg);
   if (!validation_result) {
-    log_validator_report(validation_result.error(), logger);
+    log_validator_report(validation_result.error(), logger, sector_id);
     return;
   }
 
@@ -336,7 +341,7 @@ void phy_to_fapi_results_event_translator::notify_rx_data_indication(const ul_pu
 
   error_type<fapi::validator_report> validation_result = validate_rx_data_indication(msg);
   if (!validation_result) {
-    log_validator_report(validation_result.error(), logger);
+    log_validator_report(validation_result.error(), logger, sector_id);
     return;
   }
 
@@ -490,8 +495,8 @@ static void fill_format_2_3_4_csi_part1(fapi::uci_pucch_pdu_format_2_3_4_builder
                                        message.get_csi_part1_bits().begin(), message.get_csi_part1_bits().end()));
 }
 
-/// Adds a PUCCH Format 2 PDU to the given builder using the data provided by result.
-static void add_format_2_pucch_pdu(fapi::uci_indication_message_builder& builder, const ul_pucch_results& result)
+/// Adds a PUCCH Format 2, Format 3 or Format 4 PDU to the given builder using the data provided by result.
+static void add_format_2_3_4_pucch_pdu(fapi::uci_indication_message_builder& builder, const ul_pucch_results& result)
 {
   // Do not use the handle for now.
   static const unsigned                    handle = 0;
@@ -543,15 +548,17 @@ void phy_to_fapi_results_event_translator::on_new_pucch_results(const ul_pucch_r
       add_format_0_1_pucch_pdu(builder, result);
       break;
     case pucch_format::FORMAT_2:
-      add_format_2_pucch_pdu(builder, result);
+    case pucch_format::FORMAT_3:
+    case pucch_format::FORMAT_4:
+      add_format_2_3_4_pucch_pdu(builder, result);
       break;
     default:
-      srsran_assert(0, "Unexpected PUCCH format {}", context.format);
+      srsran_assert(0, "Unexpected PUCCH format {}", fmt::underlying(context.format));
   }
 
   error_type<fapi::validator_report> validation_result = validate_uci_indication(msg);
   if (!validation_result) {
-    log_validator_report(validation_result.error(), logger);
+    log_validator_report(validation_result.error(), logger, sector_id);
     return;
   }
 
@@ -566,17 +573,38 @@ void phy_to_fapi_results_event_translator::on_new_srs_results(const ul_srs_resul
   const ul_srs_context& context = result.context;
   builder.set_basic_parameters(context.slot.sfn(), context.slot.slot_index());
 
-  // Do not use the handle for now.
-  static const unsigned            handle          = 0;
-  fapi::srs_indication_pdu_builder srs_pdu_builder = builder.add_srs_pdu(handle, context.rnti);
+  if (context.is_normalized_channel_iq_matrix_report_requested) {
+    // Do not use the handle for now.
+    static const unsigned            handle          = 0;
+    fapi::srs_indication_pdu_builder srs_pdu_builder = builder.add_srs_pdu(handle, context.rnti);
+    srs_pdu_builder.set_metrics_parameters({}, result.processor_result.time_alignment.time_alignment * 1e9);
+    srs_pdu_builder.set_codebook_report_matrix(result.processor_result.channel_matrix);
+  }
 
-  srs_pdu_builder.set_metrics_parameters({}, result.processor_result.time_alignment.time_alignment * 1e9);
+  if (context.is_positioning_report_requested) {
+    // Do not use the handle for now.
+    static const unsigned            handle          = 0;
+    fapi::srs_indication_pdu_builder srs_pdu_builder = builder.add_srs_pdu(handle, context.rnti);
+    srs_pdu_builder.set_metrics_parameters({}, result.processor_result.time_alignment.time_alignment * 1e9);
 
-  srs_pdu_builder.set_codebook_report_matrix(result.processor_result.channel_matrix);
+    // Extract the RSRP which is optional and clamp it if available.
+    std::optional<float> rsrp = result.processor_result.rsrp_dB;
+    if (rsrp.has_value()) {
+      // NOTE: Clamp values defined in SCF-222 v222.08.00 Section 3.4.10 Table 3-209 SRS-based Positioning Report.
+      static constexpr float MIN_UL_SRS_RSRP_VALUE_DBFS = -144.0F;
+      static constexpr float MAX_UL_SRS_RSRP_VALUE_DBFS = -0.0F;
+      rsrp = std::clamp(convert_to_dBFS(rsrp.value(), dBFS_calibration_value),
+                        MIN_UL_SRS_RSRP_VALUE_DBFS,
+                        MAX_UL_SRS_RSRP_VALUE_DBFS);
+    }
+
+    srs_pdu_builder.set_positioning_report_parameters(
+        {phy_time_unit::from_seconds(result.processor_result.time_alignment.time_alignment)}, {}, {}, rsrp);
+  }
 
   error_type<fapi::validator_report> validation_result = validate_srs_indication(msg);
   if (!validation_result) {
-    log_validator_report(validation_result.error(), logger);
+    log_validator_report(validation_result.error(), logger, sector_id);
     return;
   }
 

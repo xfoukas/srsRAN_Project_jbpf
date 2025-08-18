@@ -1,5 +1,5 @@
 #
-# Copyright 2021-2024 Software Radio Systems Limited
+# Copyright 2021-2025 Software Radio Systems Limited
 #
 # This file is part of srsRAN
 #
@@ -17,6 +17,21 @@
 # the LICENSE file in the top-level directory of this distribution
 # and at http://www.gnu.org/licenses/.
 #
+
+metrics:
+  layers:
+    enable_app_usage: true
+    enable_pdcp: true
+    enable_sched: true
+    enable_rlc: true
+    enable_mac: true
+    enable_du_low: true
+    enable_ru: true
+  periodicity:
+    app_usage_report_period: 10000
+    cu_cp_report_period: 5000
+    cu_up_report_period: 5000
+    du_report_period: 1000
 
 cu_up:
   warn_on_drop: False
@@ -41,6 +56,8 @@ cell_cfg:
     min_ue_mcs: 27
     mcs_table: qam256
     rv_sequence: 0
+  srs:
+    srs_period_ms: 40
 
 cells:
   - pci: 1
@@ -56,19 +73,7 @@ test_mode:
     ri: 4
     nof_ues: 16
 
-expert_execution:
-  affinities:
-    low_priority_cpus: {{low_priority_cpus}}
-    {% if ru_timing_cpu %}
-    ru_timing_cpu: {{ ru_timing_cpu }}
-    {% endif %}
-  cell_affinities:
-    - l1_dl_cpus: {{l1_dl_cpus}}
-      l1_ul_cpus: {{l1_ul_cpus}}
-      l2_cell_cpus: {{l2_cell_cpus}}
-      ru_cpus: {{ru_cpus}}
-
 expert_phy:
   max_request_headroom_slots: 3
-  max_proc_delay: 6
+  max_proc_delay: 4
   pusch_dec_max_iterations: 2

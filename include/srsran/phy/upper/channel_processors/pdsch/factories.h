@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -23,12 +23,15 @@
 #pragma once
 
 #include "srsran/hal/phy/upper/channel_processors/hw_accelerator_pdsch_enc_factory.h"
+#include "srsran/phy/support/support_factories.h"
 #include "srsran/phy/upper/channel_coding/channel_coding_factories.h"
 #include "srsran/phy/upper/channel_modulation/channel_modulation_factories.h"
+#include "srsran/phy/upper/channel_processors/pdsch/pdsch_block_processor.h"
 #include "srsran/phy/upper/channel_processors/pdsch/pdsch_encoder.h"
 #include "srsran/phy/upper/channel_processors/pdsch/pdsch_modulator.h"
 #include "srsran/phy/upper/channel_processors/pdsch/pdsch_processor.h"
 #include "srsran/phy/upper/sequence_generators/sequence_generator_factories.h"
+#include "srsran/phy/upper/signal_processors/ptrs/ptrs_pdsch_generator_factory.h"
 #include "srsran/phy/upper/signal_processors/signal_processor_factories.h"
 #include "srsran/support/executors/task_executor.h"
 #include <memory>
@@ -68,8 +71,9 @@ public:
 };
 
 std::shared_ptr<pdsch_modulator_factory>
-    create_pdsch_modulator_factory_sw(std::shared_ptr<channel_modulation_factory>,
-                                      std::shared_ptr<pseudo_random_generator_factory>);
+create_pdsch_modulator_factory_sw(std::shared_ptr<modulation_mapper_factory>,
+                                  std::shared_ptr<pseudo_random_generator_factory>,
+                                  std::shared_ptr<resource_grid_mapper_factory> rg_mapper_factory);
 
 class pdsch_processor_factory
 {
@@ -83,25 +87,36 @@ public:
 std::shared_ptr<pdsch_processor_factory>
 create_pdsch_processor_factory_sw(std::shared_ptr<pdsch_encoder_factory>        encoder_factory,
                                   std::shared_ptr<pdsch_modulator_factory>      modulator_factory,
-                                  std::shared_ptr<dmrs_pdsch_processor_factory> dmrs_factory);
+                                  std::shared_ptr<dmrs_pdsch_processor_factory> dmrs_factory,
+                                  std::shared_ptr<ptrs_pdsch_generator_factory> ptrs_factory);
+
+class pdsch_block_processor_factory
+{
+public:
+  virtual ~pdsch_block_processor_factory()                = default;
+  virtual std::unique_ptr<pdsch_block_processor> create() = 0;
+};
+
+std::shared_ptr<pdsch_block_processor_factory>
+create_pdsch_block_processor_factory_sw(std::shared_ptr<ldpc_encoder_factory>            encoder_factory,
+                                        std::shared_ptr<ldpc_rate_matcher_factory>       rate_matcher_factory,
+                                        std::shared_ptr<pseudo_random_generator_factory> prg_factory,
+                                        std::shared_ptr<modulation_mapper_factory>       modulator_factory);
+
+std::shared_ptr<pdsch_block_processor_factory>
+create_pdsch_block_processor_factory_hw(std::shared_ptr<hal::hw_accelerator_pdsch_enc_factory> encoder_factory,
+                                        std::shared_ptr<pseudo_random_generator_factory>       prg_factory,
+                                        std::shared_ptr<modulation_mapper_factory>             modulator_factory);
 
 std::shared_ptr<pdsch_processor_factory>
-create_pdsch_concurrent_processor_factory_sw(std::shared_ptr<crc_calculator_factory>          crc_factory,
-                                             std::shared_ptr<ldpc_encoder_factory>            ldpc_enc_factory,
-                                             std::shared_ptr<ldpc_rate_matcher_factory>       ldpc_rm_factory,
-                                             std::shared_ptr<pseudo_random_generator_factory> prg_factory,
-                                             std::shared_ptr<channel_modulation_factory>      modulator_factory,
-                                             std::shared_ptr<dmrs_pdsch_processor_factory>    dmrs_factory,
-                                             task_executor&                                   executor,
-                                             unsigned                                         nof_concurrent_threads);
-
-std::shared_ptr<pdsch_processor_factory>
-create_pdsch_lite_processor_factory_sw(std::shared_ptr<ldpc_segmenter_tx_factory>       segmenter_factory,
-                                       std::shared_ptr<ldpc_encoder_factory>            encoder_factory,
-                                       std::shared_ptr<ldpc_rate_matcher_factory>       rate_matcher_factory,
-                                       std::shared_ptr<pseudo_random_generator_factory> scrambler_factory,
-                                       std::shared_ptr<channel_modulation_factory>      modulator_factory,
-                                       std::shared_ptr<dmrs_pdsch_processor_factory>    dmrs_factory);
+create_pdsch_flexible_processor_factory_sw(std::shared_ptr<ldpc_segmenter_tx_factory>     ldpc_segmenter_factory,
+                                           std::shared_ptr<pdsch_block_processor_factory> block_processor_factory,
+                                           std::shared_ptr<resource_grid_mapper_factory>  rg_mapper_factory,
+                                           std::shared_ptr<dmrs_pdsch_processor_factory>  dmrs_factory,
+                                           std::shared_ptr<ptrs_pdsch_generator_factory>  ptrs_factory,
+                                           task_executor&                                 executor,
+                                           unsigned                                       nof_concurrent_threads,
+                                           unsigned                                       cb_batch_length = 0);
 
 std::shared_ptr<pdsch_processor_factory>
 create_pdsch_processor_asynchronous_pool(std::shared_ptr<pdsch_processor_factory> pdsch_proc_factory,

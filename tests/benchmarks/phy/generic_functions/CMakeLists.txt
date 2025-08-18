@@ -1,5 +1,5 @@
 #
-# Copyright 2021-2024 Software Radio Systems Limited
+# Copyright 2021-2025 Software Radio Systems Limited
 #
 # This file is part of srsRAN
 #
@@ -21,7 +21,7 @@
 set_directory_properties(PROPERTIES LABELS "phy")
 
 add_executable(dft_processor_benchmark dft_processor_benchmark.cpp)
-target_link_libraries(dft_processor_benchmark srslog srsran_generic_funcs)
+target_link_libraries(dft_processor_benchmark srslog srsran_dft)
 
 add_test(dft_processor_generic_benchmark dft_processor_benchmark -F generic -R 10 -s)
 if (ENABLE_FFTW AND FFTW3F_FOUND)

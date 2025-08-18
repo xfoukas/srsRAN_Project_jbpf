@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -24,21 +24,23 @@
 
 #include "srsran/adt/bounded_bitset.h"
 #include "srsran/adt/byte_buffer.h"
-#include "srsran/adt/optional.h"
 #include "srsran/adt/slotted_array.h"
+#include "srsran/adt/slotted_vector.h"
 #include "srsran/pdcp/pdcp_config.h"
 #include "srsran/ran/cause/ngap_cause.h"
 #include "srsran/ran/crit_diagnostics.h"
 #include "srsran/ran/cu_types.h"
+#include "srsran/ran/gnb_constants.h"
 #include "srsran/ran/gnb_id.h"
-#include "srsran/ran/lcid.h"
 #include "srsran/ran/nr_cgi.h"
 #include "srsran/ran/pci.h"
+#include "srsran/ran/rb_id.h"
 #include "srsran/ran/s_nssai.h"
 #include "srsran/ran/subcarrier_spacing.h"
+#include "srsran/ran/tac.h"
 #include "srsran/ran/up_transport_layer_info.h"
 #include <cstdint>
-#include <map>
+#include <optional>
 #include <string>
 #include <type_traits>
 #include <vector>
@@ -49,7 +51,7 @@ namespace srs_cu_cp {
 /// Maximum number of DUs supported by CU-CP (implementation-defined).
 const uint16_t MAX_NOF_DUS = 65535;
 /// Maximum number of cells per DU supported by CU-CP (implementation-defined).
-const uint16_t MAX_NOF_DU_CELLS = 16;
+const uint16_t MAX_NOF_DU_CELLS = MAX_CELLS_PER_DU;
 /// Maximum number of CU-UPs supported by CU-CP (implementation-defined).
 const uint16_t MAX_NOF_CU_UPS = 65535;
 /// Maximum number of UEs supported by CU-CP (implementation-defined).
@@ -143,7 +145,7 @@ struct cu_cp_qos_config {
 
 struct cu_cp_tai {
   plmn_identity plmn_id = plmn_identity::test_value();
-  uint32_t      tac;
+  tac_t         tac;
 };
 
 struct cu_cp_user_location_info_nr {
@@ -179,19 +181,19 @@ struct cu_cp_five_g_s_tmsi {
   {
     srsran_assert(five_g_s_tmsi.has_value(), "five_g_s_tmsi is not set");
     return five_g_s_tmsi.value().to_uint64() >> 38U;
-  };
+  }
 
   uint8_t get_amf_pointer() const
   {
     srsran_assert(five_g_s_tmsi.has_value(), "five_g_s_tmsi is not set");
     return (five_g_s_tmsi.value().to_uint64() & 0x3f00000000) >> 32U;
-  };
+  }
 
   uint32_t get_five_g_tmsi() const
   {
     srsran_assert(five_g_s_tmsi.has_value(), "five_g_s_tmsi is not set");
     return (five_g_s_tmsi.value().to_uint64() & 0xffffffff);
-  };
+  }
 
   uint64_t to_number() const { return five_g_s_tmsi->to_uint64(); }
 
@@ -260,8 +262,8 @@ struct cu_cp_nr_mode_info {
 struct cu_cp_served_cell_info {
   nr_cell_global_id_t        nr_cgi;
   pci_t                      nr_pci;
-  std::optional<uint32_t>    five_gs_tac;
-  std::optional<uint32_t>    cfg_eps_tac;
+  std::optional<tac_t>       five_gs_tac;
+  std::optional<tac_t>       cfg_eps_tac;
   std::vector<plmn_identity> served_plmns;
   cu_cp_nr_mode_info         nr_mode_info;
   byte_buffer                meas_timing_cfg;
@@ -326,7 +328,7 @@ struct cu_cp_pdu_session_res_setup_item {
   std::optional<uint64_t>                                       pdu_session_aggregate_maximum_bit_rate_dl;
   std::optional<uint64_t>                                       pdu_session_aggregate_maximum_bit_rate_ul;
   up_transport_layer_info                                       ul_ngu_up_tnl_info;
-  std::string                                                   pdu_session_type;
+  pdu_session_type_t                                            pdu_session_type;
   std::optional<security_indication_t>                          security_ind;
   slotted_id_vector<qos_flow_id_t, qos_flow_setup_request_item> qos_flow_setup_request_items;
 };
@@ -335,6 +337,7 @@ struct cu_cp_pdu_session_resource_setup_request {
   ue_index_t                                                            ue_index = ue_index_t::invalid;
   slotted_id_vector<pdu_session_id_t, cu_cp_pdu_session_res_setup_item> pdu_session_res_setup_items;
   uint64_t                                                              ue_aggregate_maximum_bit_rate_dl;
+  uint64_t                                                              ue_aggregate_maximum_bit_rate_ul;
   plmn_identity                                                         serving_plmn = plmn_identity::test_value();
   byte_buffer                                                           nas_pdu; ///< optional NAS PDU
 };
@@ -498,9 +501,10 @@ struct cu_cp_pdu_session_resource_modify_response {
 };
 
 struct cu_cp_ue_context_release_command {
-  ue_index_t   ue_index = ue_index_t::invalid;
-  ngap_cause_t cause;
-  bool         requires_rrc_release = true;
+  ue_index_t                          ue_index = ue_index_t::invalid;
+  ngap_cause_t                        cause;
+  bool                                requires_rrc_release = true;
+  std::optional<std::chrono::seconds> release_wait_time    = std::nullopt;
 };
 
 struct cu_cp_ue_context_release_request {
@@ -592,14 +596,14 @@ struct cu_cp_inactivity_notification {
   std::vector<pdu_session_id_t> inactive_pdu_sessions;
 };
 
-struct cu_cp_inter_du_handover_request {
+struct cu_cp_intra_cu_handover_request {
   ue_index_t          source_ue_index = ue_index_t::invalid;
   du_index_t          target_du_index = du_index_t::invalid;
   nr_cell_global_id_t cgi;
   pci_t               target_pci = INVALID_PCI;
 };
 
-struct cu_cp_inter_du_handover_response {
+struct cu_cp_intra_cu_handover_response {
   // Place-holder for possible return values.
   bool success = false;
 };
@@ -609,7 +613,7 @@ struct cu_cp_inter_du_handover_response {
 
 namespace fmt {
 
-// ue index formatter
+// UE index formatter.
 template <>
 struct formatter<srsran::srs_cu_cp::ue_index_t> {
   template <typename ParseContext>
@@ -619,7 +623,7 @@ struct formatter<srsran::srs_cu_cp::ue_index_t> {
   }
 
   template <typename FormatContext>
-  auto format(const srsran::srs_cu_cp::ue_index_t& idx, FormatContext& ctx)
+  auto format(const srsran::srs_cu_cp::ue_index_t& idx, FormatContext& ctx) const
   {
     if (idx == srsran::srs_cu_cp::ue_index_t::invalid) {
       return format_to(ctx.out(), "invalid");
@@ -628,7 +632,7 @@ struct formatter<srsran::srs_cu_cp::ue_index_t> {
   }
 };
 
-// du index formatter
+// DU index formatter.
 template <>
 struct formatter<srsran::srs_cu_cp::du_index_t> {
   template <typename ParseContext>
@@ -638,7 +642,7 @@ struct formatter<srsran::srs_cu_cp::du_index_t> {
   }
 
   template <typename FormatContext>
-  auto format(const srsran::srs_cu_cp::du_index_t& idx, FormatContext& ctx)
+  auto format(const srsran::srs_cu_cp::du_index_t& idx, FormatContext& ctx) const
   {
     if (idx == srsran::srs_cu_cp::du_index_t::invalid) {
       return format_to(ctx.out(), "invalid");
@@ -647,7 +651,7 @@ struct formatter<srsran::srs_cu_cp::du_index_t> {
   }
 };
 
-// cu_up index formatter
+// CU-UP index formatter.
 template <>
 struct formatter<srsran::srs_cu_cp::cu_up_index_t> {
   template <typename ParseContext>
@@ -657,7 +661,7 @@ struct formatter<srsran::srs_cu_cp::cu_up_index_t> {
   }
 
   template <typename FormatContext>
-  auto format(const srsran::srs_cu_cp::cu_up_index_t& idx, FormatContext& ctx)
+  auto format(const srsran::srs_cu_cp::cu_up_index_t& idx, FormatContext& ctx) const
   {
     if (idx == srsran::srs_cu_cp::cu_up_index_t::invalid) {
       return format_to(ctx.out(), "invalid");
@@ -666,7 +670,7 @@ struct formatter<srsran::srs_cu_cp::cu_up_index_t> {
   }
 };
 
-// du cell index formatter
+// DU cell index formatter.
 template <>
 struct formatter<srsran::srs_cu_cp::du_cell_index_t> {
   template <typename ParseContext>
@@ -676,9 +680,28 @@ struct formatter<srsran::srs_cu_cp::du_cell_index_t> {
   }
 
   template <typename FormatContext>
-  auto format(const srsran::srs_cu_cp::du_cell_index_t& idx, FormatContext& ctx)
+  auto format(const srsran::srs_cu_cp::du_cell_index_t& idx, FormatContext& ctx) const
   {
     if (idx == srsran::srs_cu_cp::du_cell_index_t::invalid) {
+      return format_to(ctx.out(), "invalid");
+    }
+    return format_to(ctx.out(), "{}", (unsigned)idx);
+  }
+};
+
+// AMF index formatter.
+template <>
+struct formatter<srsran::srs_cu_cp::amf_index_t> {
+  template <typename ParseContext>
+  auto parse(ParseContext& ctx)
+  {
+    return ctx.begin();
+  }
+
+  template <typename FormatContext>
+  auto format(const srsran::srs_cu_cp::amf_index_t& idx, FormatContext& ctx) const
+  {
+    if (idx == srsran::srs_cu_cp::amf_index_t::invalid) {
       return format_to(ctx.out(), "invalid");
     }
     return format_to(ctx.out(), "{}", (unsigned)idx);

@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -23,7 +23,11 @@
 #include <iostream>
 
 #include "fapi_to_mac_data_msg_translator.h"
-#include "srsran/fapi/messages.h"
+#include "srsran/fapi/messages/crc_indication.h"
+#include "srsran/fapi/messages/rach_indication.h"
+#include "srsran/fapi/messages/rx_data_indication.h"
+#include "srsran/fapi/messages/srs_indication.h"
+#include "srsran/fapi/messages/uci_indication.h"
 #include "srsran/srslog/srslog.h"
 
 #ifdef JBPF_ENABLED
@@ -113,8 +117,9 @@ static std::optional<float> convert_fapi_to_mac_rsrp(uint16_t fapi_rsrp)
   return std::nullopt;
 }
 
-fapi_to_mac_data_msg_translator::fapi_to_mac_data_msg_translator(subcarrier_spacing scs_) :
+fapi_to_mac_data_msg_translator::fapi_to_mac_data_msg_translator(subcarrier_spacing scs_, unsigned sector_id_) :
   scs(scs_),
+  sector_id(sector_id_),
   rach_handler(dummy_mac_rach_handler),
   pdu_handler(dummy_pdu_handler),
   cell_control_handler(dummy_cell_control_handler)
@@ -129,7 +134,7 @@ void fapi_to_mac_data_msg_translator::on_rx_data_indication(const fapi::rx_data_
 
   mac_rx_data_indication indication;
   indication.sl_rx      = slot_point(scs, msg.sfn, msg.slot);
-  indication.cell_index = to_du_cell_index(0);
+  indication.cell_index = to_du_cell_index(sector_id);
   for (const auto& fapi_pdu : msg.pdus) {
     // PDUs that were not successfully decoded have zero length.
     if (fapi_pdu.pdu_length == 0) {
@@ -138,7 +143,7 @@ void fapi_to_mac_data_msg_translator::on_rx_data_indication(const fapi::rx_data_
 
     auto pdu_buffer = byte_buffer::create(span<const uint8_t>(fapi_pdu.data, fapi_pdu.pdu_length));
     if (not pdu_buffer.has_value()) {
-      srslog::fetch_basic_logger("FAPI").warning("Unable to allocate memory for MAC RX PDU");
+      srslog::fetch_basic_logger("FAPI").warning("Sector#{}: Unable to allocate memory for MAC RX PDU", sector_id);
       // Avoid new buffer allocations for the same FAPI PDU.
       break;
     }
@@ -349,7 +354,17 @@ void fapi_to_mac_data_msg_translator::on_srs_indication(const fapi::srs_indicati
     mac_srs_pdu& mac_pdu        = mac_msg.srss.emplace_back();
     mac_pdu.rnti                = pdu.rnti;
     mac_pdu.time_advance_offset = convert_fapi_to_mac_ta_offset(pdu.timing_advance_offset_ns);
-    mac_pdu.channel_matrix      = pdu.matrix;
+    switch (pdu.report_type) {
+      case fapi::srs_report_type::normalized_channel_iq_matrix:
+        mac_pdu.report = mac_srs_pdu::normalized_channel_iq_matrix{pdu.matrix};
+        break;
+      case fapi::srs_report_type::positioning:
+        mac_pdu.report = mac_srs_pdu::positioning_report{pdu.positioning.ul_relative_toa, pdu.positioning.rsrp};
+        break;
+      default:
+        srsran_assert(0, "Unsupported SRS report type '{}'", fapi::to_value(pdu.report_type));
+        break;
+    }
   }
 
   cell_control_handler.get().handle_srs(mac_msg);
@@ -361,16 +376,43 @@ static float to_prach_rssi_dB(int fapi_rssi)
   return (fapi_rssi - 140000) * 0.001F;
 }
 
+/// Converts the given FAPI RACH occasion RSSI to dB as per SCF-222 v4.0 section 3.4.11.
+static std::optional<float> convert_fapi_to_mac_rssi_dB(uint32_t fapi_rssi)
+{
+  if (fapi_rssi != std::numeric_limits<decltype(fapi_rssi)>::max()) {
+    return to_prach_rssi_dB(fapi_rssi);
+  }
+  return std::nullopt;
+}
+
 /// Converts the given FAPI RACH preamble power to dB as per SCF-222 v4.0 section 3.4.11.
 static float to_prach_preamble_power_dB(int fapi_power)
 {
   return static_cast<float>(fapi_power - 140000) * 0.001F;
 }
 
+/// Converts the given FAPI RACH preamble power to dB as per SCF-222 v4.0 section 3.4.11.
+static std::optional<float> convert_fapi_to_mac_preamble_power_dB(uint32_t fapi_power)
+{
+  if (fapi_power != std::numeric_limits<decltype(fapi_power)>::max()) {
+    return to_prach_preamble_power_dB(fapi_power);
+  }
+  return std::nullopt;
+}
+
 /// Converts the given FAPI RACH preamble SNR to dB as per SCF-222 v4.0 section 3.4.11.
 static float to_prach_preamble_snr_dB(int fapi_snr)
 {
   return (fapi_snr - 128) * 0.5F;
+}
+
+/// Converts the given FAPI RACH preamble SNR to dB as per SCF-222 v4.0 section 3.4.11.
+static std::optional<float> convert_fapi_to_mac_preamble_snr_dB(uint8_t fapi_snr)
+{
+  if (fapi_snr != std::numeric_limits<decltype(fapi_snr)>::max()) {
+    return to_prach_preamble_snr_dB(fapi_snr);
+  }
+  return std::nullopt;
 }
 
 void fapi_to_mac_data_msg_translator::on_rach_indication(const fapi::rach_indication_message& msg)
@@ -383,24 +425,18 @@ void fapi_to_mac_data_msg_translator::on_rach_indication(const fapi::rach_indica
   mac_rach_indication indication;
   indication.slot_rx = slot_point(scs, msg.sfn, msg.slot);
   for (const auto& pdu : msg.pdus) {
-    srsran_assert(pdu.avg_rssi != std::numeric_limits<decltype(pdu.avg_rssi)>::max(), "Average RSSI field not set");
-
     mac_rach_indication::rach_occasion& occas = indication.occasions.emplace_back();
     occas.frequency_index                     = pdu.ra_index;
     occas.slot_index                          = pdu.slot_index;
     occas.start_symbol                        = pdu.symbol_index;
-    occas.rssi_dBFS                           = to_prach_rssi_dB(pdu.avg_rssi);
-    for (const auto& preamble : pdu.preambles) {
-      srsran_assert(preamble.preamble_pwr != std::numeric_limits<decltype(preamble.preamble_pwr)>::max(),
-                    "Preamble power field not set");
-      srsran_assert(preamble.preamble_snr != std::numeric_limits<decltype(preamble.preamble_snr)>::max(),
-                    "Preamble SNR field not set");
+    occas.rssi_dBFS                           = convert_fapi_to_mac_rssi_dB(pdu.avg_rssi);
 
+    for (const auto& preamble : pdu.preambles) {
       mac_rach_indication::rach_preamble& mac_pream = occas.preambles.emplace_back();
       mac_pream.index                               = preamble.preamble_index;
       mac_pream.time_advance = phy_time_unit::from_seconds(preamble.timing_advance_offset_ns * 1e-9);
-      mac_pream.pwr_dBFS     = to_prach_preamble_power_dB(preamble.preamble_pwr);
-      mac_pream.snr_dB       = to_prach_preamble_snr_dB(preamble.preamble_snr);
+      mac_pream.pwr_dBFS     = convert_fapi_to_mac_preamble_power_dB(preamble.preamble_pwr);
+      mac_pream.snr_dB       = convert_fapi_to_mac_preamble_snr_dB(preamble.preamble_snr);
     }
   }
 

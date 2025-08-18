@@ -2,8 +2,11 @@
 f1ap:
   cu_cp_addr: 127.0.10.1
   bind_addr: 127.0.10.2
-nru:
-  bind_addr: 127.0.10.2
+
+f1u:
+  socket:
+    -
+      bind_addr: 127.0.10.2
 
 ru_sdr:
   device_driver: uhd

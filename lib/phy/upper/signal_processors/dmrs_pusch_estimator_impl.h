@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -52,19 +52,6 @@ public:
   void estimate(channel_estimate& estimate, const resource_grid_reader& grid, const configuration& config) override;
 
 private:
-  /// Parameters for PUSCH DM-RS.
-  struct parameters {
-    bounded_bitset<NRE>  re_pattern;
-    std::array<float, 2> w_f;
-    std::array<float, 2> w_t;
-  };
-
-  /// Parameters for PUSCH DM-RS configuration type 1 as per TS 38.211 Table 6.4.1.1.3-1.
-  static const std::array<parameters, 8> params_type1;
-
-  /// Parameters for PUSCH DM-RS configuration type 2 as per TS 38.211 Table 6.4.1.1.3-2.
-  static const std::array<parameters, 12> params_type2;
-
   /// Maximum supported number of transmission layers.
   static constexpr unsigned MAX_TX_LAYERS = pusch_constants::MAX_NOF_LAYERS;
   /// DMRS for PUSCH reference point \f$k\f$ relative to Point A.
@@ -81,8 +68,8 @@ private:
   /// Buffer for DM-RS symbol coordinates.
   std::array<layer_dmrs_pattern, MAX_TX_LAYERS> temp_pattern;
 
-  /// \brief Generates the sequence described in TS 38.211 section 6.4.1.1.1, considering the only values required
-  /// in TS38.211 section 6.4.1.1.2.
+  /// \brief Generates the sequence described in TS38.211 Section 6.4.1.1.1, considering the only values required
+  /// in TS38.211 Section 6.4.1.1.2.
   ///
   /// \param[out] sequence Sequence destination.
   /// \param[in] symbol    Symbol index within the slot.

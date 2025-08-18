@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -21,6 +21,7 @@
  */
 
 #pragma once
+
 #include "srsran/adt/complex.h"
 #include "srsran/adt/tensor.h"
 
@@ -357,7 +358,7 @@ private:
   std::array<span<const T>, MaxNofSlices> data;
 };
 
-/// \brief Implements a modular resource element buffer writer.
+/// \brief Implements a modular resource element buffer.
 ///
 /// In this implementation, each slice is a view to an external block of contiguous REs that must be loaded with the
 /// \ref set_slice method.
@@ -365,9 +366,38 @@ private:
 /// \tparam T            Resource element type.
 /// \tparam MaxNofSlices Maximum number of slices.
 template <typename T, unsigned MaxNofSlices>
-class modular_re_buffer_writer : public re_buffer_writer<T>
+class modular_re_buffer : public re_buffer_writer<T>, public re_buffer_reader<T>
 {
 public:
+  /// Constructs a modular resource element buffer.
+  modular_re_buffer() : nof_slices(0), nof_re(0) {}
+
+  /// Constructs a modular resource element buffer for a given number of slices and resource elements.
+  modular_re_buffer(unsigned nof_slices_, unsigned nof_re_) { resize(nof_slices_, nof_re_); }
+
+  /// Build a modular RE buffer from an existing read-write buffer.
+  modular_re_buffer(re_buffer_writer<T>& buffer)
+  {
+    resize(buffer.get_nof_slices(), buffer.get_nof_re());
+    for (unsigned i_slice = 0; i_slice != nof_slices; ++i_slice) {
+      set_slice(i_slice, buffer.get_slice(i_slice));
+    }
+  }
+
+  /// Build a modular RE buffer from a buffer.
+  modular_re_buffer(re_buffer_writer<T>& buffer, unsigned offset, unsigned nof_re_)
+  {
+    srsran_assert(offset + nof_re_ <= buffer.get_nof_re(),
+                  "The given offset (i.e., {}) and number of RE (i.e., {}) exceed the buffer number of RE (i.e., {}).",
+                  offset,
+                  nof_re_,
+                  buffer.get_nof_re());
+    resize(buffer.get_nof_slices(), nof_re_);
+    for (unsigned i_slice = 0; i_slice != nof_slices; ++i_slice) {
+      set_slice(i_slice, buffer.get_slice(i_slice).subspan(offset, nof_re));
+    }
+  }
+
   /// \brief Resizes the buffer view to a desired number of RE and slices.
   /// \param[in] nof_slices Number of slices.
   /// \param[in] nof_re     Number of resource elements.
@@ -406,6 +436,17 @@ public:
 
   // See interface for documentation.
   span<T> get_slice(unsigned i_slice) override
+  {
+    srsran_assert(i_slice < nof_slices,
+                  "The slice index (i.e., {}) exceeds the number of slices (i.e., {}).",
+                  i_slice,
+                  nof_slices);
+    srsran_assert(!data[i_slice].empty(), "Data for slice {} is empty.", i_slice);
+    return data[i_slice];
+  }
+
+  // See interface for documentation.
+  span<const T> get_slice(unsigned i_slice) const override
   {
     srsran_assert(i_slice < nof_slices,
                   "The slice index (i.e., {}) exceeds the number of slices (i.e., {}).",

@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -22,10 +22,9 @@
 
 #pragma once
 
-#include "unique_thread.h"
-#include "srsran/adt/concurrent_queue.h"
-#include "srsran/adt/optional.h"
+#include "srsran/adt/detail/concurrent_queue_params.h"
 #include "srsran/support/executors/task_executor.h"
+#include "srsran/support/executors/unique_thread.h"
 #include <unordered_map>
 #include <variant>
 
@@ -39,58 +38,15 @@ namespace execution_config_helper {
 using task_priority = enqueue_priority;
 
 /// Parameters of a queue of tasks.
-using task_queue = concurrent_queue_params;
-
-/// Parameters of a strand executor.
-struct strand {
-  struct executor {
-    /// \brief Name of the strand executor.
-    std::string name;
-    /// \brief Queueing policy associated with this strand executor.
-    concurrent_queue_policy policy;
-    /// \brief Size of the queue used.
-    unsigned size;
-    /// \brief Whether the caller blocks waiting for task to complete.
-    bool synchronous = false;
-  };
-  /// Queues of different priorities. The lower the index, the higher the priority.
-  std::vector<executor> queues;
-};
-
-/// Parameters of the task executor, including name and decorators.
-struct executor {
-  /// Name of the executor.
+struct task_queue {
+  /// Name attributed to this task queue.
   std::string name;
-  /// Priority assigned to the tasks dispatched through this executor.
-  task_priority priority = task_priority::min;
-  /// Strands instantiated on top of this executor.
-  std::vector<strand> strands;
-  /// \brief Present if the executor works as a strand, serializing all the enqueued tasks. The value is the size of
-  /// the strand queue size.
-  std::optional<unsigned> strand_queue_size;
-  /// \brief Whether to make an executor synchronous. If true, the executor will be blocking, until the pushed task is
-  /// fully executed. This will have a negative impact on performance, but can be useful for debugging.
-  bool synchronous = false;
-
-  executor(const std::string&         name_,
-           const std::vector<strand>& strands_           = {},
-           std::optional<unsigned>    strand_queue_size_ = std::nullopt,
-           bool                       synchronous_       = false) :
-    name(name_), strands(strands_), strand_queue_size(strand_queue_size_), synchronous(synchronous_)
-  {
-  }
-  executor(const std::string&         name_,
-           task_priority              priority_,
-           const std::vector<strand>& strands_           = {},
-           std::optional<unsigned>    strand_queue_size_ = std::nullopt,
-           bool                       synchronous_       = false) :
-    name(name_),
-    priority(priority_),
-    strands(strands_),
-    strand_queue_size(strand_queue_size_),
-    synchronous(synchronous_)
-  {
-  }
+  /// Queueing policy used by this task queue.
+  concurrent_queue_policy policy;
+  /// Size of the queue used.
+  unsigned size;
+  /// Number of pre-reserved producers in the case of the moodycamel lockfree MPMC queue.
+  unsigned nof_prereserved_producers = std::thread::hardware_concurrency();
 };
 
 /// Arguments for a single task worker creation.
@@ -99,8 +55,6 @@ struct single_worker {
   std::string name;
   /// Queue used by the task worker.
   task_queue queue;
-  /// Executors associated with this execution context.
-  std::vector<executor> executors;
   /// \brief Wait time in microseconds, when task queue has no pending tasks. If not set, a condition variable is
   /// used to wake up the worker when a new task is pushed.
   std::optional<std::chrono::microseconds> wait_sleep_time;
@@ -108,8 +62,6 @@ struct single_worker {
   os_thread_realtime_priority prio = os_thread_realtime_priority::no_realtime();
   /// Bit mask to set worker cpu affinity.
   os_sched_affinity_bitmask mask = {};
-  /// Non null in case tracing of the worker executors is enabled.
-  file_event_tracer<true>* tracer = nullptr;
 };
 
 /// Arguments for a task worker pool creation.
@@ -120,16 +72,12 @@ struct worker_pool {
   unsigned nof_workers;
   /// Queue(s) used by the task worker. The lower the index, the higher the priority.
   std::vector<task_queue> queues;
-  /// Executors associated with this execution context.
-  std::vector<executor> executors;
   /// \brief Wait time in microseconds, when task queue has no pending tasks.
   std::chrono::microseconds sleep_time;
   /// OS priority of the worker thread.
   os_thread_realtime_priority prio = os_thread_realtime_priority::no_realtime();
   /// Array of CPU bitmasks to assign to each worker in the pool.
   std::vector<os_sched_affinity_bitmask> masks;
-  /// Non null in case tracing of the worker executors is enabled.
-  file_event_tracer<true>* tracer = nullptr;
 };
 
 /// Arguments for the creation of a priority multiqueue worker.
@@ -141,14 +89,10 @@ struct priority_multiqueue_worker {
   std::vector<task_queue> queues;
   /// \brief Wait time in microseconds, when task queue has no pending tasks.
   std::chrono::microseconds spin_sleep_time;
-  /// Executors associated with this execution context.
-  std::vector<executor> executors;
   /// OS priority of the worker thread.
   os_thread_realtime_priority prio = os_thread_realtime_priority::no_realtime();
   /// Bit mask to set worker cpu affinity.
   os_sched_affinity_bitmask mask = {};
-  /// Non null in case tracing of the worker executors is enabled.
-  file_event_tracer<true>* tracer = nullptr;
 };
 
 } // namespace execution_config_helper
@@ -192,10 +136,10 @@ public:
   void stop();
 
   /// Add new execution context to repository.
-  SRSRAN_NODISCARD bool add_execution_context(std::unique_ptr<task_execution_context> ctxt);
+  [[nodiscard]] bool add_execution_context(std::unique_ptr<task_execution_context> ctxt);
 
   /// Returns a table of all executors stored in the repository.
-  SRSRAN_NODISCARD const executor_table& executors() const { return executor_list; }
+  [[nodiscard]] const executor_table& executors() const { return executor_list; }
 
 private:
   srslog::basic_logger& logger;

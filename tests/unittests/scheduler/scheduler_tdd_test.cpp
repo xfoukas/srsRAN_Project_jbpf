@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -25,10 +25,11 @@
 
 #include "test_utils/config_generators.h"
 #include "test_utils/indication_generators.h"
-#include "test_utils/result_test_helpers.h"
-#include "test_utils/scheduler_test_bench.h"
+#include "test_utils/scheduler_test_simulator.h"
+#include "tests/test_doubles/scheduler/cell_config_builder_profiles.h"
+#include "tests/test_doubles/scheduler/scheduler_config_helper.h"
+#include "srsran/ran/pucch/pucch_info.h"
 #include "srsran/ran/tdd/tdd_ul_dl_config_formatters.h"
-#include "srsran/srslog/srslog.h"
 #include "srsran/support/test_utils.h"
 #include <gtest/gtest.h>
 #include <ostream>
@@ -41,53 +42,38 @@ struct tdd_test_params {
   unsigned                min_k = 4;
 };
 
-class base_scheduler_tdd_tester : public scheduler_test_bench
+class base_scheduler_tdd_tester : public scheduler_test_simulator
 {
 protected:
-  base_scheduler_tdd_tester(const tdd_test_params& testparams) : scheduler_test_bench(4, testparams.tdd_cfg.ref_scs)
+  base_scheduler_tdd_tester(const tdd_test_params& testparams) : scheduler_test_simulator(4, testparams.tdd_cfg.ref_scs)
   {
+    params                      = cell_config_builder_profiles::tdd(testparams.tdd_cfg.ref_scs);
+    params.csi_rs_enabled       = testparams.csi_rs_enabled;
+    params.tdd_ul_dl_cfg_common = testparams.tdd_cfg;
+    params.min_k1               = testparams.min_k;
+    params.min_k2               = testparams.min_k;
+
     // Add Cell.
-    this->add_cell([this, &testparams]() {
-      params.scs_common       = testparams.tdd_cfg.ref_scs;
-      params.dl_f_ref_arfcn   = 520002;
-      params.band             = nr_band::n41;
-      params.channel_bw_mhz   = bs_channel_bandwidth::MHz20;
-      const unsigned nof_crbs = band_helper::get_n_rbs_from_bw(
-          params.channel_bw_mhz, params.scs_common, band_helper::get_freq_range(*params.band));
-      static const uint8_t                                   ss0_idx = 0;
-      std::optional<band_helper::ssb_coreset0_freq_location> ssb_freq_loc =
-          band_helper::get_ssb_coreset0_freq_location(params.dl_f_ref_arfcn,
-                                                      *params.band,
-                                                      nof_crbs,
-                                                      params.scs_common,
-                                                      params.scs_common,
-                                                      ss0_idx,
-                                                      params.max_coreset0_duration);
-      if (!ssb_freq_loc.has_value()) {
-        report_error("Unable to derive a valid SSB pointA and k_SSB for cell id ({}).\n", params.pci);
-      }
-      params.offset_to_point_a    = (*ssb_freq_loc).offset_to_point_A;
-      params.k_ssb                = (*ssb_freq_loc).k_ssb;
-      params.coreset0_index       = (*ssb_freq_loc).coreset0_idx;
-      params.search_space0_index  = ss0_idx;
-      params.csi_rs_enabled       = testparams.csi_rs_enabled;
-      params.tdd_ul_dl_cfg_common = testparams.tdd_cfg;
-      params.min_k1               = testparams.min_k;
-      params.min_k2               = testparams.min_k;
-
-      sched_cell_configuration_request_message sched_cell_cfg_req =
-          test_helpers::make_default_sched_cell_configuration_request(params);
-
-      return sched_cell_cfg_req;
-    }());
+    this->add_cell(sched_config_helper::make_default_sched_cell_configuration_request(params));
 
     // Add UE
-    auto ue_cfg     = test_helpers::create_default_sched_ue_creation_request(params, {ue_drb_lcid});
+    auto ue_cfg     = sched_config_helper::create_default_sched_ue_creation_request(params, {ue_drb_lcid});
     ue_cfg.ue_index = ue_idx;
     ue_cfg.crnti    = ue_rnti;
     // Increase PUCCH Format 2 code rate to support TDD configuration of DDDDDDDDSU.
-    (*ue_cfg.cfg.cells)[0].serv_cell_cfg.ul_config->init_ul_bwp.pucch_cfg->format_2_common_param->max_c_rate =
-        srsran::max_pucch_code_rate::dot_35;
+    srsran_assert((*ue_cfg.cfg.cells)[0].serv_cell_cfg.ul_config->init_ul_bwp.pucch_cfg.has_value(),
+                  "The PUCCH config is not set");
+    auto& pucch_cfg = (*ue_cfg.cfg.cells)[0].serv_cell_cfg.ul_config->init_ul_bwp.pucch_cfg.value();
+    pucch_cfg.format_2_common_param->max_c_rate = max_pucch_code_rate::dot_35;
+    pucch_res_id_t any_res_f2_id                = pucch_cfg.pucch_res_set[1].pucch_res_id_list.front();
+    auto*          res_f2                       = std::find_if(pucch_cfg.pucch_res_list.begin(),
+                                pucch_cfg.pucch_res_list.end(),
+                                [any_res_f2_id](const auto& res) { return res.res_id == any_res_f2_id; });
+    srsran_assert(res_f2 != pucch_cfg.pucch_res_list.end(), "PUCCH resource F2 not found");
+    pucch_cfg.format_max_payload[pucch_format_to_uint(pucch_format::FORMAT_2)] =
+        get_pucch_format2_max_payload(std::get<pucch_format_2_3_cfg>(res_f2->format_params).nof_prbs,
+                                      std::get<pucch_format_2_3_cfg>(res_f2->format_params).nof_symbols,
+                                      to_max_code_rate_float(pucch_cfg.format_2_common_param.value().max_c_rate));
 
     this->add_ue(ue_cfg);
   }
@@ -130,12 +116,12 @@ TEST_P(scheduler_dl_tdd_tester, all_dl_slots_are_scheduled)
     }
 
     for (const pucch_info& pucch : this->last_sched_res_list[to_du_cell_index(0)]->ul.pucchs) {
-      if (pucch.format == pucch_format::FORMAT_1 and pucch.format_1.sr_bits != sr_nof_bits::no_sr) {
+      if (pucch.format() == pucch_format::FORMAT_1 and pucch.uci_bits.sr_bits != sr_nof_bits::no_sr) {
         // Skip SRs for this test.
         continue;
       }
 
-      uci_indication uci_ind = create_uci_indication(this->last_result_slot(), ue_idx, pucch);
+      uci_indication uci_ind = test_helper::create_uci_indication(this->last_result_slot(), ue_idx, pucch);
       this->sched->handle_uci_indication(uci_ind);
     }
   }
@@ -182,8 +168,8 @@ TEST_P(scheduler_ul_tdd_tester, all_ul_slots_are_scheduled)
     // Note: Skip special slots in test for now.
     if (cell_cfg_list[0].is_fully_ul_enabled(this->last_result_slot())) {
       // Ensure UE PUSCH allocations are made.
-      ASSERT_FALSE(this->last_sched_res_list[to_du_cell_index(0)]->ul.puschs.empty())
-          << "The UE configuration is leading to some UL slots staying empty";
+      ASSERT_FALSE(this->last_sched_res_list[to_du_cell_index(0)]->ul.puschs.empty()) << fmt::format(
+          "The UE configuration is leading to slot {} not having UL UE grant scheduled", this->last_result_slot());
     }
 
     for (const ul_sched_info& pusch : this->last_sched_res_list[to_du_cell_index(0)]->ul.puschs) {
@@ -195,6 +181,7 @@ TEST_P(scheduler_ul_tdd_tester, all_ul_slots_are_scheduled)
       crc.crcs[0].rnti           = ue_rnti;
       crc.crcs[0].harq_id        = to_harq_id(pusch.pusch_cfg.harq_id);
       crc.crcs[0].tb_crc_success = true;
+      crc.crcs[0].ul_sinr_dB     = 100;
       this->sched->handle_crc_indication(crc);
     }
   }
@@ -206,16 +193,19 @@ INSTANTIATE_TEST_SUITE_P(
     testing::Values(
         // clang-format off
 // csi_enabled, {ref_scs, pattern1={slot_period, DL_slots, DL_symbols, UL_slots, UL_symbols}, pattern2={...}, min_k}
-  tdd_test_params{true,  {subcarrier_spacing::kHz30, {10, 6, 5, 3, 4}}},
-  tdd_test_params{true,  {subcarrier_spacing::kHz30, {10, 7, 5, 2, 4}}},
+  tdd_test_params{true,  {subcarrier_spacing::kHz30, {10, 6, 5, 3, 4}}}, // DDDDDDSUUU
+  tdd_test_params{true,  {subcarrier_spacing::kHz30, {10, 7, 5, 2, 4}}}, // DDDDDDDSUU
   tdd_test_params{true,  {subcarrier_spacing::kHz30, {10, 7, 5, 2, 4}}, 1},
   tdd_test_params{false, {subcarrier_spacing::kHz30, {10, 8, 0, 1, 0}}},
   tdd_test_params{false, {subcarrier_spacing::kHz30, {10, 8, 0, 1, 0}}, 1},
   tdd_test_params{false, {subcarrier_spacing::kHz30, {6,  3, 5, 2, 0}, tdd_ul_dl_pattern{4, 4, 0, 0, 0}}},
+  // DDDSUUDDDD, TS 38.101-4, Table A.1.2-2, Configuration FR1.30-4.
+  tdd_test_params{false, {subcarrier_spacing::kHz30, {6,  3, 6, 2, 4}, tdd_ul_dl_pattern{4, 4, 0, 0, 0}}},
   tdd_test_params{true,  {subcarrier_spacing::kHz30, {5,  3, 9, 1, 0}}},
   tdd_test_params{true,  {subcarrier_spacing::kHz30, {5,  3, 9, 1, 0}}, 1},
   tdd_test_params{true,  {subcarrier_spacing::kHz30, {4,  2, 9, 1, 0}}},
-  tdd_test_params{true,  {subcarrier_spacing::kHz30, {4,  2, 9, 1, 0}}, 1}
+  tdd_test_params{true,  {subcarrier_spacing::kHz30, {4,  2, 9, 1, 0}}, 1},
+  tdd_test_params{true,  {subcarrier_spacing::kHz30, {10, 6, 13, 3, 0}}, 4} // DDDDDDSUUU, with 13 DL symbols in special slot
   // TODO: Support more TDD patterns.
 // Note: The params below lead to a failure due to "Not enough space in PUCCH". However, I don't think there is no valid
 // k1 candidate list that accommodates all DL slots.
@@ -233,10 +223,19 @@ INSTANTIATE_TEST_SUITE_P(
   tdd_test_params{true,  {subcarrier_spacing::kHz30, {10, 7, 5, 2, 4}}}, // DDDDDDDSUU
   tdd_test_params{true,  {subcarrier_spacing::kHz30, {10, 8, 5, 1, 4}}}, // DDDDDDDDSU
   tdd_test_params{false, {subcarrier_spacing::kHz30, {6,  3, 5, 2, 0}, tdd_ul_dl_pattern{4, 4, 0, 0, 0}}},
+  // DDDSUUDDDD, TS 38.101-4, Table A.1.2-2, Configuration FR1.30-4.
+  tdd_test_params{false, {subcarrier_spacing::kHz30, {6,  3, 6, 2, 4}, tdd_ul_dl_pattern{4, 4, 0, 0, 0}}},
   tdd_test_params{true,  {subcarrier_spacing::kHz30, {4,  2, 9, 1, 0}}},  // DDSU
+  tdd_test_params{true,  {subcarrier_spacing::kHz30, {10, 4, 5, 5, 0}}, 5}, // DDDDSUUUUU
+  tdd_test_params{true,  {subcarrier_spacing::kHz30, {10, 6, 13, 3, 0}}, 4}, // DDDDDDSUUU, with 13 DL symbols in special slot
   // UL heavy
-  tdd_test_params{true, {subcarrier_spacing::kHz30, {10, 4, 5, 5, 0}}}, // DDDDSUUUUU
-  tdd_test_params{true, {subcarrier_spacing::kHz30, {10, 3, 5, 6, 0}}},
-  tdd_test_params{true, {subcarrier_spacing::kHz30, {10, 2, 10, 7, 0}}, 2}
-)); // DDDSUUDDDD
+  tdd_test_params{true, {subcarrier_spacing::kHz30, {10, 3,  5, 6, 0}}},
+  tdd_test_params{true, {subcarrier_spacing::kHz30, {5,  1, 10, 3, 0}, tdd_ul_dl_pattern{5, 1, 10, 3, 0}}, 2},
+  tdd_test_params{true, {subcarrier_spacing::kHz30, {6,  2, 10, 3, 0}, tdd_ul_dl_pattern{4, 1, 0, 3, 0}}, 2},
+  tdd_test_params{true, {subcarrier_spacing::kHz30, {4,  1, 10, 2, 0}, tdd_ul_dl_pattern{6, 1, 10, 4, 0}}, 2},
+  tdd_test_params{true, {subcarrier_spacing::kHz30, {10, 2, 10, 7, 0}}, 2},
+  tdd_test_params{true, {subcarrier_spacing::kHz30, {10, 2,  6, 7, 4}}, 2},
+  tdd_test_params{true, {subcarrier_spacing::kHz30, {10, 2,  6, 7, 4}}},
+  tdd_test_params{true, {subcarrier_spacing::kHz30, {5,  1, 10, 3, 0}}, 2}
+));
 // clang-format on

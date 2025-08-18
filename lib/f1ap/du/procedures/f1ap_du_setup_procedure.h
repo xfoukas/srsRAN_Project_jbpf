@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -22,7 +22,6 @@
 
 #pragma once
 
-#include "../../f1ap_asn1_utils.h"
 #include "f1ap_du_event_manager.h"
 #include "srsran/f1ap/du/f1ap_du.h"
 #include "srsran/f1ap/f1ap_message_notifier.h"
@@ -43,7 +42,7 @@ public:
                           timer_factory&                  timers,
                           f1ap_du_context&                du_ctxt_);
 
-  void operator()(coro_context<async_task<f1_setup_response_message>>& ctx);
+  void operator()(coro_context<async_task<f1_setup_result>>& ctx);
 
 private:
   const char* name() const { return "F1 Setup"; }
@@ -55,7 +54,7 @@ private:
   bool retry_required();
 
   /// Creates procedure result to send back to procedure caller.
-  f1_setup_response_message create_f1_setup_result();
+  f1_setup_result create_f1_setup_result();
 
   const f1_setup_request_message request;
   f1ap_message_notifier&         cu_notifier;

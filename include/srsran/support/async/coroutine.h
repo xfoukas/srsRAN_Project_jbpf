@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -22,7 +22,7 @@
 
 #pragma once
 
-#include "awaiter_memory_storage.h"
+#include "srsran/support/async/awaiter_memory_storage.h"
 #include "srsran/support/async/detail/function_signature.h"
 #include "srsran/support/compiler.h"
 #include "srsran/support/srsran_assert.h"
@@ -50,11 +50,12 @@ using enable_if_nonvoid = std::enable_if_t<not std::is_same<Result, void>::value
 
 /// Metafunction for deriving coroutine implementation -> Promise
 template <typename F>
-using promise_of = typename std::decay_t<get_type_from_index_t<0, decltype(callable_arguments<F>())>>::promise_type;
+using promise_of =
+    typename std::decay_t<type_list_helper::type_at_t<0, decltype(callable_arguments<F>())>>::promise_type;
 
 /// Metafunction for deriving coroutine implementation -> Future Type
 template <typename F>
-using future_of = typename std::decay_t<get_type_from_index_t<0, decltype(callable_arguments<F>())>>::future_type;
+using future_of = typename std::decay_t<type_list_helper::type_at_t<0, decltype(callable_arguments<F>())>>::future_type;
 
 /// Base class for coroutine frames
 template <typename Promise>

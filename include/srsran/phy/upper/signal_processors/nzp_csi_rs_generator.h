@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -22,6 +22,7 @@
 
 #pragma once
 
+#include "srsran/adt/expected.h"
 #include "srsran/adt/static_vector.h"
 #include "srsran/phy/constants.h"
 #include "srsran/phy/support/precoding_configuration.h"
@@ -31,14 +32,14 @@
 
 namespace srsran {
 
-class resource_grid_mapper;
+class resource_grid_writer;
 
-/// Describes a Non-Zero-Power CSI Reference Signal (NZP-CSI-RS) processor interface, in compliance with TS 38.211
+/// Describes a Non-Zero-Power CSI Reference Signal (NZP-CSI-RS) processor interface, in compliance with TS38.211
 /// Section 7.4.1.5.
 class nzp_csi_rs_generator
 {
 public:
-  /// \brief Describes the required parameters to generate the NZP-CSI-RS signal, as described in TS 38.211
+  /// \brief Describes the required parameters to generate the NZP-CSI-RS signal, as described in TS38.211
   /// Section 7.4.1.5.
   ///
   /// \remark The start resource block plus the number of RB shall not exceed the resource grid bandwidth.
@@ -52,7 +53,7 @@ public:
     unsigned start_rb;
     /// Number of PRBs that the CSI spans.
     unsigned nof_rb;
-    /// Row number of the CSI-RS location table, as defined in TS 38.211 Table 7.4.1.5.3-1.
+    /// Row number of the CSI-RS location table, as defined in TS38.211 Table 7.4.1.5.3-1.
     unsigned csi_rs_mapping_table_row;
     /// Frequency domain allocation references \f${k_0, k_1, ..., k_n}\f$.
     static_vector<unsigned, CSI_RS_MAX_NOF_K_INDEXES> freq_allocation_ref_idx;
@@ -68,7 +69,7 @@ public:
     csi_rs_cdm_type cdm;
     /// Frequency density configuration.
     csi_rs_freq_density_type freq_density;
-    /// \brief CSI-RS Scrambling ID, as per TS 38.214, Section 5.2.2.3.1.
+    /// \brief CSI-RS Scrambling ID, as per TS38.214, Section 5.2.2.3.1.
     ///
     /// Takes values in the range {0, 1, ..., 1023}.
     unsigned scrambling_id;
@@ -81,10 +82,10 @@ public:
   /// Default destructor.
   virtual ~nzp_csi_rs_generator() = default;
 
-  /// \brief Generates and maps the NZP-CSI-RS, according to TS 38.211, Section 7.4.1.5.
-  /// \param [out] mapper Resource grid mapper.
+  /// \brief Generates and maps the NZP-CSI-RS, according to TS38.211, Section 7.4.1.5.
+  /// \param [out] writer Resource grid writer interface.
   /// \param [in]  config Required configuration to generate and map the signal.
-  virtual void map(resource_grid_mapper& mapper, const config_t& config) = 0;
+  virtual void map(resource_grid_writer& grid, const config_t& config) = 0;
 };
 
 /// Describes the NZP-CSI-RS generator configuration validator interface.
@@ -95,8 +96,8 @@ public:
   virtual ~nzp_csi_rs_configuration_validator() = default;
 
   /// \brief Validates NZP-CSI-RS generator configuration parameters.
-  /// \return True if the parameters contained in \c config are supported, false otherwise.
-  virtual bool is_valid(const nzp_csi_rs_generator::config_t& config) = 0;
+  /// \return A success if the parameters contained in \c config are supported, an error message otherwise.
+  virtual error_type<std::string> is_valid(const nzp_csi_rs_generator::config_t& config) const = 0;
 };
 
 } // namespace srsran

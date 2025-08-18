@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -25,9 +25,11 @@
 #include "srsran/adt/complex.h"
 #include "srsran/phy/constants.h"
 #include "srsran/phy/support/re_buffer.h"
+#include "srsran/phy/support/resource_grid_mapper.h"
+#include "srsran/phy/support/resource_grid_writer.h"
 #include "srsran/phy/upper/sequence_generators/pseudo_random_generator.h"
 #include "srsran/phy/upper/signal_processors/dmrs_pdsch_processor.h"
-#include "srsran/support/math_utils.h"
+#include "srsran/support/math/math_utils.h"
 
 namespace srsran {
 
@@ -48,25 +50,14 @@ private:
   /// additional position, as per TS38.211 Section 7.4.1.1.2. and TS38.214 Section 5.6.1.2.
   static constexpr unsigned MAX_DMRS_SYMBOLS = 4;
 
-  /// Defines generation parameters.
-  struct params_t {
-    std::array<float, 2> w_f;
-    std::array<float, 2> w_t;
-  };
-
-  /// Provides TS 38.211 Table 7.4.1.1.2-1: Parameters for PDSCH DM-RS configuration type 1.
-  static const std::array<params_t, 8> params_type1;
-
-  /// Provides TS 38.211 Table 7.4.1.1.2-2: Parameters for PDSCH DM-RS configuration type 2.
-  static const std::array<params_t, 12> params_type2;
-
   /// Pseudo-random sequence generator instance.
   std::unique_ptr<pseudo_random_generator> prg;
+  std::unique_ptr<resource_grid_mapper>    mapper;
 
-  /// \brief Implements TS 38.211 section 7.4.1.1.1 Sequence generation.
+  /// \brief Implements TS38.211 Section 7.4.1.1.1 Sequence generation.
   ///
-  /// This method generates the sequence described in TS 38.211 section 7.4.1.1.1, considering the only values required
-  /// in TS 38.211 section 7.4.1.1.2.
+  /// This method generates the sequence described in TS38.211 Section 7.4.1.1.1, considering the only values required
+  /// in TS38.211 Section 7.4.1.1.2.
   ///
   /// \param[out] sequence Provides the sequence destination.
   /// \param[in] symbol Denotes the symbol index.
@@ -90,14 +81,16 @@ private:
   static_re_buffer<MAX_PORTS, MAX_DMRS_PER_SYMBOL * MAX_DMRS_SYMBOLS> temp_re;
 
 public:
-  dmrs_pdsch_processor_impl(std::unique_ptr<pseudo_random_generator> pseudo_random_generator) :
-    prg(std::move(pseudo_random_generator))
+  dmrs_pdsch_processor_impl(std::unique_ptr<pseudo_random_generator> pseudo_random_generator_,
+                            std::unique_ptr<resource_grid_mapper>    mapper_) :
+    prg(std::move(pseudo_random_generator_)), mapper(std::move(mapper_))
   {
     srsran_assert(prg, "Invalid PRG.");
+    srsran_assert(mapper, "Invalid mapper.");
   }
 
   // See interface for documentation.
-  void map(resource_grid_mapper& mapper, const config_t& config) override;
+  void map(resource_grid_writer& grid, const config_t& config) override;
 };
 
 } // namespace srsran

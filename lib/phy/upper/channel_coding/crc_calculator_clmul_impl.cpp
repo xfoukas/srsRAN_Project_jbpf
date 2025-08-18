@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -26,9 +26,6 @@
 #include "srsran/srsvec/zero.h"
 
 using namespace srsran;
-
-// Register for converting data representation between big endian (BE) to little endian (LE).
-static const __m128i crc_xmm_be_le_swap128 = _mm_setr_epi32(0x0c0d0e0f, 0x08090a0b, 0x04050607, 0x00010203);
 
 namespace {
 
@@ -115,7 +112,9 @@ static inline uint32_t crc32_calc_pclmulqdq(span<const uint8_t> data, const crc_
 
   // Load first 16 data bytes in fold and set swap BE<->LE 16 byte conversion variable.
   __m128i fold = mm_safe_load_si128(data.first(std::min(data.size(), 16UL)));
-  __m128i swap = crc_xmm_be_le_swap128;
+
+  // Register for converting data representation between big endian (BE) to little endian (LE).
+  const __m128i swap = _mm_setr_epi32(0x0c0d0e0f, 0x08090a0b, 0x04050607, 0x00010203);
 
   // Folding all data into single 16 byte data block.
   if (data_len <= 16) {
@@ -177,7 +176,7 @@ static inline uint32_t crc32_calc_pclmulqdq(span<const uint8_t> data, const crc_
   return crc32_reduce_64_to_32(fold, k, _mm_set_epi64x(0UL, params.p));
 }
 
-crc_calculator_checksum_t crc_calculator_clmul_impl::calculate_byte(span<const uint8_t> data)
+crc_calculator_checksum_t crc_calculator_clmul_impl::calculate_byte(span<const uint8_t> data) const
 {
   if (poly == crc_generator_poly::CRC24A) {
     return crc32_calc_pclmulqdq(data, crc24A_ctx) >> 8U;
@@ -190,12 +189,12 @@ crc_calculator_checksum_t crc_calculator_clmul_impl::calculate_byte(span<const u
   return crc_calc_lut.calculate_byte(data);
 }
 
-crc_calculator_checksum_t crc_calculator_clmul_impl::calculate_bit(span<const uint8_t> data)
+crc_calculator_checksum_t crc_calculator_clmul_impl::calculate_bit(span<const uint8_t> data) const
 {
   return crc_calc_lut.calculate_bit(data);
 }
 
-crc_calculator_checksum_t crc_calculator_clmul_impl::calculate(const bit_buffer& data)
+crc_calculator_checksum_t crc_calculator_clmul_impl::calculate(const bit_buffer& data) const
 {
   unsigned nbytes          = data.size() / 8;
   unsigned remainder_nbits = data.size() % 8;
@@ -214,23 +213,17 @@ crc_calculator_checksum_t crc_calculator_clmul_impl::calculate(const bit_buffer&
     return crc;
   }
 
-  // Reset the LUT algorithm with the current CRC.
-  crc_calc_lut.reset(crc);
-
   // Extract from the data the latest byte with zero padding.
   uint8_t last_byte = data.extract(nbytes * 8, remainder_nbits) << (8U - remainder_nbits);
 
   // Insert the latest byte into the LUT algorithm.
-  crc_calc_lut.put_byte(last_byte);
+  crc = crc_calc_lut.put_byte(crc, last_byte);
 
   // Update checksum.
-  crc = crc_calc_lut.get_checksum();
-
-  // Reset CRC prior to reverse.
-  crc_calc_lut.reset(crc);
+  crc = crc_calc_lut.get_checksum(crc);
 
   // Reverse the padded.
-  crc_calc_lut.reversecrcbit(8 - remainder_nbits);
+  crc = crc_calc_lut.reversecrcbit(crc, 8 - remainder_nbits);
 
-  return crc_calc_lut.get_checksum();
+  return crc_calc_lut.get_checksum(crc);
 }

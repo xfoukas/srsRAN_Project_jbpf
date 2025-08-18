@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -23,6 +23,7 @@
 #pragma once
 
 #include "scheduler_policy.h"
+#include "srsran/scheduler/config/scheduler_expert_config.h"
 
 namespace srsran {
 
@@ -31,21 +32,31 @@ class scheduler_time_rr : public scheduler_policy
 public:
   scheduler_time_rr(const scheduler_ue_expert_config& expert_cfg_);
 
-  void dl_sched(ue_pdsch_allocator&          pdsch_alloc,
-                const ue_resource_grid_view& res_grid,
-                dl_ran_slice_candidate&      slice_candidate,
-                dl_harq_pending_retx_list    harq_pending_retx_list) override;
+  void add_ue(du_ue_index_t ue_index) override {}
 
-  void ul_sched(ue_pusch_allocator&          pusch_alloc,
-                const ue_resource_grid_view& res_grid,
-                ul_ran_slice_candidate&      slice_candidate,
-                ul_harq_pending_retx_list    harq_pending_retx_list) override;
+  void rem_ue(du_ue_index_t ue_index) override {}
+
+  void compute_ue_dl_priorities(slot_point               pdcch_slot,
+                                slot_point               pdsch_slot,
+                                span<ue_newtx_candidate> ue_candidates) override;
+
+  void compute_ue_ul_priorities(slot_point               pdcch_slot,
+                                slot_point               pusch_slot,
+                                span<ue_newtx_candidate> ue_candidates) override;
+
+  void save_dl_newtx_grants(span<const dl_msg_alloc> dl_grants) override;
+
+  void save_ul_newtx_grants(span<const ul_sched_info> ul_grants) override;
 
 private:
-  srslog::basic_logger& logger;
-  du_ue_index_t         next_dl_ue_index, next_ul_ue_index;
-
   const scheduler_ue_expert_config expert_cfg;
+
+  // Tables to keep track of UE priorities.
+  std::array<unsigned, MAX_NOF_DU_UES> ue_last_dl_alloc_count{};
+  std::array<unsigned, MAX_NOF_DU_UES> ue_last_ul_alloc_count{};
+
+  unsigned dl_alloc_count{0};
+  unsigned ul_alloc_count{0};
 };
 
 } // namespace srsran

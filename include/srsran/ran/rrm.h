@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -41,14 +41,18 @@ struct rrm_policy_member {
 };
 
 struct rrm_policy_ratio_group {
-  /// Used to identify the group to which the policy is applied.
-  rrm_policy_member pol_member;
+  /// The resource type of interest for an RRM Policy
+  /// \remark See 3GPP TS 28.541, Section 4.4.1 Attribute properties.
+  enum class resource_type_t { prb, prb_ul, prb_dl };
+  resource_type_t resource_type = resource_type_t::prb;
+  /// List of RRM policy members (PLMN + S-NSSAI combinations).
+  std::vector<rrm_policy_member> policy_members_list;
   /// Sets the minimum percentage of PRBs to be allocated to this group.
-  std::optional<int> min_prb_policy_ratio;
+  std::optional<unsigned> min_prb_policy_ratio;
   /// Sets the maximum percentage of PRBs to be allocated to this group.
-  std::optional<int> max_prb_policy_ratio;
+  std::optional<unsigned> max_prb_policy_ratio;
   /// Sets the percentage of PRBs to be allocated to this group.
-  std::optional<int> ded_prb_policy_ratio;
+  std::optional<unsigned> ded_prb_policy_ratio;
 };
 
 } // namespace srsran

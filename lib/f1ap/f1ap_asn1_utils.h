@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -131,6 +131,10 @@ inline std::optional<uint8_t> get_transaction_id(const asn1::f1ap::successful_ou
       return out.value.gnb_du_res_coordination_resp()->transaction_id;
     case success_types::f1_removal_resp:
       return out.value.f1_removal_resp()->transaction_id;
+    case success_types::trp_info_resp:
+      return out.value.trp_info_resp()->transaction_id;
+    case success_types::positioning_meas_resp:
+      return out.value.positioning_meas_resp()->transaction_id;
       // TODO: Remaining cases.
     default:
       break;
@@ -151,6 +155,10 @@ inline std::optional<uint8_t> get_transaction_id(const asn1::f1ap::unsuccessful_
       return out.value.gnb_du_cfg_upd_fail()->transaction_id;
     case f1ap_elem_procs_o::unsuccessful_outcome_c::types_opts::f1_removal_fail:
       return out.value.f1_removal_fail()->transaction_id;
+    case f1ap_elem_procs_o::unsuccessful_outcome_c::types_opts::trp_info_fail:
+      return out.value.trp_info_fail()->transaction_id;
+    case f1ap_elem_procs_o::unsuccessful_outcome_c::types_opts::positioning_meas_fail:
+      return out.value.positioning_meas_fail()->transaction_id;
       // TODO: Remaining cases.
     default:
       break;
@@ -304,6 +312,10 @@ inline std::optional<gnb_cu_ue_f1ap_id_t> get_gnb_cu_ue_f1ap_id(const asn1::f1ap
       return (gnb_cu_ue_f1ap_id_t)success_outcome.value.ue_context_mod_resp()->gnb_cu_ue_f1ap_id;
     case success_types::ue_context_mod_confirm:
       return (gnb_cu_ue_f1ap_id_t)success_outcome.value.ue_context_mod_confirm()->gnb_cu_ue_f1ap_id;
+    case success_types::positioning_info_resp:
+      return (gnb_cu_ue_f1ap_id_t)success_outcome.value.positioning_info_resp()->gnb_cu_ue_f1ap_id;
+    case success_types::positioning_activation_resp:
+      return (gnb_cu_ue_f1ap_id_t)success_outcome.value.positioning_activation_resp()->gnb_cu_ue_f1ap_id;
     default:
       break;
   }
@@ -323,6 +335,10 @@ get_gnb_cu_ue_f1ap_id(const asn1::f1ap::unsuccessful_outcome_s& unsuccess_outcom
       return (gnb_cu_ue_f1ap_id_t)unsuccess_outcome.value.ue_context_mod_fail()->gnb_cu_ue_f1ap_id;
     case unsuccess_types::ue_context_mod_refuse:
       return (gnb_cu_ue_f1ap_id_t)unsuccess_outcome.value.ue_context_mod_refuse()->gnb_cu_ue_f1ap_id;
+    case unsuccess_types::positioning_info_fail:
+      return (gnb_cu_ue_f1ap_id_t)unsuccess_outcome.value.positioning_info_fail()->gnb_cu_ue_f1ap_id;
+    case unsuccess_types::positioning_activation_fail:
+      return (gnb_cu_ue_f1ap_id_t)unsuccess_outcome.value.positioning_activation_fail()->gnb_cu_ue_f1ap_id;
     default:
       break;
   }

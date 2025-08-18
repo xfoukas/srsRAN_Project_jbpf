@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -30,14 +30,11 @@
 namespace srsran {
 namespace srs_cu_up {
 
-const network_interface_config net_config_default = {};
-
 /// Fixture base class for PDU session manager tests
 class pdu_session_manager_test_base
 {
 protected:
-  virtual ~pdu_session_manager_test_base()          = default;
-  virtual network_interface_config get_net_config() = 0;
+  ~pdu_session_manager_test_base() = default;
 
   void init()
   {
@@ -51,6 +48,7 @@ protected:
     f1u_gw           = std::make_unique<dummy_f1u_gateway>(f1u_bearer);
     n3_allocator     = std::make_unique<dummy_gtpu_teid_pool>();
     f1u_allocator    = std::make_unique<dummy_gtpu_teid_pool>();
+    ngu_session_mngr = std::make_unique<dummy_ngu_session_manager>();
 
     // create DUT object
     ue_inactivity_timer = timers_factory.create_timer();
@@ -60,22 +58,22 @@ protected:
 
     manual_task_worker teid_worker{128};
 
-    net_config      = get_net_config();
-    pdu_session_mng = std::make_unique<pdu_session_manager_impl>(MIN_UE_INDEX,
+    const uint64_t ue_dl_ambr = 1000000000;
+    pdu_session_mng           = std::make_unique<pdu_session_manager_impl>(MIN_UE_INDEX,
                                                                  qos,
                                                                  security_info,
-                                                                 net_config,
                                                                  n3_config,
                                                                  cu_up_test_mode_config{},
                                                                  logger,
+                                                                 ue_dl_ambr,
                                                                  ue_inactivity_timer,
                                                                  timers_factory,
                                                                  timers_factory,
                                                                  timers_factory,
                                                                  *f1u_gw,
+                                                                 *ngu_session_mngr,
                                                                  *n3_allocator,
                                                                  *f1u_allocator,
-                                                                 *gtpu_tx_notifier,
                                                                  *gtpu_rx_demux,
                                                                  teid_worker,
                                                                  teid_worker,
@@ -98,51 +96,20 @@ protected:
   std::unique_ptr<gtpu_tunnel_common_tx_upper_layer_notifier> gtpu_tx_notifier;
   dummy_inner_f1u_bearer                                      f1u_bearer;
   std::unique_ptr<dummy_f1u_gateway>                          f1u_gw;
+  std::unique_ptr<ngu_session_manager>                        ngu_session_mngr;
   std::unique_ptr<dummy_gtpu_teid_pool>                       n3_allocator;
   std::unique_ptr<dummy_gtpu_teid_pool>                       f1u_allocator;
   std::unique_ptr<pdu_session_manager_ctrl>                   pdu_session_mng;
   null_dlt_pcap                                               gtpu_pcap;
   security::sec_as_config                                     security_info;
-  network_interface_config                                    net_config;
   n3_interface_config                                         n3_config = {};
   cu_up_ue_logger                                             logger{"CU-UP", {MIN_UE_INDEX}};
 };
 
-/// Fixture class for PDU session manager tests with default network interface config
+/// Fixture class for PDU session manager tests with default network interface config.
 class pdu_session_manager_test : public pdu_session_manager_test_base, public ::testing::Test
 {
 protected:
-  network_interface_config get_net_config() override { return net_config_default; }
-  void                     SetUp() override { init(); }
-  void                     TearDown() override { finish(); }
-};
-
-/// Fixture class for PDU session manager tests with configurable N3 ext addr
-class pdu_session_manager_test_set_n3_ext_addr : public pdu_session_manager_test_base,
-                                                 public ::testing::TestWithParam<const char*>
-{
-protected:
-  network_interface_config get_net_config() override
-  {
-    network_interface_config cfg = net_config_default;
-    cfg.n3_ext_addr              = GetParam();
-    return cfg;
-  }
-  void SetUp() override { init(); }
-  void TearDown() override { finish(); }
-};
-
-/// Fixture class for PDU session manager tests with configurable F1-U ext addr
-class pdu_session_manager_test_set_f1u_ext_addr : public pdu_session_manager_test_base,
-                                                  public ::testing::TestWithParam<const char*>
-{
-protected:
-  network_interface_config get_net_config() override
-  {
-    network_interface_config cfg = net_config_default;
-    cfg.f1u_ext_addr             = GetParam();
-    return cfg;
-  }
   void SetUp() override { init(); }
   void TearDown() override { finish(); }
 };
@@ -150,12 +117,12 @@ protected:
 inline e1ap_pdu_session_res_to_setup_item
 generate_pdu_session_res_to_setup_item(pdu_session_id_t psi, drb_id_t drb_id, qos_flow_id_t qfi, five_qi_t five_qi)
 {
-  // prepare request
+  // Prepare request.
   e1ap_pdu_session_res_to_setup_item pdu_session_setup_item;
   pdu_session_setup_item.pdu_session_id                        = psi;
-  pdu_session_setup_item.pdu_session_type                      = "ipv4";
-  pdu_session_setup_item.snssai.sst                            = 1;
-  pdu_session_setup_item.snssai.sd                             = 10203;
+  pdu_session_setup_item.pdu_session_type                      = pdu_session_type_t::ipv4;
+  pdu_session_setup_item.snssai.sst                            = slice_service_type{1};
+  pdu_session_setup_item.snssai.sd                             = slice_differentiator::create(10203).value();
   pdu_session_setup_item.security_ind.integrity_protection_ind = integrity_protection_indication_t::not_needed;
   pdu_session_setup_item.security_ind.confidentiality_protection_ind =
       confidentiality_protection_indication_t::not_needed;
@@ -181,7 +148,7 @@ generate_pdu_session_res_to_setup_item(pdu_session_id_t psi, drb_id_t drb_id, qo
   cell_group_info_item.cell_group_id = 0;
   drb_to_setup_item.cell_group_info.push_back(cell_group_info_item);
 
-  e1ap_qos_flow_qos_param_item qos_flow_info;
+  e1ap_qos_flow_qos_param_item qos_flow_info{};
   qos_flow_info.qos_flow_id = qfi;
   non_dyn_5qi_descriptor non_dyn_5qi;
   non_dyn_5qi.five_qi                                                           = five_qi;
@@ -197,7 +164,7 @@ generate_pdu_session_res_to_setup_item(pdu_session_id_t psi, drb_id_t drb_id, qo
 inline e1ap_pdu_session_res_to_modify_item generate_pdu_session_res_to_modify_item_to_remove_drb(pdu_session_id_t psi,
                                                                                                  drb_id_t drb_id)
 {
-  // prepare modification request (to remove bearers)
+  // Prepare modification request (to remove bearers).
   e1ap_pdu_session_res_to_modify_item pdu_session_modify_item;
   pdu_session_modify_item.pdu_session_id = psi;
 
@@ -209,7 +176,7 @@ inline e1ap_pdu_session_res_to_modify_item generate_pdu_session_res_to_modify_it
 inline e1ap_pdu_session_res_to_modify_item generate_pdu_session_res_to_modify_item_to_modify_drb(pdu_session_id_t psi,
                                                                                                  drb_id_t drb_id)
 {
-  // prepare modification request (to remove bearers)
+  // Prepare modification request (to remove bearers).
   e1ap_pdu_session_res_to_modify_item pdu_session_modify_item;
   pdu_session_modify_item.pdu_session_id = psi;
 
@@ -225,7 +192,7 @@ generate_pdu_session_res_to_modify_item_to_setup_drb(pdu_session_id_t           
                                                      std::vector<qos_flow_id_t> qfi_list,
                                                      five_qi_t                  five_qi)
 {
-  // prepare modification request (to add further bearers)
+  // Prepare modification request (to add further bearers).
   e1ap_pdu_session_res_to_modify_item pdu_session_modify_item;
   pdu_session_modify_item.pdu_session_id = psi;
 
@@ -245,9 +212,9 @@ generate_pdu_session_res_to_modify_item_to_setup_drb(pdu_session_id_t           
   drb_to_setup_item.cell_group_info.push_back(cell_group_info_item);
 
   for (const auto& qfi : qfi_list) {
-    e1ap_qos_flow_qos_param_item qos_flow_info;
+    e1ap_qos_flow_qos_param_item qos_flow_info{};
     qos_flow_info.qos_flow_id = qfi;
-    non_dyn_5qi_descriptor non_dyn_5qi;
+    non_dyn_5qi_descriptor non_dyn_5qi{};
     non_dyn_5qi.five_qi                                                           = five_qi;
     qos_flow_info.qos_flow_level_qos_params.qos_desc                              = non_dyn_5qi;
     qos_flow_info.qos_flow_level_qos_params.ng_ran_alloc_retention.prio_level_arp = 1;

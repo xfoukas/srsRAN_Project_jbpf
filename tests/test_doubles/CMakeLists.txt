@@ -1,5 +1,5 @@
 #
-# Copyright 2021-2024 Software Radio Systems Limited
+# Copyright 2021-2025 Software Radio Systems Limited
 #
 # This file is part of srsRAN
 #
@@ -18,6 +18,9 @@
 # and at http://www.gnu.org/licenses/.
 #
 
+# Suppress "<ciso646> is deprecated in C++17" warnings caused by gtest when compiling with gcc 15.1.
+ADD_CXX_COMPILER_FLAG_IF_AVAILABLE(-Wno-deprecated HAVE_NO_DEPRECATED)
+
 add_subdirectory(mac)
 add_subdirectory(rrc)
 add_subdirectory(e1ap)
@@ -25,3 +28,4 @@ add_subdirectory(f1ap)
 add_subdirectory(ngap)
 add_subdirectory(scheduler)
 add_subdirectory(pdcp)
+add_subdirectory(du)

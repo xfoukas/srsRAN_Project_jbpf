@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -28,7 +28,7 @@
 #include "srsran/ran/prach/prach_constants.h"
 #include "srsran/ran/prach/prach_format_type.h"
 #include "srsran/ran/prach/prach_preamble_information.h"
-#include "srsran/support/complex_normal_random.h"
+#include "srsran/support/math/complex_normal_random.h"
 
 namespace srsran {
 
@@ -55,7 +55,8 @@ public:
   /// Gets the the PRACH buffer.
   prach_buffer& get_buffer(const prach_buffer_context& context)
   {
-    unsigned nof_symbols, sequence_length;
+    unsigned nof_symbols;
+    unsigned sequence_length;
 
     // Derive parameters from the PRACH format.
     if (is_long_preamble(context.format)) {

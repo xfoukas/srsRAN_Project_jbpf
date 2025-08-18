@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -34,17 +34,29 @@ ngap_initial_context_setup_procedure::ngap_initial_context_setup_procedure(
     const ngap_init_context_setup_request& request_,
     const ngap_ue_ids&                     ue_ids_,
     ngap_cu_cp_notifier&                   cu_cp_notifier_,
+    ngap_metrics_aggregator&               metrics_handler_,
     ngap_message_notifier&                 amf_notifier_,
     ngap_ue_logger&                        logger_) :
-  request(request_), ue_ids(ue_ids_), cu_cp_notifier(cu_cp_notifier_), amf_notifier(amf_notifier_), logger(logger_)
+  request(request_),
+  ue_ids(ue_ids_),
+  cu_cp_notifier(cu_cp_notifier_),
+  metrics_handler(metrics_handler_),
+  amf_notifier(amf_notifier_),
+  logger(logger_)
 {
+  // Map PDU session ID to S-NSSAI for metrics.
+  if (request.pdu_session_res_setup_list_cxt_req.has_value()) {
+    for (const auto& pdu_session : request.pdu_session_res_setup_list_cxt_req->pdu_session_res_setup_items) {
+      pdu_session_id_to_snssai[pdu_session.pdu_session_id] = pdu_session.s_nssai;
+    }
+  }
 }
 
 void ngap_initial_context_setup_procedure::operator()(coro_context<async_task<void>>& ctx)
 {
   CORO_BEGIN(ctx);
 
-  logger.log_debug("\"{}\" initialized", name());
+  logger.log_debug("\"{}\" started...", name());
 
   CORO_AWAIT_VALUE(init_ctxt_setup_routine_outcome, cu_cp_notifier.on_new_initial_context_setup_request(request));
 
@@ -77,7 +89,21 @@ void ngap_initial_context_setup_procedure::send_initial_context_setup_response(
     return;
   }
 
-  amf_notifier.on_new_message(ngap_msg);
+  // Notify metrics handler about successful PDU sessions.
+  for (const auto& pdu_session : msg.pdu_session_res_setup_response_items) {
+    metrics_handler.aggregate_successful_pdu_session_setup(pdu_session_id_to_snssai.at(pdu_session.pdu_session_id));
+  }
+  // Notify metrics handler about failed PDU sessions.
+  for (const auto& pdu_session : msg.pdu_session_res_failed_to_setup_items) {
+    metrics_handler.aggregate_failed_pdu_session_setup(pdu_session_id_to_snssai.at(pdu_session.pdu_session_id),
+                                                       pdu_session.unsuccessful_transfer.cause);
+  }
+
+  // Forward message to AMF.
+  if (!amf_notifier.on_new_message(ngap_msg)) {
+    logger.log_warning("AMF notifier is not set. Cannot send InitialContextSetupResponse");
+    return;
+  }
 }
 
 void ngap_initial_context_setup_procedure::send_initial_context_setup_failure(
@@ -93,9 +119,18 @@ void ngap_initial_context_setup_procedure::send_initial_context_setup_failure(
   init_ctxt_setup_fail->amf_ue_ngap_id = amf_ue_id_to_uint(amf_ue_id);
   init_ctxt_setup_fail->ran_ue_ngap_id = ran_ue_id_to_uint(ran_ue_id);
 
-  // Fill PDU Session Resource Failed to Setup List
+  // Fill PDU Session Resource Failed to Setup List.
   fill_asn1_initial_context_setup_failure(init_ctxt_setup_fail, msg);
 
-  logger.log_info("Sending InitialContextSetupFailure");
-  amf_notifier.on_new_message(ngap_msg);
+  // Notify metrics handler about failed PDU sessions.
+  for (const auto& pdu_session : msg.pdu_session_res_failed_to_setup_items) {
+    metrics_handler.aggregate_failed_pdu_session_setup(pdu_session_id_to_snssai.at(pdu_session.pdu_session_id),
+                                                       pdu_session.unsuccessful_transfer.cause);
+  }
+
+  // Forward message to AMF.
+  if (!amf_notifier.on_new_message(ngap_msg)) {
+    logger.log_warning("AMF notifier is not set. Cannot send InitialContextSetupFailure");
+    return;
+  }
 }

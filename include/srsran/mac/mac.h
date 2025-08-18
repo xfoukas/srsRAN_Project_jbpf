@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -30,7 +30,6 @@
 #include "srsran/mac/mac_pdu_handler.h"
 #include "srsran/mac/mac_ue_configurator.h"
 #include "srsran/mac/mac_ue_control_information_handler.h"
-#include <memory>
 
 namespace srsran {
 

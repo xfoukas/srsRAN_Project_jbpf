@@ -1,0 +1,34 @@
+#
+# Copyright 2013-2025 Software Radio Systems Limited
+#
+# By using this file, you agree to the terms and conditions set
+# forth in the LICENSE file which can be found at the top level of
+# the distribution.
+#
+
+- name: srs-gnb
+  type: gnb
+  image: ${RETINA_REGISTRY_PREFIX}/srsgnb:${RETINA_VERSION}
+  requirements:
+    arch: amd64
+    cpu:
+      requests: 20
+      limits: 20
+    memory:
+      requests: "60G"
+      limits: "60G"
+    ephemeral-storage:
+      requests: "50G"
+      limits: "50G"
+    hugepages-1Gi:
+      requests: 8Gi
+      limits: 8Gi
+  resources:
+    - type: accelerator
+      model: acc100
+  environment:
+    - PATH: ${PATH}:/builds/softwareradiosystems/srsgnb/build/apps/gnb
+  shared_files:
+    - local_path: ${GNB_BUILD_PATH}/apps/gnb/gnb
+      remote_path: /usr/local/bin/gnb
+      is_executable: true

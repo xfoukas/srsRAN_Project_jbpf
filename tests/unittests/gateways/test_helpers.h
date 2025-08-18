@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -22,6 +22,11 @@
 
 #pragma once
 
+#include "srsran/adt/byte_buffer.h"
+#include "srsran/gateways/sctp_network_gateway.h"
+#include "srsran/srslog/srslog.h"
+#include "srsran/support/io/io_broker.h"
+#include "srsran/support/io/sctp_socket.h"
 #include <arpa/inet.h>
 #include <condition_variable>
 #include <gtest/gtest.h>
@@ -30,12 +35,6 @@
 #include <queue>
 #include <sys/socket.h>
 #include <sys/types.h>
-
-#include "srsran/adt/byte_buffer.h"
-#include "srsran/gateways/sctp_network_gateway.h"
-#include "srsran/srslog/srslog.h"
-#include "srsran/support/io/io_broker.h"
-#include "srsran/support/io/sctp_socket.h"
 
 namespace srsran {
 
@@ -197,7 +196,7 @@ class dummy_network_gateway_notifier : public sctp_network_gateway_control_notif
                                        public network_gateway_data_notifier
 {
 public:
-  dummy_network_gateway_notifier() : logger(srslog::fetch_basic_logger("TEST")){};
+  dummy_network_gateway_notifier() : logger(srslog::fetch_basic_logger("TEST")) {}
 
   void on_connection_loss() override { logger.info("Connection loss"); }
   void on_connection_established() override { logger.info("Connection established"); }
@@ -211,7 +210,7 @@ private:
 class dummy_network_gateway_data_handler : public sctp_network_gateway_data_handler
 {
 public:
-  dummy_network_gateway_data_handler(){};
+  dummy_network_gateway_data_handler() {}
   void handle_pdu(const byte_buffer& pdu) override { last_pdu = pdu.copy(); }
 
   byte_buffer last_pdu;

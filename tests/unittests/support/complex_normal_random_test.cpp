@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -30,7 +30,7 @@
 #pragma GCC diagnostic ignored "-Wsuggest-override"
 #endif // __clang__
 
-#include "srsran/support/complex_normal_random.h"
+#include "srsran/support/math/complex_normal_random.h"
 #include <gtest/gtest.h>
 
 namespace srsran {

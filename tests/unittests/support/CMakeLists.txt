@@ -1,5 +1,5 @@
 #
-# Copyright 2021-2024 Software Radio Systems Limited
+# Copyright 2021-2025 Software Radio Systems Limited
 #
 # This file is part of srsRAN
 #
@@ -22,6 +22,7 @@ set_directory_properties(PROPERTIES LABELS "support")
 
 add_subdirectory(network)
 add_subdirectory(executors)
+add_subdirectory(rate_limiting)
 
 add_executable(timer_test timer_test.cpp)
 target_link_libraries(timer_test srslog srsran_support gtest gtest_main)
@@ -76,9 +77,9 @@ add_executable(ring_buffer_pool_test ring_buffer_pool_test.cpp)
 target_link_libraries(ring_buffer_pool_test srsran_support gtest gtest_main)
 add_test(ring_buffer_pool_test ring_buffer_pool_test)
 
-add_executable(unbounded_object_pool_test unbounded_object_pool_test.cpp)
-target_link_libraries(unbounded_object_pool_test srsran_support gtest gtest_main)
-add_test(unbounded_object_pool_test unbounded_object_pool_test)
+add_executable(object_pool_test unbounded_object_pool_test.cpp bounded_object_pool_test.cpp)
+target_link_libraries(object_pool_test srsran_support gtest gtest_main)
+add_test(object_pool_test object_pool_test)
 
 add_executable(fixed_size_memory_pool_test fixed_size_memory_pool_test.cpp)
 target_link_libraries(fixed_size_memory_pool_test srsran_support gtest gtest_main)
@@ -90,14 +91,14 @@ target_link_libraries(units_test srslog srsran_support gtest gtest_main)
 add_test(units_test units_test)
 
 add_executable(backtrace_test backtrace_test.cpp)
-target_link_libraries(backtrace_test srsran_support)
+target_link_libraries(backtrace_test PRIVATE srsran_support)
 add_backward(backtrace_test)
 
 add_executable(validator_helpers_test config/validator_helpers_test.cpp)
 target_link_libraries(validator_helpers_test srsran_support gtest gtest_main)
 add_test(validator_helpers_test validator_helpers_test)
 
-add_executable(event_tracer_test event_tracer_test.cpp)
+add_executable(event_tracer_test tracing/event_tracer_test.cpp)
 target_link_libraries(event_tracer_test srsran_support gtest gtest_main)
 add_test(event_tracer_test event_tracer_test)
 
@@ -108,3 +109,7 @@ add_test(complex_normal_random_test complex_normal_random_test)
 add_executable(transform_optional_test transform_optional_test.cpp)
 target_link_libraries(transform_optional_test srslog gtest gtest_main)
 add_test(transform_optional_test transform_optional_test)
+
+add_executable(resource_usage_test tracing/resource_usage_test.cpp)
+target_link_libraries(resource_usage_test srsran_support srslog gtest gtest_main)
+add_test(resource_usage_test resource_usage_test)

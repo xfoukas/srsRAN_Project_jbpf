@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -22,33 +22,15 @@
 
 #pragma once
 
-#include "srsran/support/srsran_assert.h"
+#include "srsran/adt/bounded_integer.h"
 #include "fmt/format.h"
 
 namespace srsran {
 
-// See TS 38.473: QoS Priority Level valid values: (0..127)
-static constexpr uint8_t MAX_QOS_PRIO_LEVEL = 127;
-
-/// \brief QoS Priority Level.
-enum class qos_prio_level_t : uint8_t { min = 0, max = MAX_QOS_PRIO_LEVEL, invalid = MAX_QOS_PRIO_LEVEL + 1 };
-
-/// Convert QoS Priority Level type to integer.
-constexpr inline uint8_t qos_prio_level_to_uint(qos_prio_level_t qos_prio_level)
-{
-  return static_cast<uint8_t>(qos_prio_level);
-}
-
-/// Convert integer to QoS Priority Level type.
-constexpr inline qos_prio_level_t uint_to_qos_prio_level(uint8_t qos_prio_level)
-{
-  srsran_assert(qos_prio_level < MAX_QOS_PRIO_LEVEL,
-                "Invalid QoS Priority Level {} - Must be between [{}..{}]",
-                qos_prio_level,
-                qos_prio_level_t::min,
-                qos_prio_level_t::max);
-  return static_cast<qos_prio_level_t>(qos_prio_level);
-}
+/// \brief QoS Priority Level. See TS 38.473 QoS Priority Level. Values: (0..127).
+struct qos_prio_level_t : public bounded_integer<uint8_t, 0, 127> {
+  using bounded_integer::bounded_integer;
+};
 
 } // namespace srsran
 
@@ -63,10 +45,9 @@ struct formatter<srsran::qos_prio_level_t> {
   }
 
   template <typename FormatContext>
-  auto format(const srsran::qos_prio_level_t& qos_prio_level, FormatContext& ctx)
-      -> decltype(std::declval<FormatContext>().out())
+  auto format(const srsran::qos_prio_level_t& qos_prio_level, FormatContext& ctx) const
   {
-    return format_to(ctx.out(), "QoS Priority Level={:#x}", qos_prio_level_to_uint(qos_prio_level));
+    return format_to(ctx.out(), "QoS Priority Level={:#x}", qos_prio_level.value());
   }
 };
 

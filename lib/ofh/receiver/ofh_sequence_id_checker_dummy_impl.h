@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -22,7 +22,7 @@
 
 #pragma once
 
-#include "ofh_sequence_id_checker.h"
+#include "srsran/ofh/receiver/ofh_sequence_id_checker.h"
 
 namespace srsran {
 namespace ofh {
@@ -32,7 +32,7 @@ class sequence_id_checker_dummy_impl : public sequence_id_checker
 {
 public:
   // See interface for documentation.
-  int update_and_compare_seq_id(unsigned eaxc, uint8_t seq_id) override { return 0; };
+  int update_and_compare_seq_id(unsigned eaxc, uint8_t seq_id) override { return 0; }
 };
 
 } // namespace ofh

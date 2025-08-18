@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -23,6 +23,7 @@
 #pragma once
 
 #include "fmt/format.h"
+#include <functional>
 #include <string>
 
 #pragma GCC diagnostic push
@@ -31,6 +32,7 @@
 #else // __clang__
 #pragma GCC diagnostic ignored "-Wsuggest-override"
 #endif // __clang__
+#pragma GCC diagnostic ignored "-Wextra-semi"
 #include <uhd/error.h>
 #include <uhd/exception.hpp>
 #pragma GCC diagnostic pop
@@ -44,7 +46,7 @@ public:
   void on_error(const S& format_str, Args&&... args)
   {
     fmt::memory_buffer str_buf;
-    fmt::format_to(str_buf, format_str, std::forward<Args>(args)...);
+    fmt::format_to(std::back_inserter(str_buf), format_str, std::forward<Args>(args)...);
     error_message = to_string(str_buf);
   }
 

@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -23,6 +23,7 @@
 #pragma once
 
 #include "srsran/srslog/log_channel.h"
+#include <algorithm>
 #include <optional>
 
 namespace srslog {
@@ -36,9 +37,9 @@ namespace detail {
 template <typename T, typename Enum>
 class logger_impl : public T
 {
-  static_assert(std::is_enum<Enum>::value, "Expected enum type");
+  static_assert(std::is_enum_v<Enum>, "Expected enum type");
 
-  using enum_base_type           = typename std::underlying_type<Enum>::type;
+  using enum_base_type           = std::underlying_type_t<Enum>;
   static constexpr unsigned size = static_cast<enum_base_type>(Enum::LAST) - 1;
 
 public:
@@ -75,9 +76,9 @@ public:
   }
 
   /// Set the specified context value to all the channels of the logger.
+  /// Note: Calling this function concurrently from different threads is not allowed.
   void set_context(uint32_t a, uint32_t b)
   {
-    detail::scoped_lock lock(m);
     for (auto channel : channels) {
       channel->set_context(a, b);
     }
@@ -108,11 +109,9 @@ private:
 
 /// Type trait to detect if T is a logger.
 template <typename T>
-struct is_logger : std::false_type {
-};
+struct is_logger : std::false_type {};
 template <typename T, typename Enum>
-struct is_logger<logger_impl<T, Enum>> : std::true_type {
-};
+struct is_logger<logger_impl<T, Enum>> : std::true_type {};
 
 } // namespace detail
 

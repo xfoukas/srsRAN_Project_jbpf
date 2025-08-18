@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -22,8 +22,9 @@
 
 #pragma once
 
-#include "srsran/adt/optional.h"
 #include "srsran/radio/radio_base.h"
+#include <cstdint>
+#include <optional>
 
 namespace srsran {
 
@@ -73,8 +74,8 @@ public:
     event_source(sources value_) : value(value_) {}
     bool operator==(const event_source& other) const { return value == other.value; }
     bool operator==(const sources& other) const { return value == other; }
-         operator sources() const { return value; }
-         operator sources&() { return value; }
+    operator sources() const { return value; }
+    operator sources&() { return value; }
 
   private:
     sources value = sources::UNDEFINED;
@@ -129,8 +130,8 @@ public:
     event_type(types value_) : value(value_) {}
     bool operator==(const event_type& other) const { return value == other.value; }
     bool operator==(const types& other) const { return value == other; }
-         operator types() const { return value; }
-         operator types&() { return value; }
+    operator types() const { return value; }
+    operator types&() { return value; }
 
   private:
     types value = types::UNDEFINED;

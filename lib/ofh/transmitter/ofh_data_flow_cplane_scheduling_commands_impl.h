@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -35,6 +35,8 @@ namespace ofh {
 
 /// Open Fronthaul Control-Plane scheduling and beamforming commands data flow implementation configuration.
 struct data_flow_cplane_scheduling_commands_impl_config {
+  /// Radio sector identifier.
+  unsigned sector;
   /// RU bandwidth in PRBs.
   unsigned ru_nof_prbs;
   /// Cyclic prefix.
@@ -45,6 +47,8 @@ struct data_flow_cplane_scheduling_commands_impl_config {
   ru_compression_params ul_compr_params;
   /// PRACH compression parameters.
   ru_compression_params prach_compr_params;
+  /// PRACH FFT size (to be used in Type 3 messages).
+  cplane_fft_size c_plane_prach_fft_len;
 };
 
 /// Open Fronthaul Control-Plane scheduling and beamforming commands data flow implementation dependencies.
@@ -53,6 +57,8 @@ struct data_flow_cplane_scheduling_commands_impl_dependencies {
   srslog::basic_logger* logger = nullptr;
   /// Uplink Control-Plane context repository.
   std::shared_ptr<uplink_cplane_context_repository> ul_cplane_context_repo;
+  /// PRACH Control-Plane context repository.
+  std::shared_ptr<uplink_cplane_context_repository> prach_cplane_context_repo;
   /// Ethernet frame pool.
   std::shared_ptr<ether::eth_frame_pool> frame_pool;
   /// VLAN frame builder.
@@ -67,9 +73,8 @@ struct data_flow_cplane_scheduling_commands_impl_dependencies {
 class data_flow_cplane_scheduling_commands_impl : public data_flow_cplane_scheduling_commands
 {
 public:
-  explicit data_flow_cplane_scheduling_commands_impl(
-      const data_flow_cplane_scheduling_commands_impl_config&  config,
-      data_flow_cplane_scheduling_commands_impl_dependencies&& dependencies);
+  data_flow_cplane_scheduling_commands_impl(const data_flow_cplane_scheduling_commands_impl_config&  config,
+                                            data_flow_cplane_scheduling_commands_impl_dependencies&& dependencies);
 
   // See interface for documentation.
   void enqueue_section_type_1_message(const data_flow_cplane_type_1_context& context) override;
@@ -77,16 +82,22 @@ public:
   // See interface for documentation.
   void enqueue_section_type_3_prach_message(const data_flow_cplane_scheduling_prach_context& context) override;
 
+  // See interface for documentation.
+  data_flow_message_encoding_metrics_collector* get_metrics_collector() override;
+
 private:
   srslog::basic_logger&                             logger;
   const unsigned                                    nof_symbols_per_slot;
   const unsigned                                    ru_nof_prbs;
+  const unsigned                                    sector_id;
+  const cplane_fft_size                             c_plane_prach_fft_len;
   const ru_compression_params                       dl_compr_params;
   const ru_compression_params                       ul_compr_params;
   const ru_compression_params                       prach_compr_params;
   sequence_identifier_generator                     cp_dl_seq_gen;
   sequence_identifier_generator                     cp_ul_seq_gen;
   std::shared_ptr<uplink_cplane_context_repository> ul_cplane_context_repo;
+  std::shared_ptr<uplink_cplane_context_repository> prach_cplane_context_repo;
   std::shared_ptr<ether::eth_frame_pool>            frame_pool;
   std::unique_ptr<ether::frame_builder>             eth_builder;
   std::unique_ptr<ecpri::packet_builder>            ecpri_builder;

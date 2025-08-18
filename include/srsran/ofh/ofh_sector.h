@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -25,9 +25,10 @@
 namespace srsran {
 namespace ofh {
 
-class controller;
+class operation_controller;
 class error_notifier;
 class receiver;
+class metrics_collector;
 class transmitter;
 
 /// \brief Open Fronthaul sector interface.
@@ -45,10 +46,10 @@ public:
   virtual transmitter& get_transmitter() = 0;
 
   /// Returns the Open Fronthaul controller of this sector.
-  virtual controller& get_controller() = 0;
+  virtual operation_controller& get_operation_controller() = 0;
 
-  /// Sets the error notifier of this sector to the given one.
-  virtual void set_error_notifier(error_notifier& notifier) = 0;
+  /// Returns the Open Fronthaul metrics collector of this sector or nullptr if metrics are disabled.
+  virtual metrics_collector* get_metrics_collector() = 0;
 };
 
 } // namespace ofh

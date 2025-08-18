@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -120,10 +120,20 @@ crb_bitmap carrier_subslot_resource_grid::used_crbs(crb_interval bwp_crb_lims, o
 {
   srsran_sanity_check(symbols.stop() <= NOF_OFDM_SYM_PER_SLOT_NORMAL_CP, "OFDM symbols out-of-bounds");
   slot_rb_bitmap slot_rbs_selected_symbols = slot_rbs.slice(symbols.start() * nof_rbs(), symbols.stop() * nof_rbs());
-  crb_bitmap     crb_bits                  = fold_and_accumulate<MAX_NOF_PRBS>(slot_rbs_selected_symbols, nof_rbs());
+  auto crb_bits = fold_and_accumulate<MAX_NOF_PRBS>(slot_rbs_selected_symbols, nof_rbs()).convert_to<crb_bitmap>();
   crb_bits.fill(0, bwp_crb_lims.start());
   crb_bits.fill(bwp_crb_lims.stop(), crb_bits.size());
   return crb_bits;
+}
+
+prb_bitmap carrier_subslot_resource_grid::used_prbs(crb_interval bwp_crb_lims, ofdm_symbol_range symbols) const
+{
+  srsran_sanity_check(symbols.stop() <= NOF_OFDM_SYM_PER_SLOT_NORMAL_CP, "OFDM symbols out-of-bounds");
+  slot_rb_bitmap slot_rbs_selected_symbols = slot_rbs.slice(symbols.start() * nof_rbs(), symbols.stop() * nof_rbs());
+  auto           prb_bits                  = fold_and_accumulate<MAX_NOF_PRBS>(
+                      slot_rbs_selected_symbols, nof_rbs(), bwp_crb_lims.start(), bwp_crb_lims.length())
+                      .convert_to<prb_bitmap>();
+  return prb_bits;
 }
 
 bool carrier_subslot_resource_grid::all_set(ofdm_symbol_range symbols, crb_interval crbs) const
@@ -230,6 +240,13 @@ cell_slot_resource_grid::used_crbs(subcarrier_spacing scs, crb_interval crb_lims
   return carrier.subslot_rbs.used_crbs(crb_lims, symbols);
 }
 
+prb_bitmap
+cell_slot_resource_grid::used_prbs(subcarrier_spacing scs, crb_interval crb_lims, ofdm_symbol_range symbols) const
+{
+  const carrier_resource_grid& carrier = get_carrier(scs);
+  return carrier.subslot_rbs.used_prbs(crb_lims, symbols);
+}
+
 bool cell_slot_resource_grid::all_set(grant_info grant) const
 {
   const auto& carrier = get_carrier(grant.scs);
@@ -245,14 +262,14 @@ bool cell_slot_resource_grid::all_set(subcarrier_spacing scs, ofdm_symbol_range 
 cell_slot_resource_grid::carrier_resource_grid& cell_slot_resource_grid::get_carrier(subcarrier_spacing scs)
 {
   size_t idx = numerology_to_grid_idx[to_numerology_value(scs)];
-  srsran_sanity_check(idx < carrier_grids.size(), "Invalid numerology={}", scs);
+  srsran_sanity_check(idx < carrier_grids.size(), "Invalid numerology={}", fmt::underlying(scs));
   return carrier_grids[idx];
 }
 
 const cell_slot_resource_grid::carrier_resource_grid& cell_slot_resource_grid::get_carrier(subcarrier_spacing scs) const
 {
   size_t idx = numerology_to_grid_idx[to_numerology_value(scs)];
-  srsran_sanity_check(idx < carrier_grids.size(), "Invalid numerology={}", scs);
+  srsran_sanity_check(idx < carrier_grids.size(), "Invalid numerology={}", fmt::underlying(scs));
   return carrier_grids[idx];
 }
 
@@ -287,6 +304,8 @@ void cell_slot_resource_allocator::slot_indication(slot_point new_slot)
   result.ul.prachs.clear();
   result.ul.pucchs.clear();
   result.ul.srss.clear();
+  result.failed_attempts.pdcch = 0;
+  result.failed_attempts.uci   = 0;
   dl_res_grid.clear();
   ul_res_grid.clear();
 

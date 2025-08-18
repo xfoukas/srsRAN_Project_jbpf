@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -30,7 +30,7 @@ ota_symbol_boundary_notifier_manager& timing_manager_impl::get_ota_symbol_bounda
   return worker;
 }
 
-controller& timing_manager_impl::get_controller()
+operation_controller& timing_manager_impl::get_controller()
 {
   return worker;
 }

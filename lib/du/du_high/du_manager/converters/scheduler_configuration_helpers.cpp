@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -29,15 +29,39 @@
 using namespace srsran;
 using namespace srs_du;
 
+std::optional<si_scheduling_config>
+srsran::srs_du::make_si_scheduling_info_config(const du_cell_config& du_cfg, span<const units::bytes> si_message_lens)
+{
+  srsran_assert(si_message_lens.size() == (du_cfg.si_config.has_value() ? du_cfg.si_config->si_sched_info.size() : 0),
+                "Number of SI messages does not match the number of SI payload sizes");
+
+  std::optional<si_scheduling_config> sched_req;
+
+  if (du_cfg.si_config.has_value()) {
+    sched_req.emplace();
+    sched_req->si_window_len_slots = du_cfg.si_config->si_window_len_slots;
+    sched_req->si_messages.resize(du_cfg.si_config->si_sched_info.size());
+    for (unsigned i = 0, sz = du_cfg.si_config->si_sched_info.size(); i != sz; ++i) {
+      sched_req->si_messages[i].period_radio_frames = du_cfg.si_config->si_sched_info[i].si_period_radio_frames;
+      sched_req->si_messages[i].msg_len             = si_message_lens[i];
+      sched_req->si_messages[i].si_window_position  = du_cfg.si_config->si_sched_info[i].si_window_position;
+    }
+  }
+
+  return sched_req;
+}
+
 /// Derives Scheduler Cell Configuration from DU Cell Configuration.
 sched_cell_configuration_request_message
-srsran::srs_du::make_sched_cell_config_req(du_cell_index_t               cell_index,
-                                           const srs_du::du_cell_config& du_cfg,
-                                           span<const units::bytes>      si_payload_sizes)
+srsran::srs_du::make_sched_cell_config_req(du_cell_index_t                            cell_index,
+                                           const srs_du::du_cell_config&              du_cfg,
+                                           units::bytes                               sib1_len,
+                                           const std::optional<si_scheduling_config>& si_sched_cfg)
 {
-  srsran_assert(si_payload_sizes.size() >= 1, "SIB1 payload size needs to be set");
-  srsran_assert(si_payload_sizes.size() - 1 ==
-                    (du_cfg.si_config.has_value() ? du_cfg.si_config->si_sched_info.size() : 0),
+  srsran_assert(sib1_len.value() > 0, "SIB1 payload size needs to be set");
+  srsran_assert(si_sched_cfg.has_value()
+                    ? si_sched_cfg->si_messages.size()
+                    : 0 == (du_cfg.si_config.has_value() ? du_cfg.si_config->si_sched_info.size() : 0),
                 "Number of SI messages does not match the number of SI payload sizes");
 
   sched_cell_configuration_request_message sched_req{};
@@ -59,19 +83,8 @@ srsran::srs_du::make_sched_cell_config_req(du_cell_index_t               cell_in
   sched_req.searchspace0 = du_cfg.searchspace0_idx;
 
   // Convert SIB1 and SI message info scheduling config.
-  sched_req.sib1_payload_size = si_payload_sizes[0].value();
-  if (du_cfg.si_config.has_value()) {
-    sched_req.si_scheduling.emplace();
-    sched_req.si_scheduling->si_window_len_slots = du_cfg.si_config->si_window_len_slots;
-    sched_req.si_scheduling->si_messages.resize(du_cfg.si_config->si_sched_info.size());
-    for (unsigned i = 0; i != du_cfg.si_config->si_sched_info.size(); ++i) {
-      sched_req.si_scheduling->si_messages[i].period_radio_frames =
-          du_cfg.si_config->si_sched_info[i].si_period_radio_frames;
-      sched_req.si_scheduling->si_messages[i].msg_len = si_payload_sizes[i + 1];
-      sched_req.si_scheduling->si_messages[i].si_window_position =
-          du_cfg.si_config->si_sched_info[i].si_window_position;
-    }
-  }
+  sched_req.sib1_payload_size = sib1_len;
+  sched_req.si_scheduling     = si_sched_cfg;
 
   sched_req.pucch_guardbands = config_helpers::build_pucch_guardbands_list(
       du_cfg.pucch_cfg, du_cfg.ul_cfg_common.init_ul_bwp.generic_params.crbs.length());
@@ -88,6 +101,8 @@ srsran::srs_du::make_sched_cell_config_req(du_cell_index_t               cell_in
   }
 
   sched_req.rrm_policy_members = du_cfg.rrm_policy_members;
+
+  sched_req.cfra_enabled = du_cfg.cfra_enabled;
 
   return sched_req;
 }
@@ -106,7 +121,6 @@ sched_ue_config_request srsran::srs_du::create_scheduler_ue_config_request(const
   for (const auto& srb : ue_res_cfg.srbs) {
     auto& sched_lc_ch = sched_cfg.lc_config_list->emplace_back(
         config_helpers::create_default_logical_channel_config(srb_id_to_lcid(srb.srb_id)));
-    sched_lc_ch.priority                  = srb.mac_cfg.priority;
     sched_lc_ch.lc_group                  = srb.mac_cfg.lcg_id;
     sched_lc_ch.lc_sr_mask                = srb.mac_cfg.lc_sr_mask;
     sched_lc_ch.lc_sr_delay_timer_applied = srb.mac_cfg.lc_sr_delay_applied;
@@ -115,19 +129,19 @@ sched_ue_config_request srsran::srs_du::create_scheduler_ue_config_request(const
   for (const auto& drb : ue_res_cfg.drbs) {
     auto& sched_lc_ch =
         sched_cfg.lc_config_list->emplace_back(config_helpers::create_default_logical_channel_config(drb.lcid));
-    sched_lc_ch.priority                  = drb.mac_cfg.priority;
     sched_lc_ch.lc_group                  = drb.mac_cfg.lcg_id;
     sched_lc_ch.lc_sr_mask                = drb.mac_cfg.lc_sr_mask;
     sched_lc_ch.lc_sr_delay_timer_applied = drb.mac_cfg.lc_sr_delay_applied;
     sched_lc_ch.sr_id.emplace(drb.mac_cfg.sr_id);
     sched_lc_ch.rrm_policy.s_nssai = drb.s_nssai;
     sched_lc_ch.rrm_policy.plmn_id = ue_ctx.nr_cgi.plmn_id;
-    sched_cfg.drb_info_list.emplace_back(
-        sched_drb_info{.lcid         = drb.lcid,
-                       .s_nssai      = drb.s_nssai,
-                       .qos_info     = *get_5qi_to_qos_characteristics_mapping(drb.qos.qos_desc.get_5qi()),
-                       .gbr_qos_info = drb.qos.gbr_qos_info});
+    sched_lc_ch.qos.emplace();
+    sched_lc_ch.qos->qos          = *get_5qi_to_qos_characteristics_mapping(drb.qos.qos_desc.get_5qi());
+    sched_lc_ch.qos->arp_priority = drb.qos.alloc_retention_prio.prio_level_arp;
+    sched_lc_ch.qos->gbr_qos_info = drb.qos.gbr_qos_info;
   }
+  sched_cfg.drx_cfg      = ue_res_cfg.cell_group.mcg_cfg.drx_cfg;
+  sched_cfg.meas_gap_cfg = ue_res_cfg.meas_gap;
 
   return sched_cfg;
 }

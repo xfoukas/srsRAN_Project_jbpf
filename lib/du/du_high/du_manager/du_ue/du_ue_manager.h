@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -42,6 +42,10 @@ public:
 
   du_ue_index_t find_unused_du_ue_index();
 
+  /// \brief Reset a set of UE contexts.
+  async_task<void> handle_f1_reset_request(const std::vector<du_ue_index_t>& ues_to_reset);
+
+  /// \brief Handle the creation of a new UE context when a UL-CCCH is received.
   void handle_ue_create_request(const ul_ccch_indication_message& msg);
 
   /// \brief Handle the creation of a new UE context by F1AP request.
@@ -72,6 +76,8 @@ public:
 
   /// \brief Number of DU UEs currently active.
   size_t nof_ues() const { return ue_db.size(); }
+
+  const auto& get_du_ues() const { return ue_db; }
 
   /// \brief Schedule an asynchronous task to be executed in the UE control loop.
   void schedule_async_task(du_ue_index_t ue_index, async_task<void> task) override

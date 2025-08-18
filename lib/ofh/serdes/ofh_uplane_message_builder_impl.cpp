@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -113,10 +113,12 @@ void uplane_message_builder_impl::serialize_iq_data(network_order_binary_seriali
                                                     unsigned                         nof_prbs,
                                                     const ru_compression_params&     compr_params)
 {
-  logger.debug("Packing '{}' PRBs inside a User-Plane message using compression type '{}' and bitwidth '{}'",
-               nof_prbs,
-               to_string(compr_params.type),
-               compr_params.data_width);
+  if (SRSRAN_UNLIKELY(logger.debug.enabled())) {
+    logger.debug("Packing '{}' PRBs inside a User-Plane message using compression type '{}' and bitwidth '{}'",
+                 nof_prbs,
+                 to_string(compr_params.type),
+                 compr_params.data_width);
+  }
 
   // Serialize compression header.
   serialize_compression_header(serializer, compr_params);

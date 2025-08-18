@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -37,7 +37,8 @@ bool mac_dl_processor::has_cell(du_cell_index_t cell_index) const
   return cell_index < MAX_NOF_DU_CELLS and cells[cell_index] != nullptr;
 }
 
-void mac_dl_processor::add_cell(const mac_cell_creation_request& cell_cfg_req)
+mac_cell_controller& mac_dl_processor::add_cell(const mac_cell_creation_request& cell_cfg_req,
+                                                mac_cell_config_dependencies     dependencies)
 {
   srsran_assert(not has_cell(cell_cfg_req.cell_index), "Overwriting existing cell is invalid.");
 
@@ -51,7 +52,10 @@ void mac_dl_processor::add_cell(const mac_cell_creation_request& cell_cfg_req)
                                            cfg.cell_exec_mapper.slot_ind_executor(cell_cfg_req.cell_index),
                                            cfg.ctrl_exec,
                                            cfg.pcap,
-                                           cfg.timers);
+                                           cfg.timers,
+                                           std::move(dependencies));
+
+  return *cells[cell_cfg_req.cell_index];
 }
 
 void mac_dl_processor::remove_cell(du_cell_index_t cell_index)
@@ -78,9 +82,9 @@ async_task<void> mac_dl_processor::remove_ue(const mac_ue_delete_request& reques
   return cells[request.cell_index]->remove_ue(request);
 }
 
-async_task<bool> mac_dl_processor::addmod_bearers(du_ue_index_t                                  ue_index,
-                                                  du_cell_index_t                                pcell_index,
-                                                  const std::vector<mac_logical_channel_config>& logical_channels)
+async_task<bool> mac_dl_processor::addmod_bearers(du_ue_index_t                          ue_index,
+                                                  du_cell_index_t                        pcell_index,
+                                                  span<const mac_logical_channel_config> logical_channels)
 {
   if (not has_cell(pcell_index)) {
     return launch_no_op_task<bool>(false);

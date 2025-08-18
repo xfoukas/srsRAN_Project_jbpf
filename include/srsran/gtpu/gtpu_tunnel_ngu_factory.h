@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -41,7 +41,7 @@ struct gtpu_tunnel_ngu_creation_message {
   dlt_pcap*                                   gtpu_pcap;
   gtpu_tunnel_ngu_rx_lower_layer_notifier*    rx_lower;
   gtpu_tunnel_common_tx_upper_layer_notifier* tx_upper;
-  timer_factory                               ue_dl_timer_factory;
+  timer_factory                               ue_ctrl_timer_factory;
 };
 
 /// Creates an instance of a GTP-U entity.

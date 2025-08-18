@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -30,22 +30,22 @@
 /// The application supports different working profiles, run <tt> radio_ssb -h </tt> for usage details.
 
 #include "../radio/radio_notifier_sample.h"
+#include "lower_phy_error_logger.h"
 #include "lower_phy_example_factory.h"
+#include "lower_phy_metrics_printer.h"
+#include "phy_rg_gateway_adapter.h"
+#include "phy_rx_symbol_adapter.h"
+#include "phy_rx_symbol_request_adapter.h"
+#include "phy_timing_adapter.h"
 #include "rx_symbol_handler_example.h"
 #include "upper_phy_ssb_example.h"
 #include "srsran/adt/to_array.h"
-#include "srsran/phy/adapters/phy_error_adapter.h"
-#include "srsran/phy/adapters/phy_metrics_adapter.h"
-#include "srsran/phy/adapters/phy_rg_gateway_adapter.h"
-#include "srsran/phy/adapters/phy_rx_symbol_adapter.h"
-#include "srsran/phy/adapters/phy_rx_symbol_request_adapter.h"
-#include "srsran/phy/adapters/phy_timing_adapter.h"
 #include "srsran/phy/lower/lower_phy.h"
 #include "srsran/phy/lower/lower_phy_controller.h"
 #include "srsran/phy/lower/lower_phy_rx_symbol_context.h"
 #include "srsran/radio/radio_factory.h"
 #include "srsran/support/executors/task_worker.h"
-#include "srsran/support/math_utils.h"
+#include "srsran/support/math/math_utils.h"
 #include "srsran/support/signal_handling.h"
 #include <atomic>
 #include <getopt.h>
@@ -76,7 +76,7 @@ static srslog::basic_levels log_level = srslog::basic_levels::warning;
 /// Program parameters.
 static subcarrier_spacing                        scs                        = subcarrier_spacing::kHz15;
 static unsigned                                  max_processing_delay_slots = 4;
-static cyclic_prefix                             cp                         = cyclic_prefix::NORMAL;
+static cyclic_prefix                             cy_prefix                  = cyclic_prefix::NORMAL;
 static double                                    dl_center_freq             = 3489.42e6;
 static double                                    ssb_center_freq            = 3488.16e6;
 static double                                    tx_gain                    = 60.0;
@@ -217,7 +217,7 @@ static const auto profiles = to_array<configuration_profile>({
          // parallel execution.
          for (unsigned channel_id = 0; channel_id != nof_ports * nof_sectors; ++channel_id) {
            fmt::memory_buffer buffer;
-           fmt::format_to(buffer, "inproc://{}#{}", getpid(), channel_id);
+           fmt::format_to(std::back_inserter(buffer), "inproc://{}#{}", getpid(), channel_id);
            tx_channel_args.emplace_back(to_string(buffer));
            rx_channel_args.emplace_back(to_string(buffer));
          }
@@ -250,7 +250,7 @@ static const auto profiles = to_array<configuration_profile>({
          // parallel execution.
          for (unsigned channel_id = 0; channel_id != nof_ports * nof_sectors; ++channel_id) {
            fmt::memory_buffer buffer;
-           fmt::format_to(buffer, "inproc://{}#{}", getpid(), channel_id);
+           fmt::format_to(std::back_inserter(buffer), "inproc://{}#{}", getpid(), channel_id);
            tx_channel_args.emplace_back(to_string(buffer));
            rx_channel_args.emplace_back(to_string(buffer));
          }
@@ -268,11 +268,8 @@ static const auto profiles = to_array<configuration_profile>({
 });
 
 /// Global instances.
-static std::mutex                             stop_execution_mutex;
-static std::atomic<bool>                      stop               = {false};
-static std::unique_ptr<upper_phy_ssb_example> upper_phy          = nullptr;
-static std::unique_ptr<lower_phy>             lower_phy_instance = nullptr;
-static std::unique_ptr<radio_session>         radio              = nullptr;
+static std::mutex        stop_execution_mutex;
+static std::atomic<bool> stop = {false};
 
 static void stop_execution()
 {
@@ -286,22 +283,16 @@ static void stop_execution()
 
   // Signal program to stop.
   stop = true;
-
-  // Stop radio. It stops blocking the radio transmit and receive operations. The timing handler prevents the PHY from
-  // free running.
-  if (radio != nullptr) {
-    radio->stop();
-  }
 }
 
 /// Function to call when the application is interrupted.
-static void interrupt_signal_handler()
+static void interrupt_signal_handler(int signal)
 {
   stop_execution();
 }
 
 /// Function to call when the application is going to be forcefully shutdown.
-static void cleanup_signal_handler()
+static void cleanup_signal_handler(int signal)
 {
   srslog::flush();
 }
@@ -318,7 +309,7 @@ static void usage(std::string_view prog)
   fmt::print("\t-T Set thread profile (single, dual, quad). [Default {}]\n", thread_profile_name);
   fmt::print("\t-C Set clock source (internal, external, gpsdo). [Default {}]\n", clock_source);
   fmt::print("\t-S Set sync source (internal, external, gpsdo). [Default {}]\n", sync_source);
-  fmt::print("\t-v Logging level. [Default {}]\n", log_level);
+  fmt::print("\t-v Logging level. [Default {}]\n", fmt::underlying(log_level));
   fmt::print("\t-c Enable amplitude clipping. [Default {}]\n", enable_clipping);
   fmt::print("\t-b Baseband gain back-off prior to clipping (in dB). [Default {}]\n", baseband_backoff_dB);
   fmt::print("\t-d Fill the resource grid with random data [Default {}]\n", enable_random_data);
@@ -431,7 +422,7 @@ static radio_configuration::radio create_radio_configuration()
 
   radio_config.clock.clock      = radio_configuration::to_clock_source(clock_source);
   radio_config.clock.sync       = radio_configuration::to_clock_source(sync_source);
-  radio_config.sampling_rate_hz = srate.to_Hz<double>();
+  radio_config.sampling_rate_Hz = srate.to_Hz<double>();
   radio_config.otw_format       = otw_format;
   radio_config.tx_mode          = radio_configuration::transmission_mode::continuous;
   radio_config.power_ramping_us = 0.0F;
@@ -444,7 +435,7 @@ static radio_configuration::radio create_radio_configuration()
     for (unsigned port_id = 0; port_id != nof_ports; ++port_id) {
       // Create channel configuration and append it to the previous ones.
       radio_configuration::channel tx_ch_config;
-      tx_ch_config.freq.center_frequency_hz = dl_center_freq;
+      tx_ch_config.freq.center_frequency_Hz = dl_center_freq;
       tx_ch_config.gain_dB                  = tx_gain;
       if (!tx_channel_args.empty()) {
         tx_ch_config.args = tx_channel_args[sector_id * nof_ports + port_id];
@@ -452,7 +443,7 @@ static radio_configuration::radio create_radio_configuration()
       tx_stream_config.channels.emplace_back(tx_ch_config);
 
       radio_configuration::channel rx_ch_config;
-      rx_ch_config.freq.center_frequency_hz = rx_freq;
+      rx_ch_config.freq.center_frequency_Hz = rx_freq;
       rx_ch_config.gain_dB                  = rx_gain;
       if (!rx_channel_args.empty()) {
         rx_ch_config.args = rx_channel_args[sector_id * nof_ports + port_id];
@@ -474,6 +465,7 @@ lower_phy_configuration create_lower_phy_configuration(task_executor*           
                                                        lower_phy_metrics_notifier*   metrics_notifier,
                                                        lower_phy_rx_symbol_notifier* rx_symbol_notifier,
                                                        lower_phy_timing_notifier*    timing_notifier,
+                                                       baseband_gateway&             bb_gateway,
                                                        srslog::basic_logger*         logger)
 {
   lower_phy_configuration phy_config;
@@ -483,9 +475,14 @@ lower_phy_configuration create_lower_phy_configuration(task_executor*           
   phy_config.time_alignment_calibration     = 0;
   phy_config.system_time_throttling         = 0.0F;
   phy_config.ta_offset                      = n_ta_offset::n0;
-  phy_config.cp                             = cp;
+  phy_config.cp                             = cy_prefix;
+  phy_config.bandwidth_rb                   = bw_rb;
+  phy_config.dl_freq_hz                     = dl_center_freq;
+  phy_config.ul_freq_hz                     = rx_freq;
+  phy_config.nof_tx_ports                   = nof_ports;
+  phy_config.nof_rx_ports                   = nof_ports;
   phy_config.dft_window_offset              = 0.5F;
-  phy_config.bb_gateway                     = &radio->get_baseband_gateway(0);
+  phy_config.bb_gateway                     = &bb_gateway;
   phy_config.rx_symbol_notifier             = rx_symbol_notifier;
   phy_config.timing_notifier                = timing_notifier;
   phy_config.error_notifier                 = error_notifier;
@@ -506,16 +503,6 @@ lower_phy_configuration create_lower_phy_configuration(task_executor*           
   // Baseband gain includes normalization to unitary power (according to the number of subcarriers) and the additional
   // back-off to account for signal PAPR.
   phy_config.amplitude_config.input_gain_dB = -convert_power_to_dB(bw_rb * NRE) - baseband_backoff_dB;
-
-  for (unsigned sector_id = 0; sector_id != nof_sectors; ++sector_id) {
-    lower_phy_sector_description sector_config;
-    sector_config.bandwidth_rb = bw_rb;
-    sector_config.dl_freq_hz   = dl_center_freq;
-    sector_config.ul_freq_hz   = rx_freq;
-    sector_config.nof_tx_ports = nof_ports;
-    sector_config.nof_rx_ports = nof_ports;
-    phy_config.sectors.push_back(sector_config);
-  }
 
   // Logger for amplitude control metrics.
   phy_config.logger = logger;
@@ -538,9 +525,9 @@ int main(int argc, char** argv)
   // Make sure parameters are valid.
   report_fatal_error_if_not(
       srate.is_valid(scs), "Sampling rate ({}) must be multiple of {}kHz.", srate, scs_to_khz(scs));
-  report_fatal_error_if_not(cp.is_valid(scs, srate.get_dft_size(scs)),
+  report_fatal_error_if_not(cy_prefix.is_valid(scs, srate.get_dft_size(scs)),
                             "The cyclic prefix ({}) numerology ({}) and sampling rate ({}) combination is invalid .",
-                            cp.to_string(),
+                            cy_prefix.to_string(),
                             to_numerology_value(scs),
                             srate);
 
@@ -618,7 +605,7 @@ int main(int argc, char** argv)
   radio_notifier_spy notification_handler(log_level);
 
   // Create radio.
-  radio = factory->create(radio_config, *async_task_executor, notification_handler);
+  std::unique_ptr<radio_session> radio = factory->create(radio_config, *async_task_executor, notification_handler);
   srsran_assert(radio, "Failed to create radio.");
 
   // Create symbol handler.
@@ -629,14 +616,15 @@ int main(int argc, char** argv)
   logger.set_level(log_level);
 
   // Create adapters.
-  phy_error_adapter             error_adapter(logger);
-  phy_metrics_adapter           metrics_adapter;
+  lower_phy_error_logger        error_adapter(logger);
+  lower_phy_metrics_printer     metrics_adapter;
   phy_rx_symbol_adapter         rx_symbol_adapter;
   phy_rg_gateway_adapter        rg_gateway_adapter;
   phy_timing_adapter            timing_adapter;
   phy_rx_symbol_request_adapter phy_rx_symbol_req_adapter;
 
   // Create lower physical layer.
+  std::unique_ptr<lower_phy> lower_phy_instance = nullptr;
   {
     // Prepare lower physical layer configuration.
     lower_phy_configuration phy_config = create_lower_phy_configuration(rx_task_executor.get(),
@@ -648,6 +636,7 @@ int main(int argc, char** argv)
                                                                         &metrics_adapter,
                                                                         &rx_symbol_adapter,
                                                                         &timing_adapter,
+                                                                        radio->get_baseband_gateway(0),
                                                                         &logger);
     lower_phy_instance                 = create_lower_phy(phy_config);
     srsran_assert(lower_phy_instance, "Failed to create lower physical layer.");
@@ -706,7 +695,7 @@ int main(int argc, char** argv)
   upper_phy_sample_config.enable_ul_processing         = enable_ul_processing;
   upper_phy_sample_config.enable_prach_processing      = enable_prach_processing;
   upper_phy_sample_config.data_modulation              = data_mod_scheme;
-  upper_phy                                            = upper_phy_ssb_example::create(upper_phy_sample_config);
+  std::unique_ptr<upper_phy_ssb_example> upper_phy     = upper_phy_ssb_example::create(upper_phy_sample_config);
   srsran_assert(upper_phy, "Failed to create upper physical layer.");
 
   // Connect adapters.
@@ -718,7 +707,7 @@ int main(int argc, char** argv)
   // Calculate starting time.
   double                     delay_s      = 0.1;
   baseband_gateway_timestamp current_time = radio->read_current_time();
-  baseband_gateway_timestamp start_time = current_time + static_cast<uint64_t>(delay_s * radio_config.sampling_rate_hz);
+  baseband_gateway_timestamp start_time = current_time + static_cast<uint64_t>(delay_s * radio_config.sampling_rate_Hz);
 
   // Start processing.
   radio->start(start_time);
@@ -732,6 +721,12 @@ int main(int argc, char** argv)
 
   // Stop execution.
   stop_execution();
+
+  // Stop radio. It stops blocking the radio transmit and receive operations. The timing handler prevents the PHY from
+  // free running.
+  if (radio != nullptr) {
+    radio->stop();
+  }
 
   // Stop the timing handler. It stops blocking notifier and allows the PHY to free run.
   upper_phy->stop();
@@ -748,6 +743,11 @@ int main(int argc, char** argv)
 
   // Prints radio notification summary (number of overflow, underflow and other events).
   notification_handler.print();
+
+  // Destroy physical layer components in the correct order.
+  lower_phy_instance.reset();
+  upper_phy.reset();
+  radio.reset();
 
   return 0;
 }

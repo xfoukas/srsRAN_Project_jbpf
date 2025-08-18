@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -112,7 +112,7 @@ public:
     pcap_writer(params.pcap), broker(params.broker), sctp_params(params.sctp)
   {
     // Create SCTP network adapter.
-    sctp_gateway = create_sctp_network_client(sctp_network_client_config{params.sctp, broker});
+    sctp_gateway = create_sctp_network_client(sctp_network_client_config{params.sctp, broker, params.io_rx_executor});
     report_error_if_not(sctp_gateway != nullptr, "Failed to create SCTP gateway client.\n");
   }
 
@@ -129,7 +129,7 @@ public:
         sctp_params.connect_port,
         std::make_unique<sctp_to_f1c_pdu_notifier>(std::move(du_rx_pdu_notifier), pcap_writer, logger));
     if (sctp_sender == nullptr) {
-      logger.error("Failed to establish F1-C TNL connection to CU-CP on {}:{}.\n",
+      logger.error("Failed to establish F1-C TNL connection to CU-CP on {}:{}.",
                    sctp_params.connect_address,
                    sctp_params.connect_port);
       return nullptr;

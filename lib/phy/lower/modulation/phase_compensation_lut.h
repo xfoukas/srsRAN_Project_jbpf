@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -61,6 +61,9 @@ public:
     unsigned nslot_per_subframe = get_nof_slots_per_subframe(scs);
     unsigned nsymb_per_slot     = get_nsymb_per_slot(cp);
     double   sign_two_pi        = ((is_tx) ? -1 : 1) * 2.0 * M_PI;
+
+    // Clear coefficient list.
+    coefficients.clear();
 
     // For each symbol in a subframe.
     for (unsigned symbol = 0, symbol_offset = 0; symbol != nslot_per_subframe * nsymb_per_slot; ++symbol) {

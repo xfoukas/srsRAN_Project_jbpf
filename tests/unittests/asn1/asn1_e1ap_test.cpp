@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -20,6 +20,7 @@
  *
  */
 
+#include "srsran/asn1/e1ap/common.h"
 #include "srsran/asn1/e1ap/e1ap.h"
 #include "srsran/asn1/e1ap/e1ap_pdu_contents.h"
 #include "srsran/pcap/dlt_pcap.h"

@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -23,6 +23,7 @@
 #include "ofh_uplane_message_decoder_impl.h"
 #include "../serdes/ofh_cuplane_constants.h"
 #include "../support/network_order_binary_deserializer.h"
+#include "srsran/adt/expected.h"
 #include "srsran/ofh/compression/compression_properties.h"
 #include "srsran/ofh/compression/iq_decompressor.h"
 #include "srsran/support/units.h"
@@ -56,34 +57,38 @@ bool uplane_message_decoder_impl::decode(uplane_message_decoder_results& results
 /// Checks the Open Fronthaul User-Plane header and returns true on success, otherwise false.
 static bool is_header_valid(const uplane_message_params& params,
                             srslog::basic_logger&        logger,
+                            unsigned                     sector_id,
                             unsigned                     nof_symbols,
                             unsigned                     version)
 {
-  if (params.direction != data_direction::uplink) {
-    logger.info("Dropped received Open Fronthaul message as it is not an uplink message");
+  if (SRSRAN_UNLIKELY(params.direction != data_direction::uplink)) {
+    logger.info("Sector#{}: dropped received Open Fronthaul message as it is not an uplink message", sector_id);
 
     return false;
   }
 
-  if (version != OFH_PAYLOAD_VERSION) {
-    logger.info(
-        "Dropped received Open Fronthaul message as its payload version is '{}' but only version '{}' is supported",
-        version,
-        OFH_PAYLOAD_VERSION);
+  if (SRSRAN_UNLIKELY(version != OFH_PAYLOAD_VERSION)) {
+    logger.info("Sector#{}: dropped received Open Fronthaul message as its payload version is '{}' but only version "
+                "'{}' is supported",
+                sector_id,
+                version,
+                OFH_PAYLOAD_VERSION);
 
     return false;
   }
 
-  if (params.filter_index == filter_index_type::reserved) {
-    logger.info("Dropped received Open Fronthaul message as its filter index value is reserved '{}'",
-                params.filter_index);
+  if (SRSRAN_UNLIKELY(params.filter_index == filter_index_type::reserved)) {
+    logger.info("Sector#{}: dropped received Open Fronthaul message as its filter index value is reserved '{}'",
+                sector_id,
+                fmt::underlying(params.filter_index));
 
     return false;
   }
 
-  if (params.symbol_id >= nof_symbols) {
-    logger.info("Dropped received Open Fronthaul message as its symbol index is '{}' and this decoder supports a "
-                "maximum of '{}' symbols",
+  if (SRSRAN_UNLIKELY(params.symbol_id >= nof_symbols)) {
+    logger.info("Sector#{}: dropped received Open Fronthaul message as its symbol index is '{}' and this decoder "
+                "supports a maximum of '{}' symbols",
+                sector_id,
                 params.symbol_id,
                 nof_symbols);
 
@@ -96,9 +101,10 @@ static bool is_header_valid(const uplane_message_params& params,
 bool uplane_message_decoder_impl::decode_header(uplane_message_params&             params,
                                                 network_order_binary_deserializer& deserializer)
 {
-  if (deserializer.remaining_bytes() < NOF_BYTES_UP_HEADER) {
-    logger.info("Dropped received Open Fronthaul message as its size is '{}' bytes and it is smaller than the message "
-                "header size",
+  if (SRSRAN_UNLIKELY(deserializer.remaining_bytes() < NOF_BYTES_UP_HEADER)) {
+    logger.info("Sector#{}: dropped received Open Fronthaul message as its size is '{}' bytes and it is smaller than "
+                "the message header size",
+                sector_id,
                 deserializer.remaining_bytes());
 
     return false;
@@ -122,22 +128,26 @@ bool uplane_message_decoder_impl::decode_header(uplane_message_params&          
   // No need to check the frame property, as its range is [0,256), and the slot_point frame range is [0,1024).
 
   // Check the subframe property.
-  if (subframe >= NOF_SUBFRAMES_PER_FRAME) {
-    logger.info("Dropped received Open Fronthaul message as the decoded subframe property '{}' is invalid", subframe);
+  if (SRSRAN_UNLIKELY(subframe >= NOF_SUBFRAMES_PER_FRAME)) {
+    logger.info("Sector#{}: dropped received Open Fronthaul message as the decoded subframe property '{}' is invalid",
+                sector_id,
+                subframe);
 
     return false;
   }
 
   // Check the slot property.
-  if (slot_id >= slot_point(scs, 0).nof_slots_per_subframe()) {
-    logger.info("Dropped received Open Fronthaul message as the decoded slot property '{}' is invalid", slot_id);
+  if (SRSRAN_UNLIKELY(slot_id >= slot_point(scs, 0).nof_slots_per_subframe())) {
+    logger.info("Sector#{}: dropped received Open Fronthaul message as the decoded slot property '{}' is invalid",
+                sector_id,
+                slot_id);
 
     return false;
   }
 
   params.slot = slot_point(to_numerology_value(scs), frame, subframe, slot_id);
 
-  return is_header_valid(params, logger, nof_symbols, version);
+  return is_header_valid(params, logger, sector_id, nof_symbols, version);
 }
 
 bool uplane_message_decoder_impl::decode_all_sections(uplane_message_decoder_results&    results,
@@ -149,22 +159,24 @@ bool uplane_message_decoder_impl::decode_all_sections(uplane_message_decoder_res
     decoded_section_status status = decode_section(results, deserializer);
 
     // Incomplete sections force the exit of the loop.
-    if (status == decoded_section_status::incomplete) {
+    if (SRSRAN_UNLIKELY(status == decoded_section_status::incomplete)) {
       break;
     }
 
-    if (status == decoded_section_status::malformed) {
-      logger.info(
-          "Dropped received Open Fronthaul message as a malformed section was decoded for slot '{}' and symbol '{}'",
-          results.params.slot,
-          results.params.symbol_id);
+    if (SRSRAN_UNLIKELY(status == decoded_section_status::malformed)) {
+      logger.info("Sector#{}: dropped received Open Fronthaul message as a malformed section was decoded for slot '{}' "
+                  "and symbol '{}'",
+                  sector_id,
+                  results.params.slot,
+                  results.params.symbol_id);
 
       return false;
     }
 
-    if (results.sections.full()) {
-      logger.info("Dropped received Open Fronthaul message as this deserializer only supports '{}' section for slot "
-                  "'{}' and symbol '{}'",
+    if (SRSRAN_UNLIKELY(results.sections.full())) {
+      logger.info("Sector#{}: dropped received Open Fronthaul message as this deserializer only supports '{}' section "
+                  "for slot '{}' and symbol '{}'",
+                  sector_id,
                   MAX_NOF_SUPPORTED_SECTIONS,
                   results.params.slot,
                   results.params.symbol_id);
@@ -174,11 +186,12 @@ bool uplane_message_decoder_impl::decode_all_sections(uplane_message_decoder_res
   }
 
   bool is_result_valid = !results.sections.empty();
-  if (!is_result_valid) {
-    logger.info(
-        "Dropped received Open Fronthaul message as no section was decoded correctly for slot '{}' and symbol '{}'",
-        results.params.slot,
-        results.params.symbol_id);
+  if (SRSRAN_UNLIKELY(!is_result_valid)) {
+    logger.info("Sector#{}: dropped received Open Fronthaul message as no section was decoded correctly for slot '{}' "
+                "and symbol '{}'",
+                sector_id,
+                results.params.slot,
+                results.params.symbol_id);
   }
 
   return is_result_valid;
@@ -209,7 +222,8 @@ static void fill_results_from_decoder_section(uplane_section_params&            
 static bool check_iq_data_size(unsigned                           nof_prb,
                                network_order_binary_deserializer& deserializer,
                                const ru_compression_params&       compression_params,
-                               srslog::basic_logger&              logger)
+                               srslog::basic_logger&              logger,
+                               unsigned                           sector_id)
 {
   units::bytes prb_iq_data_size(
       units::bits(NOF_SUBCARRIERS_PER_RB * 2 * compression_params.data_width).round_up_to_bytes().value());
@@ -219,9 +233,10 @@ static bool check_iq_data_size(unsigned                           nof_prb,
     prb_iq_data_size = prb_iq_data_size + units::bytes(1);
   }
 
-  if (deserializer.remaining_bytes() < prb_iq_data_size.value() * nof_prb) {
-    logger.info("Received Open Fronthaul message size is '{}' bytes and it is smaller than the expected IQ samples "
-                "size of '{}'",
+  if (SRSRAN_UNLIKELY(deserializer.remaining_bytes() < prb_iq_data_size.value() * nof_prb)) {
+    logger.info("Sector#{}: received Open Fronthaul message size is '{}' bytes and it is smaller than the expected IQ "
+                "samples size of '{}'",
+                sector_id,
                 deserializer.remaining_bytes(),
                 prb_iq_data_size.value() * nof_prb);
 
@@ -255,7 +270,8 @@ uplane_message_decoder_impl::decode_section(uplane_message_decoder_results&    r
   }
 
   // Check the message contains the required IQ data.
-  if (!check_iq_data_size(decoder_ofh_up_section.nof_prbs, deserializer, decoder_ofh_up_section.ud_comp_hdr, logger)) {
+  if (!check_iq_data_size(
+          decoder_ofh_up_section.nof_prbs, deserializer, decoder_ofh_up_section.ud_comp_hdr, logger, sector_id)) {
     return decoded_section_status::incomplete;
   }
 
@@ -273,9 +289,11 @@ uplane_message_decoder_impl::decoded_section_status
 uplane_message_decoder_impl::decode_section_header(decoder_uplane_section_params&     results,
                                                    network_order_binary_deserializer& deserializer)
 {
-  if (deserializer.remaining_bytes() < SECTION_ID_HEADER_NO_COMPRESSION_SIZE) {
-    logger.info("Received Open Fronthaul message size is '{}' bytes and is smaller than the section header size",
-                deserializer.remaining_bytes());
+  if (SRSRAN_UNLIKELY(deserializer.remaining_bytes() < SECTION_ID_HEADER_NO_COMPRESSION_SIZE)) {
+    logger.info(
+        "Sector#{}: received Open Fronthaul message size is '{}' bytes and is smaller than the section header size",
+        sector_id,
+        deserializer.remaining_bytes());
 
     return decoded_section_status::incomplete;
   }
@@ -319,10 +337,11 @@ uplane_message_decoder_impl::decode_compression_length(decoder_uplane_section_pa
       break;
   }
 
-  if (deserializer.remaining_bytes() < sizeof(uint16_t)) {
-    logger.info(
-        "Received Open Fronthaul message size is '{}' bytes and is smaller than the user data compression length",
-        deserializer.remaining_bytes());
+  if (SRSRAN_UNLIKELY(deserializer.remaining_bytes() < sizeof(uint16_t))) {
+    logger.info("Sector#{}: received Open Fronthaul message size is '{}' bytes and is smaller than the user data "
+                "compression length",
+                sector_id,
+                deserializer.remaining_bytes());
 
     return decoded_section_status::incomplete;
   }
@@ -350,23 +369,23 @@ void uplane_message_decoder_impl::decode_iq_data(uplane_section_params&         
   decompressor->decompress(results.iq_samples, compressed_data, compression_params);
 }
 
-filter_index_type srsran::ofh::uplane_peeker::peek_filter_index(span<const uint8_t> message)
+std::optional<filter_index_type> srsran::ofh::uplane_peeker::peek_filter_index(span<const uint8_t> message)
 {
-  if (message.empty()) {
-    return filter_index_type::reserved;
+  if (SRSRAN_UNLIKELY(message.empty())) {
+    return std::nullopt;
   }
 
   // Filter index is codified in the first byte, the 4 LSB.
-  return to_filter_index_type(message[0] & 0xf);
+  return std::make_optional<filter_index_type>(to_filter_index_type(message[0] & 0xf));
 }
 
-slot_symbol_point srsran::ofh::uplane_peeker::peek_slot_symbol_point(span<const uint8_t> message,
-                                                                     unsigned            nof_symbols,
-                                                                     subcarrier_spacing  scs)
+std::optional<slot_symbol_point> srsran::ofh::uplane_peeker::peek_slot_symbol_point(span<const uint8_t> message,
+                                                                                    unsigned            nof_symbols,
+                                                                                    subcarrier_spacing  scs)
 {
   // Slot is codified in the first 4 bytes of the Open Fronthaul message.
-  if (message.size() < 4) {
-    return {slot_point{}, 0, nof_symbols};
+  if (SRSRAN_UNLIKELY(message.size() < 4)) {
+    return std::nullopt;
   }
 
   uint8_t  frame             = message[1];
@@ -379,14 +398,24 @@ slot_symbol_point srsran::ofh::uplane_peeker::peek_slot_symbol_point(span<const 
   unsigned symbol_id       = slot_and_symbol & 0x3f;
   slot_id |= slot_and_symbol >> 6;
 
-  if (subframe >= NOF_SUBFRAMES_PER_FRAME) {
-    return {slot_point{}, 0, nof_symbols};
+  // Frame property is not checked because all the values of the variable are valid.
+
+  // Check the subframe property.
+  if (SRSRAN_UNLIKELY(subframe >= NOF_SUBFRAMES_PER_FRAME)) {
+    return std::nullopt;
   }
 
   // Check the slot property.
-  if (slot_id >= slot_point(scs, 0).nof_slots_per_subframe()) {
-    return {slot_point{}, 0, nof_symbols};
+  if (unsigned nof_slots_per_subframe = slot_point(scs, 0).nof_slots_per_subframe();
+      SRSRAN_UNLIKELY(slot_id >= nof_slots_per_subframe)) {
+    return std::nullopt;
   }
 
-  return {slot_point(to_numerology_value(scs), frame, subframe, slot_id), symbol_id, nof_symbols};
+  // Check the symbol property.
+  if (SRSRAN_UNLIKELY(symbol_id >= nof_symbols)) {
+    return std::nullopt;
+  }
+
+  return std::make_optional<slot_symbol_point>(
+      slot_point(to_numerology_value(scs), frame, subframe, slot_id), symbol_id, nof_symbols);
 }

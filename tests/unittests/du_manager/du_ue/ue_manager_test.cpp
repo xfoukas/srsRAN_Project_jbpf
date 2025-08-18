@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -68,7 +68,7 @@ protected:
   {
     f1ap_ue_delete_request ue_del_req{};
     ue_del_req.ue_index = ue_index;
-    test_logger.info("TEST: Starting UE deletion with UE index={}...", ue_del_req.ue_index);
+    test_logger.info("TEST: Starting UE deletion with UE index={}...", fmt::underlying(ue_del_req.ue_index));
     ue_mng.schedule_async_task(ue_del_req.ue_index, ue_mng.handle_ue_delete_request(ue_del_req));
   }
 
@@ -110,7 +110,7 @@ protected:
 
   du_manager_params params{{"srsgnb", (gnb_du_id_t)1, 1, cells},
                            {timers, worker, ue_execs, cell_execs},
-                           {f1ap_dummy, f1ap_dummy},
+                           {f1ap_dummy, f1ap_dummy, f1ap_dummy},
                            {f1u_dummy},
                            {mac_dummy, f1ap_dummy, f1ap_dummy, rlc_pcap},
                            {mac_dummy, mac_dummy}};
@@ -278,7 +278,11 @@ TEST_F(du_ue_manager_tester, when_ue_is_being_removed_then_ue_notifiers_get_disc
   // Test: Buffer State updates are forwarded to MAC.
   auto* test_ue = ue_mng.find_ue(get_last_ue_index());
   auto& srb1    = test_ue->bearers.srbs()[srb_id_t::srb1].connector.rlc_tx_buffer_state_notif;
-  srb1.on_buffer_state_update(10);
+  {
+    rlc_buffer_state rlc_bs = {};
+    rlc_bs.pending_bytes    = 10;
+    srb1.on_buffer_state_update(rlc_bs);
+  }
   ASSERT_TRUE(mac_dummy.last_dl_bs.has_value());
   ASSERT_EQ(mac_dummy.last_dl_bs->ue_index, test_ue->ue_index);
   ASSERT_EQ(mac_dummy.last_dl_bs->lcid, lcid_t::LCID_SRB1);
@@ -289,7 +293,11 @@ TEST_F(du_ue_manager_tester, when_ue_is_being_removed_then_ue_notifiers_get_disc
 
   // TEST: UE notifiers are disconnected.
   mac_dummy.last_dl_bs.reset();
-  srb1.on_buffer_state_update(10);
+  {
+    rlc_buffer_state rlc_bs = {};
+    rlc_bs.pending_bytes    = 10;
+    srb1.on_buffer_state_update(rlc_bs);
+  }
   worker.run_pending_tasks();
   ASSERT_TRUE(not mac_dummy.last_dl_bs.has_value() or mac_dummy.last_dl_bs.value().bs == 0);
 }
@@ -336,6 +344,13 @@ public:
   du_ue_index_t test_ue_index;
 };
 
+static f1ap_ue_context_release_request::cause_type rlf_cause_to_f1ap_cause(rlf_cause rlf_cause)
+{
+  using cause_type = f1ap_ue_context_release_request::cause_type;
+  cause_type cause = rlf_cause == rlf_cause::max_mac_kos_reached ? cause_type::rlf_mac : cause_type::rlf_rlc;
+  return cause;
+}
+
 TEST_F(du_ue_manager_rlf_tester,
        when_rlf_is_triggered_then_timer_starts_and_on_timeout_f1ap_is_notified_of_ue_context_removal_request)
 {
@@ -348,7 +363,7 @@ TEST_F(du_ue_manager_rlf_tester,
   tick_until_rlf_timeout();
   ASSERT_TRUE(f1ap_dummy.last_ue_release_req.has_value());
   ASSERT_EQ(f1ap_dummy.last_ue_release_req->ue_index, get_last_ue_index());
-  ASSERT_EQ(f1ap_dummy.last_ue_release_req->cause, cause);
+  ASSERT_EQ(f1ap_dummy.last_ue_release_req->cause, rlf_cause_to_f1ap_cause(cause));
 }
 
 TEST_F(du_ue_manager_rlf_tester, when_mac_rlf_is_triggered_and_then_crnti_ce_is_detected_then_rlf_is_aborted)
@@ -393,7 +408,7 @@ TEST_F(du_ue_manager_rlf_tester,
   // TEST: RLC RLF is reported.
   ASSERT_TRUE(f1ap_dummy.last_ue_release_req.has_value());
   ASSERT_EQ(f1ap_dummy.last_ue_release_req->ue_index, get_last_ue_index());
-  ASSERT_EQ(f1ap_dummy.last_ue_release_req->cause, cause);
+  ASSERT_EQ(f1ap_dummy.last_ue_release_req->cause, rlf_cause_to_f1ap_cause(cause));
 }
 
 TEST_F(du_ue_manager_rlf_tester, when_rlf_is_triggered_then_following_rlfs_have_no_effect)

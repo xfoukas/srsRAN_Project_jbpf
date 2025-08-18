@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -24,13 +24,17 @@
 
 #include "../config/cell_configuration.h"
 #include "../pdcch_scheduling/pdcch_resource_allocator.h"
-#include "srsran/adt/concurrent_queue.h"
+#include "../support/paging_helpers.h"
+#include "srsran/adt/flat_map.h"
 #include "srsran/adt/mpmc_queue.h"
 #include "srsran/scheduler/config/scheduler_expert_config.h"
+#include "srsran/scheduler/result/pdsch_info.h"
+#include "srsran/scheduler/scheduler_paging_handler.h"
 #include "srsran/srslog/logger.h"
-#include <unordered_map>
 
 namespace srsran {
+
+struct sched_paging_information;
 
 /// Defines Paging scheduler that is used to allocate resources to send paging information to UE in a given slot.
 class paging_scheduler
@@ -40,6 +44,8 @@ public:
   static constexpr unsigned RRC_CN_PAGING_ID_RECORD_SIZE = 7U;
   // 40 bits (5 Bytes) Full-I-RNTI + 1 Byte for Paging record header size estimate.
   static constexpr unsigned RRC_RAN_PAGING_ID_RECORD_SIZE = 6U;
+  // [Implementation defined] Maximum number of pending pagings allowed.
+  static constexpr unsigned MAX_NOF_PENDING_PAGINGS = MAX_NOF_DU_UES;
 
   /// NG-5G-S-TMSI (48 bits) or I-RNTI-Value (40 bits).
   using ue_paging_id              = uint64_t;
@@ -126,11 +132,6 @@ private:
                          const dmrs_information&               dmrs_info,
                          unsigned                              tbs);
 
-  /// \brief Helper function to precompute Type2-PDCCH Monitoring slots when pagingSearchSpace > 0.
-  ///
-  /// \param[in] scs_common SCS of PDCCH.
-  void precompute_type2_pdcch_slots(subcarrier_spacing scs_common);
-
   // Args.
   const scheduler_expert_config& expert_cfg;
   const cell_configuration&      cell_cfg;
@@ -148,15 +149,8 @@ private:
   /// Number of paging occasions per paging frame. Value of Ns in the equation in clause 7.1 of TS 38.304.
   uint8_t nof_po_per_pf;
 
-  /// Array of Type0-PDCCH CSS monitoring slots (1 per beam) that will be used for Paging scheduling if
-  /// pagingSearchSpace is 0 [TS 38.213, Section 13].
-  std::array<slot_point, MAX_NUM_BEAMS> type0_pdcch_css_slots;
+  paging_slot_helper slot_helper;
 
-  /// Array of Type2-PDCCH CSS monitoring slots that will be used for Paging scheduling if pagingSearchSpace > 0.
-  /// NOTE1: nrofPDCCH-MonitoringOccasionPerSSB-InPO is always 1. See \c
-  /// pcch_config::NR_OF_PDCCH_MONITORING_OCCASION_PER_SSB_IN_PO.
-  /// NOTE2: Row number corresponds to SSB beam index and column number corresponds to Paging Occasion index (i_s).
-  std::array<static_vector<slot_point, pcch_config::MAX_PO_PER_PF>, MAX_NUM_BEAMS> type2_pdcch_css_slots;
   /// Search Space configuration when pagingSearchSpace > 0, if configured.
   const search_space_configuration* ss_cfg = nullptr;
 
@@ -170,7 +164,7 @@ private:
   /// This is used only to avoid data race between threads.
   paging_info_queue new_paging_notifications;
   /// Contains paging information of UEs yet to be scheduled.
-  std::unordered_map<ue_paging_id, ue_paging_info> paging_pending_ues;
+  flat_map<ue_paging_id, ue_paging_info> paging_pending_ues;
   /// Lookup to keep track of scheduled paging UEs at a particular PDSCH time resource index. Index of \c
   /// pdsch_time_res_idx_to_scheduled_ues_lookup corresponds to PDSCH Time Domain Resource Index.
   static_vector<std::vector<const sched_paging_information*>, MAX_NOF_PDSCH_TD_RESOURCE_ALLOCATIONS>

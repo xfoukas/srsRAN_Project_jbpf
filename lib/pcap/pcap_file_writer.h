@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -34,21 +34,21 @@ namespace srsran {
 
 /// This structure gets written to the start of the file
 struct pcap_hdr_t {
-  unsigned       magic_number;  /// magic number
-  unsigned short version_major; /// major version number
-  unsigned short version_minor; /// minor version number
-  unsigned       thiszone;      /// GMT to local correction
-  unsigned       sigfigs;       /// accuracy of timestamps
-  unsigned       snaplen;       /// max length of captured packets, in octets
-  unsigned       network;       /// data link type
+  unsigned       magic_number;  ///< magic number
+  unsigned short version_major; ///< major version number
+  unsigned short version_minor; ///< minor version number
+  unsigned       thiszone;      ///< GMT to local correction
+  unsigned       sigfigs;       ///< accuracy of timestamps
+  unsigned       snaplen;       ///< max length of captured packets, in octets
+  unsigned       network;       ///< data link type
 };
 
 /// This structure precedes each packet
 struct pcaprec_hdr_t {
-  unsigned ts_sec;   /// timestamp seconds
-  unsigned ts_usec;  /// timestamp microseconds
-  unsigned incl_len; /// number of octets of packet saved in file
-  unsigned orig_len; /// actual length of packet
+  unsigned ts_sec;   ///< timestamp seconds
+  unsigned ts_usec;  ///< timestamp microseconds
+  unsigned incl_len; ///< number of octets of packet saved in file
+  unsigned orig_len; ///< actual length of packet
 };
 
 /// @brief Base class for PCAP writing to files.
@@ -67,6 +67,7 @@ public:
   bool is_write_enabled() const { return pcap_fstream.is_open(); }
 
   bool open(uint32_t dlt, const std::string& filename);
+  void flush();
   void close();
   void write_pdu_header(uint32_t length);
   void write_pdu(srsran::const_span<uint8_t> pdu);

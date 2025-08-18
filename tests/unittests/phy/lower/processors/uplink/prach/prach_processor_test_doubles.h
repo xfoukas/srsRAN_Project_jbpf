@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -86,6 +86,7 @@ class prach_processor_spy : public prach_processor
 {
 public:
   void                             connect(prach_processor_notifier& notifier) override {}
+  void                             stop() override {}
   prach_processor_request_handler& get_request_handler() override { return request_handler; }
   prach_processor_baseband&        get_baseband() override { return baseband; }
 

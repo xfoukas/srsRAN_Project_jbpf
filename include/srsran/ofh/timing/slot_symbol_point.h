@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -42,21 +42,6 @@ public:
     nof_symbols(nof_symbols_), numerology(numerology_), count_val(count_)
   {
     srsran_assert(numerology < NOF_NUMEROLOGIES, "Invalid numerology idx={} passed", unsigned(numerology));
-  }
-
-  slot_symbol_point(const slot_symbol_point& symbol_point) :
-    nof_symbols(symbol_point.get_nof_symbols()),
-    numerology(symbol_point.get_numerology()),
-    count_val(symbol_point.to_uint())
-  {
-  }
-  slot_symbol_point& operator=(const slot_symbol_point& symbol_point)
-  {
-    nof_symbols = symbol_point.get_nof_symbols();
-    numerology  = symbol_point.get_numerology();
-    count_val   = symbol_point.to_uint();
-
-    return *this;
   }
 
   /// Slot point.

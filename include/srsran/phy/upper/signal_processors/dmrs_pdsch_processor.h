@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -22,38 +22,36 @@
 
 #pragma once
 
-#include "srsran/adt/static_vector.h"
 #include "srsran/phy/support/precoding_configuration.h"
 #include "srsran/phy/upper/dmrs_mapping.h"
-#include "srsran/ran/cyclic_prefix.h"
 #include "srsran/ran/slot_point.h"
 
 namespace srsran {
 
-class resource_grid_mapper;
+class resource_grid_writer;
 
 /// Describes a DMRS for PDSCH processor interface.
 class dmrs_pdsch_processor
 {
 public:
-  /// Describes the required parameters to generate the signal as described in 3GPP TS 38.211 section 7.4.1.1.
+  /// Describes the required parameters to generate the signal as described in 3GPP TS38.211 Section 7.4.1.1.
   struct config_t {
     /// Slot context for sequence initialization.
     slot_point slot;
-    /// Reference point for PDSCH DMRS \e k in RBs.
+    /// Reference point for PDSCH DM-RS \e k in RBs.
     unsigned reference_point_k_rb;
     /// DM-RS config type (\e dmrsConfigType).
     dmrs_type type;
     /// PDSCH DMRS-Scrambling-ID (\e pdschDmrsScramblingId).
     unsigned scrambling_id;
-    /// DMRS sequence initialization (\f$n_{SCID}\f$).
+    /// DM-RS sequence initialization (\f$n_{SCID}\f$).
     bool n_scid;
-    /// Indicates the generated signal linear amplitude.
+    /// Generated signal linear amplitude.
     float amplitude;
     /// DM-RS position mask. Indicates the OFDM symbols carrying DM-RS within the slot.
     symbol_slot_mask symbols_mask;
     /// Allocation RB list, the entries set to true are used for transmission.
-    bounded_bitset<MAX_RB> rb_mask;
+    crb_bitmap rb_mask;
     /// Precoding configuration.
     precoding_configuration precoding;
   };
@@ -62,9 +60,9 @@ public:
   virtual ~dmrs_pdsch_processor() = default;
 
   /// \brief Generates and maps DMRS for PDSCH.
-  /// \param [out] grid  Destination resource grid.
+  /// \param [out] grid  Resource grid writer interface.
   /// \param [in] config PT-RS configuration.
-  virtual void map(resource_grid_mapper& mapper, const config_t& config) = 0;
+  virtual void map(resource_grid_writer& grid, const config_t& config) = 0;
 };
 
 } // namespace srsran

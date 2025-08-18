@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -26,7 +26,6 @@
 #include "srsran/srslog/logger.h"
 #include "srsran/support/executors/manual_task_worker.h"
 #include "srsran/support/test_utils.h"
-
 #include <gtest/gtest.h>
 
 using namespace srsran;
@@ -40,19 +39,19 @@ protected:
   {
     e1ap_logger.set_level(srslog::basic_levels::debug);
     srslog::init();
-  };
+  }
 
   ~e1ap_cu_cp_ue_context_test()
   {
     // flush logger after each test
     srslog::flush();
-  };
+  }
 
   ue_index_t generate_random_ue_index()
   {
     return uint_to_ue_index(
         test_rgen::uniform_int<uint64_t>(ue_index_to_uint(ue_index_t::min), ue_index_to_uint(ue_index_t::max) - 1));
-  };
+  }
 
   timer_manager         timer_mng;
   srslog::basic_logger& e1ap_logger = srslog::fetch_basic_logger("CU-CP-E1");

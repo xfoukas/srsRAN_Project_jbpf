@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -21,10 +21,11 @@
  */
 
 #include "f1ap_test_message_validators.h"
-#include "../../../lib/f1ap/asn1_helpers.h"
+#include "../lib/f1ap/asn1_helpers.h"
 #include "../tests/test_doubles/rrc/rrc_test_message_validators.h"
 #include "srsran/asn1/f1ap/common.h"
 #include "srsran/asn1/f1ap/f1ap_pdu_contents.h"
+#include "srsran/f1ap/du/f1ap_du_connection_manager.h"
 #include "srsran/f1ap/f1ap_message.h"
 
 using namespace srsran;
@@ -39,6 +40,69 @@ static bool is_packable(const f1ap_message& msg)
   byte_buffer   temp_pdu;
   asn1::bit_ref bref{temp_pdu};
   return msg.pdu.pack(bref) == asn1::SRSASN_SUCCESS;
+}
+
+bool srsran::test_helpers::is_gnb_du_config_update_valid(const f1ap_message& msg)
+{
+  TRUE_OR_RETURN(msg.pdu.type() == asn1::f1ap::f1ap_pdu_c::types_opts::init_msg);
+  TRUE_OR_RETURN(msg.pdu.init_msg().proc_code == ASN1_F1AP_ID_GNB_DU_CFG_UPD);
+  TRUE_OR_RETURN(is_packable(msg));
+
+  return true;
+}
+
+bool srsran::test_helpers::is_gnb_du_config_update_valid(const f1ap_message&                        msg,
+                                                         const srs_du::gnbdu_config_update_request& req)
+{
+  TRUE_OR_RETURN(is_gnb_du_config_update_valid(msg));
+  const auto& upd_req = msg.pdu.init_msg().value.gnb_du_cfg_upd();
+  TRUE_OR_RETURN(upd_req->served_cells_to_modify_list_present == not req.cells_to_mod.empty());
+  TRUE_OR_RETURN(upd_req->served_cells_to_modify_list.size() == req.cells_to_mod.size());
+  for (unsigned i = 0, e = req.cells_to_mod.size(); i != e; ++i) {
+    auto& asn1cell = upd_req->served_cells_to_modify_list[i]->served_cells_to_modify_item();
+    if (req.cells_to_mod[i].du_sys_info.has_value()) {
+      TRUE_OR_RETURN(asn1cell.gnb_du_sys_info_present);
+      TRUE_OR_RETURN(asn1cell.gnb_du_sys_info.mib_msg == req.cells_to_mod[i].du_sys_info->packed_mib);
+      TRUE_OR_RETURN(asn1cell.gnb_du_sys_info.sib1_msg == req.cells_to_mod[i].du_sys_info->packed_sib1);
+    }
+  }
+
+  return true;
+}
+
+bool srsran::test_helpers::is_gnb_cu_config_update_acknowledge_valid(const f1ap_message& msg)
+{
+  TRUE_OR_RETURN(msg.pdu.type() == asn1::f1ap::f1ap_pdu_c::types_opts::successful_outcome);
+  TRUE_OR_RETURN(msg.pdu.successful_outcome().proc_code == ASN1_F1AP_ID_GNB_CU_CFG_UPD);
+  TRUE_OR_RETURN(is_packable(msg));
+  return true;
+}
+
+bool srsran::test_helpers::is_gnb_cu_config_update_acknowledge_valid(const f1ap_message& msg, const f1ap_message& req)
+{
+  TRUE_OR_RETURN(is_gnb_cu_config_update_acknowledge_valid(msg));
+  const auto& upd_req = req.pdu.init_msg().value.gnb_cu_cfg_upd();
+  const auto& upd_ack = msg.pdu.successful_outcome().value.gnb_cu_cfg_upd_ack();
+
+  TRUE_OR_RETURN(upd_req->transaction_id == upd_ack->transaction_id);
+  return true;
+}
+
+bool srsran::test_helpers::is_gnb_cu_config_update_failure_valid(const f1ap_message& msg)
+{
+  TRUE_OR_RETURN(msg.pdu.type() == asn1::f1ap::f1ap_pdu_c::types_opts::unsuccessful_outcome);
+  TRUE_OR_RETURN(msg.pdu.unsuccessful_outcome().proc_code == ASN1_F1AP_ID_GNB_CU_CFG_UPD);
+  TRUE_OR_RETURN(is_packable(msg));
+  return true;
+}
+
+bool srsran::test_helpers::is_gnb_cu_config_update_failure_valid(const f1ap_message& msg, const f1ap_message& req)
+{
+  TRUE_OR_RETURN(is_gnb_cu_config_update_failure_valid(msg));
+  const auto& upd_req  = req.pdu.init_msg().value.gnb_cu_cfg_upd();
+  const auto& upd_fail = msg.pdu.unsuccessful_outcome().value.gnb_cu_cfg_upd_fail();
+  TRUE_OR_RETURN(upd_req->transaction_id == upd_fail->transaction_id);
+  return true;
 }
 
 bool srsran::test_helpers::is_init_ul_rrc_msg_transfer_valid(const f1ap_message&                       msg,
@@ -221,12 +285,45 @@ bool srsran::test_helpers::is_valid_ue_context_modification_response(const f1ap_
   return true;
 }
 
+bool srsran::test_helpers::is_valid_ue_context_release_request(const f1ap_message& msg)
+{
+  TRUE_OR_RETURN(msg.pdu.type() == asn1::f1ap::f1ap_pdu_c::types_opts::init_msg);
+  TRUE_OR_RETURN(msg.pdu.init_msg().proc_code == ASN1_F1AP_ID_UE_CONTEXT_RELEASE_REQUEST);
+  TRUE_OR_RETURN(is_packable(msg));
+  return true;
+}
+
+bool srsran::test_helpers::is_valid_ue_context_release_request(const f1ap_message& msg, gnb_du_ue_f1ap_id_t du_ue_id)
+{
+  TRUE_OR_RETURN(is_valid_ue_context_release_request(msg));
+  TRUE_OR_RETURN(msg.pdu.init_msg().value.ue_context_release_request()->gnb_du_ue_f1ap_id ==
+                 gnb_du_ue_f1ap_id_to_uint(du_ue_id));
+  return true;
+}
+
 bool srsran::test_helpers::is_valid_ue_context_release_command(const f1ap_message& msg)
 {
   TRUE_OR_RETURN(msg.pdu.type() == asn1::f1ap::f1ap_pdu_c::types_opts::init_msg);
   TRUE_OR_RETURN(msg.pdu.init_msg().proc_code == ASN1_F1AP_ID_UE_CONTEXT_RELEASE);
   TRUE_OR_RETURN(is_packable(msg));
+  return true;
+}
 
+bool srsran::test_helpers::is_valid_ue_context_release_complete(const f1ap_message& msg)
+{
+  TRUE_OR_RETURN(msg.pdu.type() == asn1::f1ap::f1ap_pdu_c::types_opts::successful_outcome);
+  TRUE_OR_RETURN(msg.pdu.successful_outcome().proc_code == ASN1_F1AP_ID_UE_CONTEXT_RELEASE);
+  TRUE_OR_RETURN(is_packable(msg));
+  return true;
+}
+
+bool srsran::test_helpers::is_valid_ue_context_release_complete(const f1ap_message& msg, const f1ap_message& rel_cmd)
+{
+  TRUE_OR_RETURN(is_valid_ue_context_release_complete(msg));
+  const auto& rel_cmd_msg = rel_cmd.pdu.init_msg().value.ue_context_release_cmd();
+  const auto& resp        = msg.pdu.successful_outcome().value.ue_context_release_complete();
+  TRUE_OR_RETURN(resp->gnb_cu_ue_f1ap_id == rel_cmd_msg->gnb_cu_ue_f1ap_id);
+  TRUE_OR_RETURN(resp->gnb_du_ue_f1ap_id == rel_cmd_msg->gnb_du_ue_f1ap_id);
   return true;
 }
 
@@ -236,5 +333,77 @@ bool srsran::test_helpers::is_valid_paging(const f1ap_message& msg)
   TRUE_OR_RETURN(msg.pdu.init_msg().proc_code == ASN1_F1AP_ID_PAGING);
   TRUE_OR_RETURN(is_packable(msg));
 
+  return true;
+}
+
+bool srsran::test_helpers::is_valid_f1_reset_ack(const f1ap_message& msg)
+{
+  TRUE_OR_RETURN(msg.pdu.type().value == asn1::f1ap::f1ap_pdu_c::types_opts::successful_outcome);
+  TRUE_OR_RETURN(msg.pdu.successful_outcome().value.type().value ==
+                 asn1::f1ap::f1ap_elem_procs_o::successful_outcome_c::types_opts::reset_ack);
+  return true;
+}
+
+bool srsran::test_helpers::is_valid_f1_reset_ack(const f1ap_message& req, const f1ap_message& resp)
+{
+  TRUE_OR_RETURN(is_valid_f1_reset_ack(resp));
+
+  const auto& reset = req.pdu.init_msg().value.reset();
+
+  const reset_ack_s& ack = resp.pdu.successful_outcome().value.reset_ack();
+  TRUE_OR_RETURN(ack->transaction_id == reset->transaction_id);
+  if (reset->reset_type.type().value == reset_type_c::types_opts::f1_interface) {
+    TRUE_OR_RETURN(not ack->ue_associated_lc_f1_conn_list_res_ack_present);
+  } else if (reset->reset_type.type().value == reset_type_c::types_opts::part_of_f1_interface) {
+    TRUE_OR_RETURN(ack->ue_associated_lc_f1_conn_list_res_ack_present);
+  }
+
+  return true;
+}
+
+#ifndef SRSRAN_HAS_ENTERPRISE
+
+bool test_helpers::is_valid_positioning_information_response(const f1ap_message& msg)
+{
+  return true;
+}
+
+bool test_helpers::is_valid_f1ap_trp_information_request(const f1ap_message& msg)
+{
+  return true;
+}
+
+bool test_helpers::is_valid_f1ap_positioning_information_request(const f1ap_message& msg)
+{
+  return true;
+}
+
+bool test_helpers::is_valid_f1ap_positioning_activation_request(const f1ap_message& msg)
+{
+  return true;
+}
+
+bool test_helpers::is_valid_f1ap_positioning_measurement_request(const f1ap_message& msg)
+{
+  return true;
+}
+
+bool test_helpers::is_valid_f1ap_positioning_measurement_response(const f1ap_message& msg)
+{
+  return true;
+}
+
+bool test_helpers::is_valid_f1ap_positioning_measurement_failure(const f1ap_message& msg)
+{
+  return true;
+}
+
+#endif // SRSRAN_HAS_ENTERPRISE
+
+bool test_helpers::is_valid_gnb_cu_configuration_update(const f1ap_message& msg)
+{
+  TRUE_OR_RETURN(msg.pdu.type().value == asn1::f1ap::f1ap_pdu_c::types_opts::init_msg);
+  TRUE_OR_RETURN(msg.pdu.init_msg().value.type().value ==
+                 asn1::f1ap::f1ap_elem_procs_o::init_msg_c::types_opts::gnb_cu_cfg_upd);
   return true;
 }

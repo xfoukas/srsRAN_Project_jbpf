@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -52,6 +52,10 @@ struct ul_srs_context {
   slot_point slot;
   /// Radio Network Temporary Identifier (RNTI).
   rnti_t rnti;
+  /// Normalized channel IQ matrix report requested.
+  bool is_normalized_channel_iq_matrix_report_requested;
+  /// Positioning report requested.
+  bool is_positioning_report_requested;
 };
 
 } // namespace srsran

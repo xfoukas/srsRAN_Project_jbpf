@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -62,7 +62,7 @@ public:
 
   void on_inter_cu_ho_rrc_recfg_complete_received(const ue_index_t           ue_index,
                                                   const nr_cell_global_id_t& cgi,
-                                                  const unsigned             tac) override
+                                                  const tac_t                tac) override
   {
     logger.info("ue={}: Received inter CU handover related RRC Reconfiguration Complete", ue_index);
   }
@@ -148,7 +148,8 @@ public:
   }
 
   std::optional<rrc_meas_cfg>
-  on_measurement_config_request(nr_cell_identity nci, std::optional<rrc_meas_cfg> current_meas_config = {}) override
+  on_measurement_config_request(nr_cell_identity            nci,
+                                std::optional<rrc_meas_cfg> current_meas_config = std::nullopt) override
   {
     std::optional<rrc_meas_cfg> meas_cfg;
     return meas_cfg;
@@ -170,6 +171,24 @@ public:
   {
     return true;
   }
+};
+
+class dummy_rrc_ue_rrc_du_adapter : public rrc_ue_event_notifier
+{
+public:
+  void on_new_rrc_connection() override {}
+
+  void on_successful_rrc_release() override {}
+
+  void on_attempted_rrc_connection_establishment(establishment_cause_t cause) override {}
+
+  void on_successful_rrc_connection_establishment(establishment_cause_t cause) override {}
+
+  void on_attempted_rrc_connection_reestablishment() override {}
+
+  void on_successful_rrc_connection_reestablishment() override {}
+
+  void on_successful_rrc_connection_reestablishment_fallback() override {}
 };
 
 } // namespace srs_cu_cp

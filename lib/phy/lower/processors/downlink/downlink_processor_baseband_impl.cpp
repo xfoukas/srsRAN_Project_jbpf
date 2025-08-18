@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -37,13 +37,17 @@ downlink_processor_baseband_impl::downlink_processor_baseband_impl(
   pdxch_proc_baseband(pdxch_proc_baseband_),
   amplitude_control(amplitude_control_),
   nof_slot_tti_in_advance(config.nof_slot_tti_in_advance),
+  nof_slot_tti_in_advance_ns(config.nof_slot_tti_in_advance * 1000000 /
+                             slot_point(config.scs, 0).nof_slots_per_subframe()),
   sector_id(config.sector_id),
+  rate(config.rate),
   scs(config.scs),
   nof_rx_ports(config.nof_tx_ports),
   nof_samples_per_subframe(config.rate.to_kHz()),
   nof_slots_per_subframe(get_nof_slots_per_subframe(config.scs)),
   nof_symbols_per_slot(get_nsymb_per_slot(config.cp)),
-  temp_buffer(config.nof_tx_ports, 2 * config.rate.get_dft_size(config.scs))
+  temp_buffer(config.nof_tx_ports, 2 * config.rate.get_dft_size(config.scs)),
+  cfo_processor(config.rate)
 {
   unsigned symbol_size_no_cp        = config.rate.get_dft_size(config.scs);
   unsigned nof_symbols_per_subframe = nof_symbols_per_slot * nof_slots_per_subframe;
@@ -63,10 +67,10 @@ update_metadata(baseband_gateway_transmitter_metadata& metadata, bool could_proc
   srsran_assert(metadata.is_empty || (curr_writing_index != 0), "Buffer state is non-empty before writing.");
   srsran_assert(!metadata.is_empty || (!metadata.tx_start.has_value() && !metadata.tx_end.has_value()),
                 "TX window cannot be defined for an empty buffer.");
-  srsran_assert(!metadata.tx_start.has_value() || (curr_writing_index >= metadata.tx_start.value()),
+  srsran_assert(!metadata.tx_start.has_value() || (curr_writing_index >= *metadata.tx_start),
                 "Writing index, i.e., {}, is lower than the buffer TX window start, i.e., {}.",
                 curr_writing_index,
-                metadata.tx_start.value());
+                *metadata.tx_start);
   srsran_assert(!metadata.tx_end.has_value(),
                 "Updating buffer metadata after the transmission window is fully specified.");
 
@@ -100,12 +104,12 @@ static void fill_zeros(baseband_gateway_buffer_writer& buffer, const baseband_ga
   } else {
     if (md.tx_start.has_value()) {
       for (unsigned i_channel = 0, i_channel_end = buffer.get_nof_channels(); i_channel != i_channel_end; ++i_channel) {
-        srsvec::zero(buffer.get_channel_buffer(i_channel).first(md.tx_start.value()));
+        srsvec::zero(buffer.get_channel_buffer(i_channel).first(*md.tx_start));
       }
     }
     if (md.tx_end.has_value()) {
       for (unsigned i_channel = 0, i_channel_end = buffer.get_nof_channels(); i_channel != i_channel_end; ++i_channel) {
-        srsvec::zero(buffer.get_channel_buffer(i_channel).last(buffer.get_nof_samples() - md.tx_end.value()));
+        srsvec::zero(buffer.get_channel_buffer(i_channel).last(buffer.get_nof_samples() - *md.tx_end));
       }
     }
   }
@@ -117,7 +121,7 @@ baseband_gateway_transmitter_metadata downlink_processor_baseband_impl::process(
   srsran_assert(nof_rx_ports == buffer.get_nof_channels(), "Invalid number of channels.");
   unsigned nof_output_samples = buffer.get_nof_samples();
 
-  // Ouput buffer writing position index.
+  // Output buffer writing position index.
   unsigned writing_index = 0;
 
   // Output buffer metadata.
@@ -138,11 +142,22 @@ baseband_gateway_transmitter_metadata downlink_processor_baseband_impl::process(
 
     // If there are no samples available in the temporary buffer, process a new symbol.
     if (temp_buffer.get_nof_available_samples(proc_timestamp) == 0) {
+      // Calculate an adjusted timestamp for the samples to be generated. The transmit time offset is subtracted from
+      // the requested buffer timestamp to shift the signal in time. The generated signal will then be stored in the
+      // destination buffer according to the timestamp at which it should be transmitted.
+      baseband_gateway_timestamp proc_timestamp_offset  = proc_timestamp;
+      int                        current_tx_time_offset = tx_time_offset.load(std::memory_order::memory_order_relaxed);
+      if ((current_tx_time_offset < 0) ||
+          (static_cast<baseband_gateway_timestamp>(current_tx_time_offset) < proc_timestamp_offset)) {
+        // Make sure the subtraction does not overflow.
+        proc_timestamp_offset -= current_tx_time_offset;
+      }
+
       // Calculate the subframe index.
-      auto i_sf =
-          static_cast<unsigned>((proc_timestamp / nof_samples_per_subframe) % (NOF_SFNS * NOF_SUBFRAMES_PER_FRAME));
+      auto i_sf = static_cast<unsigned>((proc_timestamp_offset / nof_samples_per_subframe) %
+                                        (NOF_SFNS * NOF_SUBFRAMES_PER_FRAME));
       // Calculate the sample index within the subframe.
-      unsigned i_sample_sf = proc_timestamp % nof_samples_per_subframe;
+      unsigned i_sample_sf = proc_timestamp_offset % nof_samples_per_subframe;
 
       // Calculate symbol index within the subframe and the sample index within the OFDM symbol.
       unsigned i_sample_symbol = i_sample_sf;
@@ -160,10 +175,11 @@ baseband_gateway_transmitter_metadata downlink_processor_baseband_impl::process(
       slot_point slot(to_numerology_value(scs), i_slot);
 
       // Detect slot boundary.
-      if ((!last_notified_slot.has_value() || (slot > last_notified_slot.value())) && (i_symbol == 0)) {
+      if ((!last_notified_slot.has_value() || (slot > *last_notified_slot)) && (i_symbol == 0)) {
         // Notify slot boundary.
         lower_phy_timing_context context;
-        context.slot = slot + nof_slot_tti_in_advance;
+        context.slot       = slot + nof_slot_tti_in_advance;
+        context.time_point = std::chrono::system_clock::now() + nof_slot_tti_in_advance_ns;
         last_notified_slot.emplace(slot);
         notifier->on_tti_boundary(context);
       }
@@ -233,39 +249,54 @@ bool downlink_processor_baseband_impl::process_new_symbol(baseband_gateway_buffe
 
   bool processed = pdxch_proc_baseband.process_symbol(buffer, pdxch_context);
 
+  // Skip any post-processing if no signal is generated.
   if (!processed) {
     return false;
   }
 
-  // Process amplitude control.
+  // Reset CFO processor initial phase at the first OFDM symbol.
+  if (i_symbol == 0) {
+    cfo_processor.next_cfo_command();
+  }
+
+  // Init signal measurements.
+  sample_statistics<float>   avg_power;
+  sample_statistics<float>   peak_power;
+  lower_phy_baseband_metrics metrics;
+  uint64_t                   total_processed_samples = 0;
+  uint64_t                   nof_clipped_samples     = 0;
+
+  // Post process modulated signal.
   for (unsigned i_port = 0, i_port_end = buffer.get_nof_channels(); i_port != i_port_end; ++i_port) {
-    amplitude_control.process(buffer[i_port], buffer[i_port]);
+    // Select channel buffer for the transmit port.
+    span<cf_t> channel_buffer = buffer.get_channel_buffer(i_port);
+
+    // Perform carrier frequency offset in place.
+    cfo_processor.process(channel_buffer);
+
+    // Process amplitude control.
+    amplitude_control.process(channel_buffer, channel_buffer);
+
+    // Perform signal measurements.
+    avg_power.update(srsvec::average_power(channel_buffer));
+    peak_power.update(srsvec::max_abs_element(channel_buffer).second);
+    nof_clipped_samples += srsvec::count_if_part_abs_greater_than(channel_buffer, 0.95);
+    total_processed_samples += channel_buffer.size();
   }
 
-  // Perform signal measurements.
-  {
-    sample_statistics<float>   avg_power;
-    sample_statistics<float>   peak_power;
-    lower_phy_baseband_metrics metrics;
-    unsigned                   nof_channels = buffer.get_nof_channels();
+  // Notify signal metrics.
+  notifier->on_new_metrics(lower_phy_baseband_metrics{
+      .avg_power  = avg_power.get_mean(),
+      .peak_power = peak_power.get_mean(),
+      .clipping   = std::pair<uint64_t, uint64_t>{nof_clipped_samples, total_processed_samples}});
 
-    uint64_t total_processed_samples = 0;
-    uint64_t nof_clipped_samples     = 0;
-
-    for (unsigned i_channel = 0; i_channel != nof_channels; ++i_channel) {
-      span<const cf_t> channel_buffer = buffer.get_channel_buffer(i_channel);
-      avg_power.update(srsvec::average_power(channel_buffer));
-      peak_power.update(srsvec::max_abs_element(channel_buffer).second);
-      nof_clipped_samples += srsvec::count_if_part_abs_greater_than(channel_buffer, 0.95);
-      total_processed_samples += channel_buffer.size();
-    }
-
-    metrics.avg_power  = avg_power.get_mean();
-    metrics.peak_power = peak_power.get_max();
-    metrics.clipping   = std::pair<uint64_t, uint64_t>{nof_clipped_samples, total_processed_samples};
-
-    notifier->on_new_metrics(metrics);
-  }
+  // Advance CFO processor number of samples.
+  cfo_processor.advance(buffer.get_nof_samples());
 
   return true;
+}
+
+void downlink_processor_baseband_impl::set_tx_time_offset(phy_time_unit tx_time_offset_)
+{
+  tx_time_offset = tx_time_offset_.to_nearest_samples(rate.to_Hz());
 }

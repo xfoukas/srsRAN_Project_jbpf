@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -236,13 +236,18 @@ du_processor_impl::handle_ue_rrc_context_creation_request(const ue_rrc_context_c
     // Return the RRCReject container
     return make_unexpected(rrc->get_rrc_reject());
   }
-  rrc_ue_interface* rrc_ue       = rrc->find_ue(ue_index);
-  f1ap_rrc_ue_adapters[ue_index] = {};
-  f1ap_rrc_ue_adapters.at(ue_index).connect_rrc_ue(rrc_ue->get_ul_pdu_handler());
+  rrc_ue_interface* rrc_ue         = rrc->find_ue(ue_index);
+  f1ap_rrc_dcch_adapters[ue_index] = {};
+  f1ap_rrc_ccch_adapters[ue_index] = {};
+  f1ap_rrc_ccch_adapters.at(ue_index).connect_rrc_ue(rrc_ue->get_ul_pdu_handler());
+  f1ap_rrc_dcch_adapters.at(ue_index).connect_rrc_ue(rrc_ue->get_ul_pdu_handler());
 
   // Signal back that the UE was successfully created.
   logger.info("ue={} c-rnti={}: UE created", ue->get_ue_index(), req.c_rnti);
-  return ue_rrc_context_creation_response{ue_index, &f1ap_rrc_ue_adapters.at(ue_index)};
+  return ue_rrc_context_creation_response{ue_index,
+                                          &f1ap_rrc_ccch_adapters.at(ue_index),
+                                          &f1ap_rrc_dcch_adapters.at(ue_index).get_srb1_notifier(),
+                                          &f1ap_rrc_dcch_adapters.at(ue_index).get_srb2_notifier()};
 }
 
 void du_processor_impl::handle_du_initiated_ue_context_release_request(const f1ap_ue_context_release_request& request)
@@ -278,6 +283,15 @@ bool du_processor_impl::has_cell(nr_cell_global_id_t cgi)
   return cfg.du_cfg_hdlr->get_context().find_cell(cgi) != nullptr;
 }
 
+async_task<f1ap_gnb_cu_configuration_update_response>
+du_processor_impl::handle_configuration_update(const f1ap_gnb_cu_configuration_update& request)
+{
+  // Update the DU configuration.
+  cfg.du_cfg_hdlr->handle_gnb_cu_configuration_update(request);
+
+  return f1ap->handle_gnb_cu_configuration_update(request);
+}
+
 std::optional<nr_cell_global_id_t> du_processor_impl::get_cgi(pci_t pci)
 {
   const du_cell_configuration* cell = cfg.du_cfg_hdlr->get_context().find_cell(pci);
@@ -311,5 +325,8 @@ metrics_report::du_info du_processor_impl::handle_du_metrics_report_request() co
       report.cells.back().pci = cell.pci;
     }
   }
+  // Get RRC metrics.
+  rrc->get_rrc_du_metrics_collector().collect_metrics(report.rrc_metrics);
+
   return report;
 }

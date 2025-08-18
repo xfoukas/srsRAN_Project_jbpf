@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -22,8 +22,8 @@
 
 #pragma once
 
-#include "srsran/fapi/messages.h"
-#include "srsran/phy/upper/channel_processors/pdcch_processor.h"
+#include "srsran/fapi/messages/dl_tti_request.h"
+#include "srsran/phy/upper/channel_processors/pdcch/pdcch_processor.h"
 
 namespace srsran {
 namespace fapi_adaptor {

@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -47,7 +47,7 @@ public:
   ~gtpu_tunnel_nru_impl() override = default;
 
   gtpu_tunnel_common_rx_upper_layer_interface* get_rx_upper_layer_interface() final { return rx.get(); }
-  gtpu_tunnel_nru_tx_lower_layer_interface*    get_tx_lower_layer_interface() final { return tx.get(); };
+  gtpu_tunnel_nru_tx_lower_layer_interface*    get_tx_lower_layer_interface() final { return tx.get(); }
 
 private:
   srslog::basic_logger& logger;

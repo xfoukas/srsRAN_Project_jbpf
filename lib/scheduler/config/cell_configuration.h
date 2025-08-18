@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -22,8 +22,7 @@
 
 #pragma once
 
-#include "../support/rb_helper.h"
-#include "srsran/adt/expected.h"
+#include "srsran/adt/slotted_vector.h"
 #include "srsran/scheduler/config/scheduler_expert_config.h"
 #include "srsran/scheduler/scheduler_configurator.h"
 
@@ -45,6 +44,7 @@ public:
   const du_cell_index_t                        cell_index;
   const du_cell_group_index_t                  cell_group_index;
   const pci_t                                  pci;
+  const subcarrier_spacing                     scs_common;
   const unsigned                               nof_dl_prbs;
   const unsigned                               nof_ul_prbs;
   const unsigned                               nof_slots_per_frame;
@@ -57,6 +57,8 @@ public:
   const ssb_configuration ssb_cfg;
   dmrs_typeA_position     dmrs_typeA_pos;
   carrier_configuration   ul_carrier;
+  const uint8_t           coreset0;
+  const uint8_t           searchspace0;
 
   /// List of PUCCH guardbands.
   const std::vector<sched_grid_resource> pucch_guardbands;
@@ -72,6 +74,8 @@ public:
 
   /// List of RRM Policy members configured for this cell.
   std::vector<slice_rrm_policy_config> rrm_policy_members;
+
+  const bool cfra_enabled;
 
   // Derived Parameters.
   ssb_pattern_case ssb_case;

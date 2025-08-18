@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -24,14 +24,15 @@
 
 #include "srsran/f1u/du/f1u_bearer_logger.h"
 #include "srsran/f1u/du/f1u_gateway.h"
+#include "srsran/f1u/split_connector/f1u_five_qi_gw_maps.h"
+#include "srsran/f1u/split_connector/f1u_session_manager.h"
 #include "srsran/gtpu/gtpu_demux.h"
+#include "srsran/gtpu/gtpu_gateway.h"
 #include "srsran/gtpu/gtpu_tunnel_common_tx.h"
 #include "srsran/gtpu/gtpu_tunnel_nru.h"
 #include "srsran/gtpu/gtpu_tunnel_nru_factory.h"
 #include "srsran/gtpu/gtpu_tunnel_nru_rx.h"
-#include "srsran/gtpu/ngu_gateway.h"
 #include "srsran/pcap/dlt_pcap.h"
-#include "srsran/srslog/srslog.h"
 #include <cstdint>
 #include <unordered_map>
 
@@ -49,11 +50,11 @@ public:
     }
   }
 
-  void connect(srs_cu_up::ngu_tnl_pdu_session& handler_) { handler = &handler_; }
+  void connect(gtpu_tnl_pdu_session& handler_) { handler = &handler_; }
 
   void disconnect() { handler = nullptr; }
 
-  srs_cu_up::ngu_tnl_pdu_session* handler;
+  gtpu_tnl_pdu_session* handler;
 };
 
 class gtpu_rx_f1u_adapter : public srsran::gtpu_tunnel_nru_rx_lower_layer_notifier
@@ -111,6 +112,7 @@ public:
                               const up_transport_layer_info&             dl_tnl_info_,
                               srs_du::f1u_du_gateway_bearer_rx_notifier& du_rx_,
                               const up_transport_layer_info&             ul_up_tnl_info_,
+                              gtpu_tnl_pdu_session&                      udp_session_,
                               srs_du::f1u_bearer_disconnector&           disconnector_,
                               dlt_pcap&                                  gtpu_pcap,
                               uint16_t                                   peer_port) :
@@ -118,12 +120,14 @@ public:
     disconnector(disconnector_),
     dl_tnl_info(dl_tnl_info_),
     ul_tnl_info(ul_up_tnl_info_),
+    udp_session(udp_session_),
     du_rx(du_rx_)
   {
     gtpu_to_f1u_adapter.connect(du_rx);
 
     gtpu_tunnel_nru_creation_message msg{};
     // msg.ue_index                            = 0; TODO
+    msg.cfg.rx.node       = nru_node::du;
     msg.cfg.rx.local_teid = dl_tnl_info.gtp_teid;
     msg.cfg.tx.peer_teid  = ul_tnl_info.gtp_teid;
     msg.cfg.tx.peer_addr  = ul_tnl_info.tp_address.to_string();
@@ -138,6 +142,8 @@ public:
   ~f1u_split_gateway_du_bearer() override { stop(); }
 
   void stop() override { disconnector.remove_du_bearer(dl_tnl_info); }
+
+  expected<std::string> get_bind_address() const override;
 
   void on_new_pdu(nru_ul_message msg) override
   {
@@ -159,12 +165,15 @@ public:
   gtpu_tx_udp_gw_adapter gtpu_to_network_adapter;
   gtpu_rx_f1u_adapter    gtpu_to_f1u_adapter;
 
+  std::unique_ptr<gtpu_demux_dispatch_queue> dispatch_queue;
+
 private:
   f1u_bearer_logger                logger;
   f1u_bearer_disconnector&         disconnector;
   up_transport_layer_info          dl_tnl_info;
   up_transport_layer_info          ul_tnl_info;
   std::unique_ptr<gtpu_tunnel_nru> tunnel;
+  gtpu_tnl_pdu_session&            udp_session;
 
 public:
   /// Holds notifier that will point to NR-U bearer on the DL path
@@ -179,30 +188,24 @@ public:
 class f1u_split_connector final : public f1u_du_udp_gateway
 {
 public:
-  f1u_split_connector(srs_cu_up::ngu_gateway* udp_gw_,
-                      gtpu_demux*             demux_,
-                      dlt_pcap&               gtpu_pcap_,
-                      uint16_t                peer_port_    = GTPU_PORT,
-                      std::string             f1u_ext_addr_ = "auto") :
-    logger_du(srslog::fetch_basic_logger("DU-F1-U")),
-    udp_gw(udp_gw_),
-    demux(demux_),
-    gtpu_pcap(gtpu_pcap_),
-    peer_port(peer_port_),
-    f1u_ext_addr(std::move(f1u_ext_addr_))
-  {
-    udp_session = udp_gw->create(gw_data_gtpu_demux_adapter);
-    gw_data_gtpu_demux_adapter.connect_gtpu_demux(*demux);
-  }
+  f1u_split_connector(const gtpu_gateway_maps& udp_gw_maps,
+                      gtpu_demux*              demux_,
+                      dlt_pcap&                gtpu_pcap_,
+                      uint16_t                 peer_port_    = GTPU_PORT,
+                      std::string              f1u_ext_addr_ = "auto");
 
   f1u_du_gateway* get_f1u_du_gateway() { return this; }
 
-  std::optional<uint16_t> get_bind_port() const override { return udp_session->get_bind_port(); }
+  std::optional<uint16_t> get_bind_port() const override
+  {
+    return f1u_sessions.default_gw_sessions[0]->get_bind_port();
+  }
 
   std::unique_ptr<f1u_du_gateway_bearer> create_du_bearer(uint32_t                                   ue_index,
                                                           drb_id_t                                   drb_id,
+                                                          five_qi_t                                  five_qi,
                                                           srs_du::f1u_config                         config,
-                                                          const up_transport_layer_info&             dl_up_tnl_info,
+                                                          const gtpu_teid_t&                         dl_teid,
                                                           const up_transport_layer_info&             ul_up_tnl_info,
                                                           srs_du::f1u_du_gateway_bearer_rx_notifier& du_rx,
                                                           timer_factory                              timers,
@@ -218,11 +221,11 @@ private:
   std::unordered_map<up_transport_layer_info, f1u_split_gateway_du_bearer*> du_map;
   std::mutex map_mutex; // shared mutex for access to cu_map
 
-  srs_cu_up::ngu_gateway*                         udp_gw;
-  std::unique_ptr<srs_cu_up::ngu_tnl_pdu_session> udp_session;
-  gtpu_demux*                                     demux;
-  network_gateway_data_gtpu_demux_adapter         gw_data_gtpu_demux_adapter;
-  dlt_pcap&                                       gtpu_pcap;
+  std::unique_ptr<f1u_session_manager>                     f1u_session_mngr;
+  f1u_session_maps                                         f1u_sessions;
+  gtpu_demux*                                              demux;
+  std::unique_ptr<network_gateway_data_gtpu_demux_adapter> gw_data_gtpu_demux_adapter;
+  dlt_pcap&                                                gtpu_pcap;
 
   uint16_t    peer_port;
   std::string f1u_ext_addr = "auto"; // External address advertised by the F1-U interface

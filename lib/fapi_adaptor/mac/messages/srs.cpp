@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -21,7 +21,7 @@
  */
 
 #include "srsran/fapi_adaptor/mac/messages/srs.h"
-#include "srsran/scheduler/scheduler_slot_handler.h"
+#include "srsran/scheduler/result/srs_info.h"
 
 using namespace srsran;
 using namespace fapi_adaptor;
@@ -63,4 +63,7 @@ void fapi_adaptor::convert_srs_mac_to_fapi(fapi::ul_srs_pdu_builder& builder, co
                          mac_pdu.bw_index,
                          mac_pdu.cyclic_shift,
                          mac_pdu.resource_type);
+
+  // Add the requested reports.
+  builder.set_report_params(mac_pdu.normalized_channel_iq_matrix_requested, mac_pdu.positioning_report_requested);
 }

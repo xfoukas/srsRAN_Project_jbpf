@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -190,12 +190,12 @@ static coreset_configuration generate_coreset_configuration()
 
 static dci_1_0_si_rnti_configuration generate_si_f1_0()
 {
-  return {1, 2, 3, 1, 0, 2, 1};
+  return {1, 2, 3, vrb_to_prb::mapping_type::non_interleaved, 0, 2, 1};
 }
 
 static dci_1_0_ra_rnti_configuration generate_ra_f1_0()
 {
-  return {1, 2, 3, 0, 1, 2};
+  return {1, 2, 3, vrb_to_prb::mapping_type::non_interleaved, 1, 2};
 }
 
 static dci_dl_info generate_dci_dl_info()
@@ -256,6 +256,38 @@ static void add_dl_pdcch_pdus_to_result(mac_dl_sched_result_test_helper& helper)
   }
 }
 
+static void add_all_dl_pdcch_pdus_to_result(mac_dl_sched_result_test_helper& helper)
+{
+  for (unsigned i = 0; i != MAX_DL_PDCCH_PDUS_PER_SLOT; ++i) {
+    pdcch_dl_information info{
+        generate_dci_context(helper.bwp_cfg_pdcch[std::min<unsigned>(i, helper.bwp_cfg_pdcch.size() - 1U)],
+                             helper.coreset_cfg[std::min<unsigned>(i, helper.coreset_cfg.size() - 1U)]),
+        generate_dci_dl_info()};
+    helper.sched_result.dl_pdcchs.push_back(std::move(info));
+  }
+
+  // Add the DCIs payload.
+  for (unsigned i = 0; i != MAX_DL_PDCCH_PDUS_PER_SLOT; ++i) {
+    helper.result.dl_pdcch_pdus.push_back(generate_dci_payload());
+  }
+}
+
+static void add_all_ul_pdcch_pdus_to_result(mac_dl_sched_result_test_helper& helper)
+{
+  for (unsigned i = 0; i != MAX_UL_PDCCH_PDUS_PER_SLOT; ++i) {
+    pdcch_ul_information info{
+        generate_dci_context(helper.bwp_cfg_pdcch[std::min<unsigned>(i, helper.bwp_cfg_pdcch.size() - 1U)],
+                             helper.coreset_cfg[std::min<unsigned>(i, helper.coreset_cfg.size() - 1U)]),
+        {}};
+    helper.sched_result.ul_pdcchs.push_back(std::move(info));
+  }
+
+  // Add the DCIs payload.
+  for (unsigned i = 0; i != MAX_UL_PDCCH_PDUS_PER_SLOT; ++i) {
+    helper.result.ul_pdcch_pdus.push_back(generate_dci_payload());
+  }
+}
+
 static pdsch_information fill_valid_pdsch_information(coreset_configuration& coreset_cfg,
                                                       bwp_configuration&     bwp_config,
                                                       pdsch_information&     info,
@@ -264,18 +296,18 @@ static pdsch_information fill_valid_pdsch_information(coreset_configuration& cor
   bwp_config  = generate_bwp_configuration();
   coreset_cfg = generate_coreset_configuration();
 
-  info.rnti           = to_rnti(0x4444);
-  info.bwp_cfg        = &bwp_config;
-  info.coreset_cfg    = &coreset_cfg;
-  info.rbs            = vrb_interval{40, 60};
-  info.symbols        = {3, 10};
-  info.dmrs           = {dmrs_symbol_mask(14), dmrs_config_type::type1, 2, 3, false, 0, 2, bounded_bitset<12>(12)};
-  info.n_id           = generate_nid_pdsch();
-  info.nof_layers     = 1U;
-  info.is_interleaved = false;
-  info.harq_id        = to_harq_id(4);
-  info.ss_set_type    = search_space_set_type::type0;
-  info.dci_fmt        = dci_dl_format::f1_0;
+  info.rnti            = to_rnti(0x4444);
+  info.bwp_cfg         = &bwp_config;
+  info.coreset_cfg     = &coreset_cfg;
+  info.rbs             = vrb_interval{40, 60};
+  info.symbols         = {3, 10};
+  info.dmrs            = {dmrs_symbol_mask(14), dmrs_config_type::type1, 2, 3, false, 0, 2, bounded_bitset<12>(12)};
+  info.n_id            = generate_nid_pdsch();
+  info.nof_layers      = 1U;
+  info.vrb_prb_mapping = vrb_to_prb::mapping_type::non_interleaved;
+  info.harq_id         = to_harq_id(4);
+  info.ss_set_type     = search_space_set_type::type0;
+  info.dci_fmt         = dci_dl_format::f1_0;
   info.codewords.push_back(pdsch_codeword{{modulation_scheme::QAM16, 220.F}, 5, pdsch_mcs_table::qam64, 2, 128});
 
   if (nof_ports == 2) {
@@ -410,6 +442,97 @@ mac_dl_sched_result_test_helper unittests::build_valid_mac_dl_sched_result()
   return helper;
 }
 
+static csi_rs_info build_valid_csi_pdu(mac_dl_sched_result_test_helper& helper)
+{
+  csi_rs_info result;
+  result.bwp_cfg              = &helper.bwp_cfg[0];
+  result.crbs                 = {40, 120};
+  result.type                 = csi_rs_type::CSI_RS_ZP;
+  result.row                  = 1;
+  result.freq_domain          = bounded_bitset<12, false>(12);
+  result.symbol0              = 0;
+  result.symbol1              = 4;
+  result.cdm_type             = csi_rs_cdm_type::no_CDM;
+  result.freq_density         = csi_rs_freq_density_type::one;
+  result.scrambling_id        = 0;
+  result.power_ctrl_offset    = 0;
+  result.power_ctrl_offset_ss = 0;
+
+  return result;
+}
+
+mac_dl_sched_result_test_helper unittests::build_valid_mac_dl_sched_result_with_all_supported_pdus()
+{
+  mac_dl_sched_result_test_helper helper;
+  mac_dl_sched_result&            result = helper.result;
+
+  for (unsigned i = 0, e = helper.coreset_cfg.size(); i != e; ++i) {
+    helper.coreset_cfg[i] = generate_coreset_configuration();
+    helper.bwp_cfg[i]     = generate_bwp_configuration();
+  }
+
+  for (unsigned i = 0; i != MAX_DL_PDCCH_PDUS_PER_SLOT; ++i) {
+    helper.bwp_cfg_pdcch[i] = {cyclic_prefix::NORMAL, subcarrier_spacing::kHz240, {0 + i, 20 + i}};
+  }
+
+  result.slot   = slot_point(4, generate_sfn(), generate_slot());
+  result.dl_res = &helper.sched_result;
+
+  // Add DL PDCCH PDUs.
+  add_all_dl_pdcch_pdus_to_result(helper);
+
+  // Add UL PDCCH PDU.
+  add_all_ul_pdcch_pdus_to_result(helper);
+
+  // Add SIB1 PDU.
+  helper.sib1 = build_valid_sib1_information_pdu();
+  // Fix the BWP and CORESET pointers.
+  helper.sib1.pdu.pdsch_cfg.bwp_cfg     = &helper.sib1.bwp_cfg;
+  helper.sib1.pdu.pdsch_cfg.coreset_cfg = &helper.sib1.coreset_cfg;
+  for (unsigned i = 0; i != MAX_SI_PDUS_PER_SLOT; ++i) {
+    helper.sched_result.bc.sibs.push_back(helper.sib1.pdu);
+  }
+
+  // Add RAR PDU.
+  helper.rar = build_valid_rar_information_pdu();
+  // Fix the BWP and CORESET pointers.
+  helper.rar.pdu.pdsch_cfg.bwp_cfg     = &helper.rar.bwp_cfg;
+  helper.rar.pdu.pdsch_cfg.coreset_cfg = &helper.rar.coreset_cfg;
+  for (unsigned i = 0; i != MAX_RAR_PDUS_PER_SLOT; ++i) {
+    helper.sched_result.rar_grants.push_back(helper.rar.pdu);
+  }
+
+  // Add paging PDU.
+  helper.dl_paging = build_valid_dl_paging_pdu();
+  // Fix the BWP and CORESET pointers.
+  helper.dl_paging.pdu.pdsch_cfg.bwp_cfg     = &helper.dl_paging.bwp_cfg;
+  helper.dl_paging.pdu.pdsch_cfg.coreset_cfg = &helper.dl_paging.coreset_cfg;
+  for (unsigned i = 0; i != MAX_PAGING_PDUS_PER_SLOT; ++i) {
+    helper.sched_result.paging_grants.push_back(helper.dl_paging.pdu);
+  }
+
+  // Add downlink UE PDU.
+  helper.dl_msg_alloc = build_valid_dl_msg_alloc_pdu();
+  // Fix the BWP and CORESET pointers.
+  helper.dl_msg_alloc.pdu.pdsch_cfg.bwp_cfg     = &helper.dl_msg_alloc.bwp_cfg;
+  helper.dl_msg_alloc.pdu.pdsch_cfg.coreset_cfg = &helper.dl_msg_alloc.coreset_cfg;
+  for (unsigned i = 0; i != MAX_UE_PDUS_PER_SLOT; ++i) {
+    helper.sched_result.ue_grants.push_back(helper.dl_msg_alloc.pdu);
+  }
+
+  // Add CSI PDU.
+  for (unsigned i = 0; i != MAX_CSI_RS_PDUS_PER_SLOT; ++i) {
+    helper.sched_result.csi_rs.push_back(build_valid_csi_pdu(helper));
+  }
+
+  // Add SSBs.
+  for (unsigned i = 0; i != MAX_SSB_PER_SLOT; ++i) {
+    result.ssb_pdus.push_back(build_valid_dl_ssb_pdu());
+  }
+
+  return helper;
+}
+
 prach_occasion_info unittests::build_valid_prach_occassion()
 {
   prach_occasion_info prach;
@@ -455,7 +578,7 @@ ul_sched_info_test_helper unittests::build_valid_pusch_pdu()
   pusch.pusch_dmrs_id              = 18;
   pusch.dmrs_hopping_mode          = pusch_information::dmrs_hopping_mode::no_hopping;
   pusch.rv_index                   = 1;
-  pusch.harq_id                    = 2;
+  pusch.harq_id                    = to_harq_id(2);
   pusch.new_data                   = true;
   pusch.tb_size_bytes              = 11;
   pusch.num_cb                     = 0;
@@ -485,24 +608,26 @@ srs_info_helper unittests::build_valid_srs_pdu()
   srs_info& pdu  = helper.pdu;
   helper.bwp_cfg = {cyclic_prefix::NORMAL, subcarrier_spacing::kHz15, {10, 20}};
 
-  pdu.crnti                = to_rnti(23);
-  pdu.bwp_cfg              = &helper.bwp_cfg;
-  pdu.nof_antenna_ports    = 4;
-  pdu.symbols              = {0, 1};
-  pdu.nof_repetitions      = n1;
-  pdu.config_index         = 4;
-  pdu.sequence_id          = 4;
-  pdu.bw_index             = 2;
-  pdu.tx_comb              = tx_comb_size::n2;
-  pdu.comb_offset          = 2;
-  pdu.cyclic_shift         = 2;
-  pdu.freq_position        = 32;
-  pdu.freq_shift           = 21;
-  pdu.freq_hopping         = 12;
-  pdu.group_or_seq_hopping = srs_group_or_sequence_hopping::neither;
-  pdu.resource_type        = srs_resource_type::aperiodic;
-  pdu.t_srs_period         = srs_periodicity::sl8;
-  pdu.t_offset             = 65;
+  pdu.crnti                                  = to_rnti(23);
+  pdu.bwp_cfg                                = &helper.bwp_cfg;
+  pdu.nof_antenna_ports                      = 4;
+  pdu.symbols                                = {0, 1};
+  pdu.nof_repetitions                        = n1;
+  pdu.config_index                           = 4;
+  pdu.sequence_id                            = 4;
+  pdu.bw_index                               = 2;
+  pdu.tx_comb                                = tx_comb_size::n2;
+  pdu.comb_offset                            = 1;
+  pdu.cyclic_shift                           = 2;
+  pdu.freq_position                          = 32;
+  pdu.freq_shift                             = 21;
+  pdu.freq_hopping                           = 3;
+  pdu.group_or_seq_hopping                   = srs_group_or_sequence_hopping::neither;
+  pdu.resource_type                          = srs_resource_type::aperiodic;
+  pdu.t_srs_period                           = srs_periodicity::sl8;
+  pdu.t_offset                               = 65;
+  pdu.normalized_channel_iq_matrix_requested = true;
+  pdu.positioning_report_requested           = true;
 
   return helper;
 }
@@ -514,19 +639,19 @@ pucch_info_test_helper unittests::build_valid_pucch_format_1_pdu()
 
   helper.bwp_cfg = {cyclic_prefix::NORMAL, subcarrier_spacing::kHz15, {2, 10}};
 
-  pucch.crnti                         = to_rnti(0x4444);
-  pucch.bwp_cfg                       = &helper.bwp_cfg;
-  pucch.format                        = pucch_format::FORMAT_1;
-  pucch.resources.prbs                = {1, 4};
-  pucch.resources.symbols             = {0, 14};
-  pucch.resources.second_hop_prbs     = {2, 12};
-  pucch.format_1.harq_ack_nof_bits    = 2;
-  pucch.format_1.sr_bits              = sr_nof_bits::no_sr;
-  pucch.format_1.time_domain_occ      = 3;
-  pucch.format_1.initial_cyclic_shift = 9;
-  pucch.format_1.n_id_hopping         = 2;
-  pucch.format_1.group_hopping        = srsran::pucch_group_hopping::NEITHER;
-  pucch.format_1.slot_repetition      = srsran::pucch_repetition_tx_slot::no_multi_slot;
+  pucch.crnti                      = to_rnti(0x4444);
+  pucch.bwp_cfg                    = &helper.bwp_cfg;
+  auto& format_1                   = pucch.format_params.emplace<pucch_format_1>();
+  pucch.resources.prbs             = {1, 4};
+  pucch.resources.symbols          = {0, 14};
+  pucch.resources.second_hop_prbs  = {2, 12};
+  pucch.uci_bits.harq_ack_nof_bits = 2;
+  pucch.uci_bits.sr_bits           = sr_nof_bits::no_sr;
+  format_1.time_domain_occ         = 3;
+  format_1.initial_cyclic_shift    = 9;
+  format_1.n_id_hopping            = 2;
+  format_1.group_hopping           = srsran::pucch_group_hopping::NEITHER;
+  format_1.slot_repetition         = srsran::pucch_repetition_tx_slot::no_multi_slot;
 
   return helper;
 }
@@ -538,25 +663,79 @@ pucch_info_test_helper srsran::unittests::build_valid_pucch_format_2_pdu()
 
   helper.bwp_cfg = {cyclic_prefix::NORMAL, subcarrier_spacing::kHz15, {2, 10}};
 
-  pucch.crnti                      = to_rnti(0x4444);
-  pucch.bwp_cfg                    = &helper.bwp_cfg;
-  pucch.format                     = pucch_format::FORMAT_2;
-  pucch.resources.prbs             = {1, 4};
-  pucch.resources.symbols          = {0, 1};
-  pucch.resources.second_hop_prbs  = {1, 11};
-  pucch.format_2.max_code_rate     = max_pucch_code_rate::dot_08;
-  pucch.format_2.csi_part1_bits    = 102;
-  pucch.format_2.harq_ack_nof_bits = 100;
-  pucch.format_2.sr_bits           = sr_nof_bits::one;
-  pucch.format_2.n_id_0_scrambling = 256;
-  pucch.format_2.n_id_scambling    = 382;
+  pucch.crnti                       = to_rnti(0x4444);
+  pucch.bwp_cfg                     = &helper.bwp_cfg;
+  auto& format_2                    = pucch.format_params.emplace<pucch_format_2>();
+  pucch.resources.prbs              = {1, 4};
+  pucch.resources.symbols           = {0, 1};
+  pucch.resources.second_hop_prbs   = {1, 11};
+  format_2.max_code_rate            = max_pucch_code_rate::dot_08;
+  pucch.uci_bits.csi_part1_nof_bits = 102;
+  pucch.uci_bits.harq_ack_nof_bits  = 100;
+  pucch.uci_bits.sr_bits            = sr_nof_bits::one;
+  format_2.n_id_0_scrambling        = 256;
+  format_2.n_id_scambling           = 382;
+
+  return helper;
+}
+
+pucch_info_test_helper srsran::unittests::build_valid_pucch_format_3_pdu()
+{
+  pucch_info_test_helper helper;
+  pucch_info&            pucch = helper.info;
+
+  helper.bwp_cfg = {cyclic_prefix::NORMAL, subcarrier_spacing::kHz15, {2, 10}};
+
+  pucch.crnti                       = to_rnti(0x4444);
+  pucch.bwp_cfg                     = &helper.bwp_cfg;
+  auto& format_3                    = pucch.format_params.emplace<pucch_format_3>();
+  pucch.resources.prbs              = {1, 4};
+  pucch.resources.symbols           = {0, 3};
+  pucch.resources.second_hop_prbs   = {1, 11};
+  format_3.max_code_rate            = max_pucch_code_rate::dot_08;
+  pucch.uci_bits.csi_part1_nof_bits = 102;
+  pucch.uci_bits.harq_ack_nof_bits  = 100;
+  pucch.uci_bits.sr_bits            = sr_nof_bits::one;
+  format_3.n_id_0_scrambling        = 256;
+  format_3.n_id_scrambling          = 382;
+  format_3.n_id_hopping             = 180;
+  format_3.additional_dmrs          = false;
+  format_3.pi_2_bpsk                = true;
+
+  return helper;
+}
+
+pucch_info_test_helper srsran::unittests::build_valid_pucch_format_4_pdu()
+{
+  pucch_info_test_helper helper;
+  pucch_info&            pucch = helper.info;
+
+  helper.bwp_cfg = {cyclic_prefix::NORMAL, subcarrier_spacing::kHz15, {2, 10}};
+
+  pucch.crnti                       = to_rnti(0x4444);
+  pucch.bwp_cfg                     = &helper.bwp_cfg;
+  auto& format_4                    = pucch.format_params.emplace<pucch_format_4>();
+  pucch.resources.prbs              = {1, 2};
+  pucch.resources.symbols           = {0, 3};
+  pucch.resources.second_hop_prbs   = {10, 11};
+  format_4.max_code_rate            = max_pucch_code_rate::dot_08;
+  pucch.uci_bits.csi_part1_nof_bits = 102;
+  pucch.uci_bits.harq_ack_nof_bits  = 100;
+  pucch.uci_bits.sr_bits            = sr_nof_bits::one;
+  format_4.n_id_0_scrambling        = 256;
+  format_4.n_id_scrambling          = 382;
+  format_4.n_id_hopping             = 180;
+  format_4.additional_dmrs          = false;
+  format_4.pi_2_bpsk                = true;
+  format_4.n_sf_pucch_f4            = pucch_format_4_sf::sf2;
+  format_4.orthog_seq_idx           = 1;
 
   return helper;
 }
 
 mac_ul_sched_result_test_helper srsran::unittests::build_valid_mac_ul_sched_result()
 {
-  mac_ul_sched_result_test_helper helper;
+  mac_ul_sched_result_test_helper helper{{}, {}, {}, build_valid_srs_pdu(), {}, {}};
   mac_ul_sched_result&            result = helper.result;
   result.slot                            = slot_point(4, generate_sfn(), generate_slot());
   result.ul_res                          = &helper.sched_result;
@@ -580,11 +759,68 @@ mac_ul_sched_result_test_helper srsran::unittests::build_valid_mac_ul_sched_resu
   return helper;
 }
 
-mac_dl_data_result srsran::unittests::build_valid_mac_data_result()
+mac_ul_sched_result_test_helper unittests::build_valid_mac_ul_sched_result_with_all_supported_pdus()
 {
-  mac_dl_data_result result;
+  mac_ul_sched_result_test_helper helper{{}, {}, {}, build_valid_srs_pdu(), {}, {}};
+  mac_ul_sched_result&            result = helper.result;
+  result.slot                            = slot_point(4, generate_sfn(), generate_slot());
+  result.ul_res                          = &helper.sched_result;
 
-  result.si_pdus.push_back({1, {}});
+  // Add PUCCH PDUs.
+  for (unsigned i = 0; i != MAX_PUCCH_PDUS_PER_SLOT; ++i) {
+    helper.pucch_f1              = build_valid_pucch_format_1_pdu();
+    helper.pucch_f1.info.bwp_cfg = &helper.pucch_f1.bwp_cfg;
+    helper.sched_result.pucchs.push_back(helper.pucch_f1.info);
+  }
+
+  // Add PUSCH PDU.
+  for (unsigned i = 0; i != MAX_PUSCH_PDUS_PER_SLOT; ++i) {
+    helper.pusch                        = build_valid_pusch_pdu();
+    helper.pusch.info.pusch_cfg.bwp_cfg = &helper.pusch.bwp_cfg;
+    helper.sched_result.puschs.push_back(helper.pusch.info);
+  }
+
+  // Add PRACH.
+  for (unsigned i = 0; i != MAX_PRACH_OCCASIONS_PER_SLOT; ++i) {
+    helper.sched_result.prachs.push_back(build_valid_prach_occassion());
+  }
+
+  // Add SRS.
+  for (unsigned i = 0; i != MAX_SRS_PDUS_PER_SLOT; ++i) {
+    helper.sched_result.srss.push_back(helper.srs.pdu);
+  }
+
+  return helper;
+}
+
+mac_dl_data_result_test_helper srsran::unittests::build_valid_mac_data_result()
+{
+  mac_dl_data_result_test_helper result;
+
+  result.result.si_pdus.push_back({1, shared_transport_block(result.data)});
+
+  return result;
+}
+
+mac_dl_data_result_test_helper unittests::build_valid_mac_data_result_with_all_supported_pdu()
+{
+  mac_dl_data_result_test_helper result;
+
+  for (unsigned i = 0; i != MAX_SI_PDUS_PER_SLOT; ++i) {
+    result.result.si_pdus.push_back({1, shared_transport_block(result.data)});
+  }
+
+  for (unsigned i = 0; i != MAX_RAR_PDUS_PER_SLOT; ++i) {
+    result.result.rar_pdus.push_back({1, shared_transport_block(result.data)});
+  }
+
+  for (unsigned i = 0; i != MAX_UE_PDUS_PER_SLOT; ++i) {
+    result.result.ue_pdus.push_back({1, shared_transport_block(result.data)});
+  }
+
+  for (unsigned i = 0; i != MAX_PAGING_PDUS_PER_SLOT; ++i) {
+    result.result.paging_pdus.push_back({1, shared_transport_block(result.data)});
+  }
 
   return result;
 }

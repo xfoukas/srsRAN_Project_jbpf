@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -23,6 +23,17 @@
 #pragma once
 
 #include "srsran/adt/expected.h"
+#include "srsran/fapi/messages/crc_indication.h"
+#include "srsran/fapi/messages/dl_tti_request.h"
+#include "srsran/fapi/messages/error_indication.h"
+#include "srsran/fapi/messages/rach_indication.h"
+#include "srsran/fapi/messages/rx_data_indication.h"
+#include "srsran/fapi/messages/slot_indication.h"
+#include "srsran/fapi/messages/srs_indication.h"
+#include "srsran/fapi/messages/tx_data_request.h"
+#include "srsran/fapi/messages/uci_indication.h"
+#include "srsran/fapi/messages/ul_dci_request.h"
+#include "srsran/fapi/messages/ul_tti_request.h"
 #include "srsran/fapi/validator_report.h"
 #include "srsran/srslog/logger.h"
 
@@ -74,7 +85,7 @@ error_type<validator_report> validate_ul_dci_request(const ul_dci_request_messag
 error_type<validator_report> validate_ul_tti_request(const ul_tti_request_message& msg);
 
 /// Logs the given validator report.
-void log_validator_report(const validator_report& report, srslog::basic_logger& logger);
+void log_validator_report(const validator_report& report, srslog::basic_logger& logger, unsigned sector_id);
 
 } // namespace fapi
 } // namespace srsran

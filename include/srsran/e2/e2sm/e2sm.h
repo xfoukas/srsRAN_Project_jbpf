@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -22,12 +22,12 @@
 
 #pragma once
 
-#include "srsran/adt/optional.h"
 #include "srsran/asn1/e2ap/e2ap.h"
 #include "srsran/asn1/e2sm/e2sm_kpm_ies.h"
 #include "srsran/asn1/e2sm/e2sm_rc_ies.h"
 #include "srsran/e2/e2_messages.h"
 #include "srsran/support/async/async_task.h"
+#include <map>
 #include <variant>
 
 namespace srsran {
@@ -46,7 +46,7 @@ struct e2sm_action_definition {
 };
 
 struct e2sm_ric_control_request {
-  e2sm_service_model_t                         service_model;
+  e2sm_service_model_t                         service_model                = e2sm_service_model_t::RC;
   bool                                         ric_call_process_id_present  = false;
   bool                                         ric_ctrl_ack_request_present = false;
   uint64_t                                     ric_call_process_id;
@@ -56,7 +56,7 @@ struct e2sm_ric_control_request {
 };
 
 struct e2sm_ric_control_response {
-  e2sm_service_model_t                             service_model;
+  e2sm_service_model_t                             service_model = e2sm_service_model_t::RC;
   bool                                             success;
   bool                                             ric_call_process_id_present = false;
   bool                                             ric_ctrl_outcome_present    = false;
@@ -73,6 +73,9 @@ public:
   /// \brief get action id associated with the control action executor.
   /// \return Returns action id.
   virtual uint32_t get_action_id() = 0;
+  /// \brief get control action definition to be used in RAN Function Description.
+  /// \return Returns ran function definition ctrl action item.
+  virtual asn1::e2sm::ran_function_definition_ctrl_action_item_s get_control_action_definition() = 0;
   /// \brief check if the requested RIC control action is supported.
   /// \param[in] req is a RIC control action request (with control header and message).
   /// \return Returns true if action supported by control action executor.
@@ -81,6 +84,38 @@ public:
   /// \param[in] req is a RIC control action request (with control header and message).
   /// \return Returns RIC control response.
   virtual async_task<e2sm_ric_control_response> execute_ric_control_action(const e2sm_ric_control_request& req) = 0;
+
+  template <typename T, typename Func>
+  void parse_ran_parameter_value(const asn1::e2sm::ran_param_value_type_c& ran_param,
+                                 uint64_t                                  ran_param_id,
+                                 uint64_t                                  ue_id,
+                                 T&                                        ctrl_cfg,
+                                 Func                                      parse_action_ran_parameter_value)
+  {
+    parse_action_ran_parameter_value(ran_param, ran_param_id, ue_id, ctrl_cfg);
+
+    if (ran_param.type() == asn1::e2sm::ran_param_value_type_c::types_opts::ran_p_choice_list) {
+      for (auto& ran_p_list : ran_param.ran_p_choice_list().ran_param_list.list_of_ran_param) {
+        for (auto& ran_p : ran_p_list.seq_of_ran_params) {
+          if (action_params.find(ran_p.ran_param_id) != action_params.end()) {
+            parse_ran_parameter_value(
+                ran_p.ran_param_value_type, ran_p.ran_param_id, ue_id, ctrl_cfg, parse_action_ran_parameter_value);
+          }
+        }
+      }
+    } else if (ran_param.type() == asn1::e2sm::ran_param_value_type_c::types_opts::ran_p_choice_structure) {
+      for (auto& ran_seq : ran_param.ran_p_choice_structure().ran_param_structure.seq_of_ran_params) {
+        if (action_params.find(ran_seq.ran_param_id) != action_params.end()) {
+          parse_ran_parameter_value(
+              ran_seq.ran_param_value_type, ran_seq.ran_param_id, ue_id, ctrl_cfg, parse_action_ran_parameter_value);
+        }
+      }
+    }
+  }
+
+protected:
+  std::string                     action_name;
+  std::map<uint32_t, std::string> action_params;
 };
 
 class e2sm_report_service
@@ -108,6 +143,9 @@ public:
   /// \brief get style type id associated with the control service.
   /// \return Returns style type id.
   virtual uint32_t get_style_type() = 0;
+  /// \brief get control service definition to be used in RAN Function Description.
+  /// \return Returns ran function definition ctrl item.
+  virtual asn1::e2sm::ran_function_definition_ctrl_item_s get_control_style_definition() = 0;
   /// \brief add an RIC control action executor associated with a specific action id.
   /// \param[in] act_executor is a RIC control action executor that maps RIC action to the proper stack functions.
   /// \return Returns true if action executor successfully added.

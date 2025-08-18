@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -24,6 +24,7 @@
 #include "rrc_ue_helpers.h"
 #include "srsran/asn1/rrc_nr/dl_dcch_msg.h"
 #include "srsran/asn1/rrc_nr/ho_prep_info.h"
+#include "srsran/support/cpu_architecture_info.h"
 #include "srsran/support/srsran_assert.h"
 
 using namespace srsran;
@@ -35,6 +36,7 @@ rrc_ue_impl::rrc_ue_impl(rrc_pdu_f1ap_notifier&                 f1ap_pdu_notifie
                          rrc_ue_context_update_notifier&        cu_cp_notifier_,
                          rrc_ue_measurement_notifier&           measurement_notifier_,
                          rrc_ue_cu_cp_ue_notifier&              cu_cp_ue_notifier_,
+                         rrc_ue_event_notifier&                 metrics_notifier_,
                          const ue_index_t                       ue_index_,
                          const rnti_t                           c_rnti_,
                          const rrc_cell_context                 cell_,
@@ -47,6 +49,7 @@ rrc_ue_impl::rrc_ue_impl(rrc_pdu_f1ap_notifier&                 f1ap_pdu_notifie
   cu_cp_notifier(cu_cp_notifier_),
   measurement_notifier(measurement_notifier_),
   cu_cp_ue_notifier(cu_cp_ue_notifier_),
+  metrics_notifier(metrics_notifier_),
   du_to_cu_container(du_to_cu_container_),
   logger("RRC", {ue_index_, c_rnti_}),
   event_mng(std::make_unique<rrc_ue_event_manager>(cu_cp_ue_notifier.get_timer_factory()))
@@ -84,12 +87,17 @@ void rrc_ue_impl::create_srb(const srb_creation_message& msg)
     // SRB0 is already set up
     return;
   } else if (msg.srb_id <= srb_id_t::srb2) {
+    auto&    cpu_desc  = cpu_architecture_info::get();
+    uint32_t nof_cores = cpu_desc.get_host_nof_available_cpus();
+
     // create PDCP entity for this SRB
-    context.srbs.emplace(
-        std::piecewise_construct,
-        std::forward_as_tuple(msg.srb_id),
-        std::forward_as_tuple(
-            msg.ue_index, msg.srb_id, cu_cp_ue_notifier.get_timer_factory(), cu_cp_ue_notifier.get_executor()));
+    context.srbs.emplace(std::piecewise_construct,
+                         std::forward_as_tuple(msg.srb_id),
+                         std::forward_as_tuple(msg.ue_index,
+                                               msg.srb_id,
+                                               cu_cp_ue_notifier.get_timer_factory(),
+                                               cu_cp_ue_notifier.get_executor(),
+                                               nof_cores));
     auto& srb_context = context.srbs.at(msg.srb_id);
 
     if (msg.srb_id == srb_id_t::srb2 || msg.enable_security) {
@@ -110,6 +118,21 @@ static_vector<srb_id_t, MAX_NOF_SRBS> rrc_ue_impl::get_srbs()
   }
 
   return srb_ids;
+}
+
+rrc_state rrc_ue_impl::get_rrc_state() const
+{
+  return context.state;
+}
+
+void rrc_ue_impl::cancel_handover_reconfiguration_transaction(uint8_t transaction_id)
+{
+  // If the UE is awaiting a RRC Reconfiguration Complete for an ongoing handover, cancel the transaction.
+  logger.log_debug(
+      "Received a RRC Reestablishment Request during an ongoing handover. Cancelling the handover transaction");
+  if (not event_mng->transactions.cancel_transaction(transaction_id)) {
+    logger.log_warning("Unexpected RRC transaction id={}", transaction_id);
+  }
 }
 
 void rrc_ue_impl::on_new_dl_ccch(const asn1::rrc_nr::dl_ccch_msg_s& dl_ccch_msg)

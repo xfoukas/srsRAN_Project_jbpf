@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -22,15 +22,12 @@
 
 #pragma once
 
-#include "srsran/adt/optional.h"
 #include "srsran/adt/static_vector.h"
 #include "srsran/ofh/compression/iq_compressor.h"
 #include "srsran/ofh/ecpri/ecpri_packet_builder.h"
-#include "srsran/ofh/ethernet/ethernet_frame_builder.h"
-#include "srsran/ofh/ethernet/ethernet_gateway.h"
+#include "srsran/ofh/ethernet/ethernet_mac_address.h"
 #include "srsran/ofh/ofh_constants.h"
-#include "srsran/ofh/serdes/ofh_cplane_message_builder.h"
-#include "srsran/ofh/serdes/ofh_uplane_message_builder.h"
+#include "srsran/ofh/serdes/ofh_cplane_message_properties.h"
 #include "srsran/ofh/transmitter/ofh_transmitter_timing_parameters.h"
 #include "srsran/ran/bs_channel_bandwidth.h"
 #include "srsran/ran/cyclic_prefix.h"
@@ -85,18 +82,20 @@ struct transmitter_config {
   bool is_downlink_static_compr_hdr_enabled;
   /// Uplink static compression header flag.
   bool is_uplink_static_compr_hdr_enabled;
-  /// \brief Downlink broadcast flag.
-  ///
-  /// If this flag is enabled the same downlink data will be send to all the configured downlink eAxCs.
-  bool downlink_broadcast;
   /// IQ samples scaling factor.
   float iq_scaling;
+  /// C-Plane PRACH FFT size (to be used in Type 3 messages).
+  cplane_fft_size c_plane_prach_fft_len;
   /// Downlink processing time in microseconds.
   std::chrono::microseconds dl_processing_time;
+  /// Uplink request processing time in microseconds.
+  std::chrono::microseconds ul_processing_time;
   /// Optional TDD configuration.
   std::optional<tdd_ul_dl_config_common> tdd_config;
   /// Indicates if DPDK should be used by the underlying implementation.
   bool uses_dpdk;
+  /// If set to true, metrics are enabled in the transmitter.
+  bool are_metrics_enabled = false;
 };
 
 } // namespace ofh

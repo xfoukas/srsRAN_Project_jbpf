@@ -1,5 +1,5 @@
 #
-# Copyright 2021-2024 Software Radio Systems Limited
+# Copyright 2021-2025 Software Radio Systems Limited
 #
 # This file is part of srsRAN
 #
@@ -23,10 +23,10 @@ set_directory_properties(PROPERTIES LABELS "gateways")
 include_directories(../../..)
 
 add_executable(udp_network_gateway_benchmark udp_network_gateway_benchmark.cpp)
-target_link_libraries(udp_network_gateway_benchmark srsran_network srsran_gateway srsran_support srslog)
+target_link_libraries(udp_network_gateway_benchmark srsran_gateway srsran_support srslog)
 
 add_executable(udp_network_gateway_tx_benchmark udp_network_gateway_tx_benchmark.cpp)
-target_link_libraries(udp_network_gateway_tx_benchmark srsran_network srsran_gateway srsran_support srslog)
+target_link_libraries(udp_network_gateway_tx_benchmark srsran_gateway srsran_support srslog)
 
 add_executable(udp_network_gateway_rx_benchmark udp_network_gateway_rx_benchmark.cpp)
-target_link_libraries(udp_network_gateway_rx_benchmark srsran_network srsran_gateway srsran_support srslog)
+target_link_libraries(udp_network_gateway_rx_benchmark srsran_gateway srsran_support srslog)
