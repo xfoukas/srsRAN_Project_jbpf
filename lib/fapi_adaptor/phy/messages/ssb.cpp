@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -21,116 +21,17 @@
  */
 
 #include "srsran/fapi_adaptor/phy/messages/ssb.h"
+#include "srsran/ran/ssb/pbch_mib_pack.h"
 #include "srsran/srsvec/bit.h"
 
 using namespace srsran;
 using namespace fapi_adaptor;
 
-/// \brief Adds the PHY timing information to the BCH payload for the given \c fapi_pdu.
-/// \return A packed BCH payload with the timing information, as per TS38.212 Section 7.1.1.
-static uint32_t fill_phy_timing_info_in_bch_payload(const fapi::dl_ssb_pdu& fapi_pdu, uint32_t sfn, bool hrf)
+/// Unpacks the contents of the BCH payload.
+static void unpack_bch_payload(span<uint8_t> dest, const fapi::dl_ssb_pdu& fapi_pdu)
 {
-  // Move the BCH payload to the MSB.
-  uint32_t payload = fapi_pdu.bch_payload.bch_payload << 8U;
-
-  // Add the SFN.
-  payload |= ((sfn & 0xfU) << 4U);
-
-  // Add the half radio frame bit.
-  payload |= (hrf << 3U);
-
-  if (fapi_pdu.ssb_maintenance_v3.L_max == 64) {
-    // Pack the 6th, 5th and 4th bits of SS/PBCH block index.
-    payload |= ((fapi_pdu.ssb_block_index >> 3U) & 7U);
-  } else {
-    // 3rd LSB set to MSB of the SSB subcarrier offset. 2nd and 1st bits are reserved.
-    payload |= (((fapi_pdu.ssb_subcarrier_offset >> 7U) & 1U) << 2U);
-  }
-
-  return payload;
-}
-
-/// \brief Encodes the full BCH payload for the given \c fapi_pdu.
-/// \return A packed BCH payload, as per TS38.212 Section 7.1.1.
-static uint32_t
-generate_bch_payload(const fapi::dl_ssb_pdu& fapi_pdu, uint32_t sfn, bool hrf, subcarrier_spacing scs_common)
-{
-  const fapi::dl_ssb_phy_mib_pdu& mib     = fapi_pdu.bch_payload.phy_mib_pdu;
-  uint32_t                        payload = 0;
-
-  // CHOICE in BCCH-BCH-MessageType - 1 bit.
-  // Set to zero.
-
-  // Pack MIB.
-
-  // systemFrameNumber - 6 bits MSB.
-  payload |= (((sfn >> 4U) & 0x3fU) << 25U);
-
-  // subCarrierSpacingCommon - 1 bit.
-  bool scs_flag = (scs_common == subcarrier_spacing::kHz30 || scs_common == subcarrier_spacing::kHz120);
-  payload |= (scs_flag << 24U);
-
-  // ssb-SubcarrierOffset - 4 bits.
-  payload |= ((fapi_pdu.ssb_subcarrier_offset & 0xfU) << 20U);
-
-  // dmrs-TypeA-Position - 1 bit.
-  payload |= ((static_cast<std::underlying_type_t<fapi::dmrs_typeA_pos>>(mib.dmrs_typeA_position) & 0x1U) << 19U);
-
-  // pdcch-ConfigSIB1 - 8 bits.
-  payload |= ((mib.pdcch_config_sib1 & 0xffU) << 11U);
-
-  // Barred - 1 bit.
-  payload |= ((mib.cell_barred ? 0U : 1U) << 10U);
-
-  // intraFreqReselection - 1 bit.
-  payload |= ((mib.intrafreq_reselection ? 0U : 1U) << 9U);
-
-  // Spare - 1 bit.
-  // Leave to zero.
-
-  // Add the SFN. - 4 bit LSB.
-  payload |= ((sfn & 0xfU) << 4U);
-
-  // Half radio frame bit.
-  payload |= (hrf << 3U);
-
-  if (fapi_pdu.ssb_maintenance_v3.L_max == 64) {
-    // Pack the 6th, 5th and 4th bits of SS/PBCH block index.
-    payload |= ((fapi_pdu.ssb_block_index >> 3U) & 7U);
-  } else {
-    // 3rd LSB set to MSB of the SSB subcarrier offset. 2nd and 1st bits are reserved.
-    payload |= (((fapi_pdu.ssb_subcarrier_offset >> 7U) & 1U) << 2U);
-  }
-
-  return payload;
-}
-
-/// \brief Fills the contents of the BCH payload.
-///
-/// The BCH packing procedure is selected based on the field \c bch_payload_type of \c fapi_pdu, as per TS38.212
-/// Section 7.1.1 and references therein.
-static void fill_bch_payload(span<uint8_t>           dest,
-                             const fapi::dl_ssb_pdu& fapi_pdu,
-                             uint16_t                sfn,
-                             bool                    hrf,
-                             subcarrier_spacing      scs_common)
-{
-  uint32_t payload = 0;
-  switch (fapi_pdu.bch_payload_flag) {
-    case fapi::bch_payload_type::mac_full:
-      payload = fapi_pdu.bch_payload.bch_payload;
-      break;
-    case fapi::bch_payload_type::phy_timing_info:
-      payload = fill_phy_timing_info_in_bch_payload(fapi_pdu, sfn, hrf);
-      break;
-    case fapi::bch_payload_type::phy_full:
-      payload = generate_bch_payload(fapi_pdu, sfn, hrf, scs_common);
-      break;
-    default:
-      srsran_assert(0, "Invalid BCH payload flag");
-      break;
-  }
-  srsvec::bit_unpack(dest, payload, dest.size());
+  report_error_if_not(fapi_pdu.bch_payload_flag == fapi::bch_payload_type::phy_timing_info, "Invalid BCH payload flag");
+  srsvec::bit_unpack(dest, fapi_pdu.bch_payload.bch_payload, dest.size());
 }
 
 /// Returns the coefficient \f$\beta_{PSS}\f$ from the given SSB PDU (see TS38.213, Section 4.1).
@@ -168,9 +69,8 @@ void srsran::fapi_adaptor::convert_ssb_fapi_to_phy(ssb_processor::pdu_t&   proc_
   proc_pdu.pattern_case      = fapi_pdu.ssb_maintenance_v3.case_type;
   proc_pdu.common_scs        = scs_common;
 
-  // Fill in the BCH payload.
-  fill_bch_payload(proc_pdu.bch_payload, fapi_pdu, sfn, proc_pdu.slot.is_odd_hrf(), scs_common);
+  unpack_bch_payload(proc_pdu.mib_payload, fapi_pdu);
 
-  // :TODO: Implement the ports array when beamforming is added.
+  // Use only a single port for SSB.
   proc_pdu.ports = {0};
 }

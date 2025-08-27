@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -25,15 +25,20 @@
 using namespace srsran;
 using namespace fapi_adaptor;
 
-void srsran::fapi_adaptor::convert_srs_fapi_to_phy(uplink_processor::srs_pdu& pdu,
-                                                   const fapi::ul_srs_pdu&    fapi_pdu,
-                                                   uint16_t                   sfn,
-                                                   uint16_t                   slot)
+void srsran::fapi_adaptor::convert_srs_fapi_to_phy(uplink_pdu_slot_repository::srs_pdu& pdu,
+                                                   const fapi::ul_srs_pdu&              fapi_pdu,
+                                                   unsigned                             nof_rx_antennas,
+                                                   uint16_t                             sfn,
+                                                   uint16_t                             slot)
 {
   // Fill main context fields.
   ul_srs_context& context = pdu.context;
   context.slot            = slot_point(fapi_pdu.scs, sfn, slot);
   context.rnti            = fapi_pdu.rnti;
+  context.is_normalized_channel_iq_matrix_report_requested =
+      fapi_pdu.srs_params_v4.report_type.test(to_value(fapi::srs_report_type::normalized_channel_iq_matrix));
+  context.is_positioning_report_requested =
+      fapi_pdu.srs_params_v4.report_type.test(to_value(fapi::srs_report_type::positioning));
 
   // Fill SRS resource configuration.
   pdu.config.slot = slot_point(fapi_pdu.scs, sfn, slot);
@@ -56,7 +61,7 @@ void srsran::fapi_adaptor::convert_srs_fapi_to_phy(uplink_processor::srs_pdu& pd
 
   // GCC gives a false positive of type Werror=stringop-overflow.
   // Fill the antenna port indices starting from 0.
-  static_vector<unsigned, srs_constants::max_nof_rx_ports> ports(static_cast<unsigned>(fapi_pdu.num_ant_ports));
+  static_vector<unsigned, srs_constants::max_nof_rx_ports> ports(nof_rx_antennas);
   std::iota(ports.begin(), ports.end(), 0);
   pdu.config.ports.assign(ports.begin(), ports.end());
 }

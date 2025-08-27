@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -22,8 +22,8 @@
 
 #pragma once
 
-#include "task_executor.h"
 #include "srsran/adt/blocking_queue.h"
+#include "srsran/support/executors/task_executor.h"
 
 namespace srsran {
 
@@ -32,23 +32,26 @@ namespace srsran {
 class manual_task_worker : public task_executor
 {
 public:
-  manual_task_worker(size_t q_size, bool blocking_mode_ = true) :
-    t_id(std::this_thread::get_id()), pending_tasks(q_size), blocking_mode(blocking_mode_)
+  manual_task_worker(size_t q_size, bool blocking_mode_ = true, bool explicit_mode_ = false) :
+    t_id(std::this_thread::get_id()),
+    pending_tasks(q_size),
+    blocking_mode(blocking_mode_),
+    explicit_mode(explicit_mode_)
   {
   }
 
   std::thread::id get_thread_id() const { return t_id; }
 
-  bool execute(unique_task task) override
+  [[nodiscard]] bool execute(unique_task task) override
   {
-    if (std::this_thread::get_id() == t_id) {
+    if (std::this_thread::get_id() == t_id and not explicit_mode) {
       task();
       return true;
     }
     return defer(std::move(task));
   }
 
-  bool defer(unique_task task) override
+  [[nodiscard]] bool defer(unique_task task) override
   {
     if (blocking_mode) {
       pending_tasks.push_blocking(std::move(task));
@@ -72,7 +75,7 @@ public:
 
   void request_stop()
   {
-    defer([this]() { stop(); });
+    (void)defer([this]() { stop(); });
   }
 
   /// Run all pending tasks until queue is emptied.
@@ -128,6 +131,7 @@ private:
   std::thread::id             t_id;
   blocking_queue<unique_task> pending_tasks;
   bool                        blocking_mode;
+  bool                        explicit_mode;
 };
 
 } // namespace srsran

@@ -1,5 +1,5 @@
 #
-# Copyright 2021-2024 Software Radio Systems Limited
+# Copyright 2021-2025 Software Radio Systems Limited
 #
 # This file is part of srsRAN
 #
@@ -27,6 +27,7 @@ set(SOURCES
         ngap_connection_handler.cpp
         ngap_validators/ngap_validators.cpp
         gateways/n2_connection_client_factory.cpp
+        metrics/ngap_metrics_aggregator.cpp
         procedures/ng_setup_procedure.cpp
         procedures/ng_reset_procedure.cpp
         procedures/ngap_initial_context_setup_procedure.cpp
@@ -48,5 +49,3 @@ target_link_libraries(srsran_ngap
 	srsran_support)
 
 include_directories(${CMAKE_CURRENT_SOURCE_DIR})
-
-add_to_exported_libs(srsran_ngap)

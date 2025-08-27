@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -21,31 +21,13 @@
  */
 
 #include "du_appconfig_yaml_writer.h"
-#include "apps/services/logger/logger_appconfig_yaml_writer.h"
+#include "apps/helpers/f1u/f1u_config_yaml_writer.h"
+#include "apps/helpers/logger/logger_appconfig_yaml_writer.h"
+#include "apps/services/app_resource_usage/app_resource_usage_config_yaml_writer.h"
+#include "apps/services/metrics/metrics_config_yaml_writer.h"
 #include "du_appconfig.h"
 
 using namespace srsran;
-
-static void fill_du_appconfig_metrics_section(YAML::Node node, const srs_du::metrics_appconfig& config)
-{
-  node["addr"] = config.addr;
-  node["port"] = config.port;
-}
-
-static void fill_du_appconfig_e2_section(YAML::Node node, const e2_appconfig& config)
-{
-  node["enable_du_e2"]           = config.enable_du_e2;
-  node["addr"]                   = config.ip_addr;
-  node["port"]                   = config.port;
-  node["bind_addr"]              = config.bind_addr;
-  node["sctp_rto_initial"]       = config.sctp_rto_initial;
-  node["sctp_rto_min"]           = config.sctp_rto_min;
-  node["sctp_rto_max"]           = config.sctp_rto_max;
-  node["sctp_init_max_attempts"] = config.sctp_init_max_attempts;
-  node["sctp_max_init_timeo"]    = config.sctp_max_init_timeo;
-  node["e2sm_kpm_enabled"]       = config.e2sm_kpm_enabled;
-  node["e2sm_rc_enabled"]        = config.e2sm_rc_enabled;
-}
 
 static void fill_du_appconfig_hal_section(YAML::Node node, const std::optional<hal_appconfig>& config)
 {
@@ -74,9 +56,10 @@ static void fill_du_appconfig_expert_execution_section(YAML::Node node, const ex
   }
 
   {
-    YAML::Node threads_node           = node["threads"];
-    YAML::Node non_rt_node            = threads_node["non_rt"];
-    non_rt_node["nof_non_rt_threads"] = config.threads.non_rt_threads.nof_non_rt_threads;
+    YAML::Node threads_node               = node["threads"];
+    YAML::Node non_rt_node                = threads_node["non_rt"];
+    non_rt_node["nof_non_rt_threads"]     = config.threads.non_rt_threads.nof_non_rt_threads;
+    non_rt_node["non_rt_task_queue_size"] = config.threads.non_rt_threads.non_rt_task_queue_size;
   }
 }
 
@@ -86,11 +69,17 @@ static void fill_du_appconfig_buffer_pool_section(YAML::Node node, const buffer_
   node["segment_size"] = config.segment_size;
 }
 
-static void fill_du_appconfig_nru_section(YAML::Node node, const srs_du::nru_appconfig& config)
+static void fill_du_appconfig_remote_control_section(YAML::Node node, const remote_control_appconfig& config)
+{
+  node["enabled"]      = config.enabled;
+  node["bind_address"] = config.bind_addr;
+  node["port"]         = config.port;
+}
+
+static void fill_du_appconfig_f1u_section(YAML::Node node, const srs_du::f1u_appconfig& config)
 {
   node["queue_size"] = config.pdu_queue_size;
-  node["bind_addr"]  = config.bind_address;
-  node["ext_addr"]   = config.ext_addr;
+  fill_f1u_config_yaml_schema(node, config.f1u_sockets);
 }
 
 static void fill_du_appconfig_f1ap_section(YAML::Node node, const srs_du::f1ap_appconfig& config)
@@ -101,12 +90,13 @@ static void fill_du_appconfig_f1ap_section(YAML::Node node, const srs_du::f1ap_a
 
 void srsran::fill_du_appconfig_in_yaml_schema(YAML::Node& node, const du_appconfig& config)
 {
+  app_services::fill_app_resource_usage_config_in_yaml_schema(node, config.metrics_cfg.rusage_config);
+  app_services::fill_metrics_appconfig_in_yaml_schema(node, config.metrics_cfg.metrics_service_cfg);
   fill_logger_appconfig_in_yaml_schema(node, config.log_cfg);
-  fill_du_appconfig_metrics_section(node["metrics"], config.metrics_cfg);
-  fill_du_appconfig_e2_section(node["e2"], config.e2_cfg);
   fill_du_appconfig_hal_section(node, config.hal_config);
   fill_du_appconfig_expert_execution_section(node["expert_execution"], config.expert_execution_cfg);
   fill_du_appconfig_buffer_pool_section(node["buffer_pool"], config.buffer_pool_config);
-  fill_du_appconfig_nru_section(node["nru"], config.nru_cfg);
+  fill_du_appconfig_remote_control_section(node["remote_control"], config.remote_control_config);
+  fill_du_appconfig_f1u_section(node["f1u"], config.f1u_cfg);
   fill_du_appconfig_f1ap_section(node["f1ap"], config.f1ap_cfg);
 }

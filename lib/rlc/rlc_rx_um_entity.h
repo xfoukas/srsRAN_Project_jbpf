@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -25,7 +25,6 @@
 #include "rlc_rx_entity.h"
 #include "rlc_um_pdu.h"
 #include "srsran/adt/expected.h"
-#include "srsran/rlc/rlc_metrics.h"
 #include "srsran/support/executors/task_executor.h"
 #include "srsran/support/sdu_window.h"
 #include "srsran/support/timers.h"
@@ -96,7 +95,7 @@ private:
   const uint32_t um_window_size;
 
   /// Rx window
-  std::unique_ptr<sdu_window<rlc_rx_um_sdu_info>> rx_window;
+  sdu_window<rlc_rx_um_sdu_info, rlc_bearer_logger> rx_window;
 
   /// \brief t-Reassembly
   /// This timer is used by [...] the receiving side of an UM RLC entity in order to detect loss of RLC PDUs at lower
@@ -108,12 +107,12 @@ private:
   pcap_rlc_pdu_context pcap_context;
 
 public:
-  rlc_rx_um_entity(gnb_du_id_t                       gnb_du_id,
-                   du_ue_index_t                     ue_index,
-                   rb_id_t                           rb_id,
+  rlc_rx_um_entity(gnb_du_id_t                       gnb_du_id_,
+                   du_ue_index_t                     ue_index_,
+                   rb_id_t                           rb_id_,
                    const rlc_rx_um_config&           config,
                    rlc_rx_upper_layer_data_notifier& upper_dn_,
-                   rlc_metrics_aggregator&           metrics_agg_,
+                   rlc_bearer_metrics_collector&     metrics_coll_,
                    rlc_pcap&                         pcap_,
                    task_executor&                    ue_executor,
                    timer_manager&                    timers);
@@ -138,7 +137,7 @@ public:
   {
     // Stop all timers. Any queued handlers of timers that just expired before this call are canceled automatically
     reassembly_timer.stop();
-  };
+  }
 
   void on_expired_reassembly_timer();
 
@@ -175,11 +174,6 @@ private:
   /// \return The reassembled SDU in case of success, default_error_t{} otherwise.
   expected<byte_buffer_chain> reassemble_sdu(rlc_rx_um_sdu_info& sdu_info, uint32_t sn);
 
-  /// Creates the rx_window according to sn_size
-  /// \param sn_size Size of the sequence number (SN)
-  /// \return unique pointer to rx_window instance
-  std::unique_ptr<sdu_window<rlc_rx_um_sdu_info>> create_rx_window(rlc_um_sn_size sn_size);
-
   bool sn_in_reassembly_window(const uint32_t sn);
   bool sn_invalid_for_rx_buffer(const uint32_t sn);
 
@@ -205,7 +199,7 @@ struct formatter<srsran::rlc_rx_um_sdu_info> {
   }
 
   template <typename FormatContext>
-  auto format(const srsran::rlc_rx_um_sdu_info& info, FormatContext& ctx)
+  auto format(const srsran::rlc_rx_um_sdu_info& info, FormatContext& ctx) const
   {
     return format_to(ctx.out(),
                      "has_gap={} fully_received={} nof_segments={}",
@@ -224,7 +218,7 @@ struct formatter<srsran::rlc_rx_um_state> {
   }
 
   template <typename FormatContext>
-  auto format(const srsran::rlc_rx_um_state& st, FormatContext& ctx)
+  auto format(const srsran::rlc_rx_um_state& st, FormatContext& ctx) const
   {
     return format_to(ctx.out(),
                      "rx_next_reassembly={} rx_timer_trigger={} rx_next_highest={}",

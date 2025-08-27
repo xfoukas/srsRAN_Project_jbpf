@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -25,12 +25,11 @@
 #include "../adapters/du_processor_adapters.h"
 #include "../adapters/f1ap_adapters.h"
 #include "../adapters/ngap_adapters.h"
-#include "../cu_cp_controller/common_task_scheduler.h"
 #include "../cu_cp_impl_interface.h"
-#include "../task_schedulers/du_task_scheduler.h"
 #include "../ue_manager/ue_manager_impl.h"
 #include "du_configuration_manager.h"
 #include "du_metrics_handler.h"
+#include "srsran/cu_cp/common_task_scheduler.h"
 #include "srsran/cu_cp/cu_cp_types.h"
 #include "srsran/support/async/async_task.h"
 #include <unordered_map>
@@ -76,6 +75,8 @@ public:
   /// \param[in] du_index The index of the DU processor object.
   /// \return The DU processor object.
   du_processor& get_du_processor(du_index_t du_index);
+
+  std::vector<du_index_t> get_du_processor_indexes() const;
 
   std::vector<metrics_report::du_info> handle_du_metrics_report_request() const override;
 

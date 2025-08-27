@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -30,6 +30,8 @@ struct resource_grid_context;
 class shared_resource_grid;
 
 namespace ofh {
+
+class error_notifier;
 
 /// \brief Open Fronthaul uplink request handler.
 ///

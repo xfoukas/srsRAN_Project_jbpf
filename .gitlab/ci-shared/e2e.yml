@@ -14,14 +14,14 @@ variables:
       - "viavi"
       - "none"
     value: "zmq"
+  E2E_FILE_OR_DIR:
+    description: Path to the test file or directory to run. Empty for all tests in the folder.
+    value: ""
   MARKERS:
     description: Selected pytest marker (label / tag). Tests with that mark will run.
     value: ""
   KEYWORDS:
     description: Select tests by keyword expressions. This will run tests which contain names that match the given string expression (case-insensitive), which can include Python operators that use filenames, class names and function names as variables
-    value: ""
-  PYTEST_ARGS:
-    description: Extra pytest args for the e2e suite to run
     value: ""
   RETINA_PARAM_ARGS:
     description: Extra retina args for the e2e suite to run
@@ -40,6 +40,9 @@ variables:
 
 .load retina variables:
   stage: ci
+  variables:
+    GIT_LFS_SKIP_SMUDGE: 1
+  retry: 2
   script:
     - cat ${SRSRANDIR}/.gitlab/ci/e2e/.env
   artifacts:
@@ -47,9 +50,10 @@ variables:
       dotenv: ${SRSRANDIR}/.gitlab/ci/e2e/.env
 
 .prepare_test:
-  variables:
+  variables: &setup_kube_variables
     KUBECONFIG_VAR_NAME: "RETINA_NAMESPACE_KUBECONFIG"
     KUBECONFIG_VAR_NAME_EXTRA: "RETINA_NAMESPACE_KUBECONFIG_EXTRA"
+    GIT_LFS_SKIP_SMUDGE: 1
   before_script: &setup_kube_config
     - |
       export FORCE_COLOR=1
@@ -66,20 +70,19 @@ variables:
     name: ${RETINA_REGISTRY_PREFIX}/launcher:${RETINA_VERSION}
     entrypoint: ["/bin/sh", "-c"]
   variables:
-    ARTIFACT_COMPRESSION_LEVEL: "slowest"
-    KUBERNETES_CPU_REQUEST: 2
+    TRANSFER_METER_FREQUENCY: 5s
+    ARTIFACT_COMPRESSION_LEVEL: slowest
+    RUNNER_AFTER_SCRIPT_TIMEOUT: 20m
+    KUBERNETES_CPU_REQUEST: 1
     KUBERNETES_CPU_LIMIT: 2
-    KUBERNETES_MEMORY_REQUEST: 2Gi
-    KUBERNETES_MEMORY_LIMIT: 2Gi
+    KUBERNETES_MEMORY_REQUEST: 3Gi
+    KUBERNETES_MEMORY_LIMIT: 3Gi
     KUBERNETES_EPHEMERAL_STORAGE_REQUEST: "20G"
     KUBERNETES_EPHEMERAL_STORAGE_LIMIT: "20G"
-    KUBECONFIG_VAR_NAME: "RETINA_NAMESPACE_KUBECONFIG"
-    KUBECONFIG_VAR_NAME_EXTRA: "RETINA_NAMESPACE_KUBECONFIG_EXTRA"
+    <<: *setup_kube_variables
     GROUP: zmq
   tags:
-    - "${RETINA_TAG}"
-  extends:
-    - .prepare_test
+    - retina-e2e-amd64
   artifacts:
     paths:
       - ${SRSRANDIR}/tests/e2e/log
@@ -88,13 +91,14 @@ variables:
     reports:
       junit: ${SRSRANDIR}/tests/e2e/out.xml
   script:
+    - *setup_kube_config
     - |
       # Print E2E parameters
       echo "GROUP=${GROUP}"
       echo "TESTBED=${TESTBED}"
+      echo "E2E_FILE_OR_DIR=${E2E_FILE_OR_DIR}"
       echo "MARKERS=${MARKERS}"
       echo "KEYWORDS=${KEYWORDS}"
-      echo "PYTEST_ARGS=${PYTEST_ARGS}"
       echo "RETINA_PARAM_ARGS=${RETINA_PARAM_ARGS}"
       echo "RETINA_LAUNCHER_ARGS=${RETINA_LAUNCHER_ARGS}"
       echo "E2E_LOG_LEVEL=${E2E_LOG_LEVEL}"
@@ -111,16 +115,20 @@ variables:
     - |
       echo "" >> .gitlab/ci/e2e/.env
       cat $RETINA_CONFIG_ENV >> .gitlab/ci/e2e/.env
+      echo "" >> .gitlab/ci/e2e/.env
+      printenv | grep CI >> .gitlab/ci/e2e/.env
     # Modify request to shared the complete folder with the gnb container
     - |
-      yq -i '(.[] | select(.type == "gnb") | .shared_files) += [{"local_path": "../../", "remote_path": env(SRSRANDIR), "is_executable": false}]' ${SRSRANDIR}/.gitlab/ci/e2e/retina_request_${TESTBED}.yml
+      if [ "$CI_JOB_NAME_SLUG" != "smoke-zmq" ] && [ "$TESTBED" != "zmq_deb" ]; then
+        yq -i '(.[] | select(.type == "gnb") | .shared_files) = [{"local_path": "../../", "remote_path": env(SRSRANDIR), "is_executable": false}]' ${SRSRANDIR}/.gitlab/ci/e2e/${TESTBED}.yml
+      fi
     # Set username for retina
     - |
       cd tests/e2e
       export LOGNAME=ci_${GROUP}
     # Run Retina
     - |
-      E2E_CMD="retina-launcher ${RETINA_LAUNCHER_ARGS} --retina-request=${SRSRANDIR}/.gitlab/ci/e2e/retina_request_${TESTBED}.yml ${PYTEST_ARGS} -k '${KEYWORDS}' -m '${MARKERS}' --register-parameter ue.all.log_level=$E2E_LOG_LEVEL gnb.all.log_level=$E2E_LOG_LEVEL ${RETINA_PARAM_ARGS}"
+      E2E_CMD="retina-launcher ${E2E_FILE_OR_DIR} ${RETINA_LAUNCHER_ARGS} --retina-request=${SRSRANDIR}/.gitlab/ci/e2e/${TESTBED}.yml -k '${KEYWORDS}' -m '${MARKERS}' --register-parameter ue.all.log_level=$E2E_LOG_LEVEL gnb.all.log_level=$E2E_LOG_LEVEL 5gc.all.log_level=$E2E_LOG_LEVEL ${RETINA_PARAM_ARGS}"
       echo "${E2E_CMD}"
       eval $E2E_CMD
   after_script:
@@ -129,9 +137,9 @@ variables:
     - retina-delete-orchestration-network --user-name ci_${GROUP}
     # Push test metrics
     - |
-      find . -iname "test_metrics.csv" -exec \
-        influx write --host $INFLUXDB_URL --token $INFLUXDB_TOKEN --org $INFLUXDB_ORG \
-        --bucket ci --file {} \;
+      find . -iname "test_metrics.csv" -exec sh -c \
+        'influx write --host "$INFLUXDB_URL" --token "$INFLUXDB_TOKEN" --org "$INFLUXDB_ORG" \
+        --bucket ci --file "$1" || true' _ {} \;
     # Artifact size
     - echo -e "\e[0Ksection_start:`date +%s`:e2e_folder_section[collapsed=true]\r\e[0KLog folder's tree"
     - |
@@ -154,8 +162,30 @@ variables:
       }
       print_tree "${SRSRANDIR}/tests/e2e/log/" ""
     - echo -e "\e[0Ksection_end:`date +%s`:e2e_folder_section\r\e[0K"
+    # UI Link
+    - |
+      echo "*******************************************************************************************************************************"
+      echo "UI Link ---> ${RETINA_METRICS_UI_URL}&from=$(date -u -d $CI_JOB_STARTED_AT '+%Y-%m-%dT%H:%M:%S.%3NZ')&to=$(date -u '+%Y-%m-%dT%H:%M:%S.%3NZ')"
+      echo "*******************************************************************************************************************************"
+    # Report link
     - |
       subpath=$(echo "$SRSRANDIR" | sed "s|^$CI_PROJECT_DIR||")
       echo "*******************************************************************************************************************************"
       echo "Test report ---> https://softwareradiosystems.gitlab.io/-/$CI_PROJECT_NAME/-/jobs/$CI_JOB_ID/artifacts${subpath}/tests/e2e/log/report.html"
       echo "*******************************************************************************************************************************"
+    # Artifact transfer
+    - |
+      # Saving artifacts to the FTP server
+      # Verify if SSH connection is active
+      if ! nc -z -v "$FTP_SERVER_IP" 22 >/dev/null 2>&1; then
+          echo "Error: SSH server ${FTP_SERVER_IP}:22 is not active or is not reachable."
+          exit 1
+      fi
+      artifacts_dir="${SRSRANDIR}/tests/e2e/log"
+      compressed_artifact="artifacts_${CI_JOB_NAME_SLUG}_${CI_JOB_ID}.zip"
+      remote_path="E:/artifacts/"
+      # Compress the artifacts
+      zip -q -r "${compressed_artifact}" "${artifacts_dir}"
+      # Send the artifacts to the server
+      sshpass -p "${SSH_PASS}" scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -P 22 "${compressed_artifact}" "${SSH_USER}@${FTP_SERVER_IP}:${remote_path}"  >/dev/null 2>&1
+      echo "Artifacts saved at ${FTP_SERVER_IP}:${remote_path}/${compressed_artifact}"

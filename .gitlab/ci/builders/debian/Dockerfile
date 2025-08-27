@@ -1,12 +1,12 @@
 #
-# Copyright 2013-2024 Software Radio Systems Limited
+# Copyright 2013-2025 Software Radio Systems Limited
 #
 # By using this file, you agree to the terms and conditions set
 # forth in the LICENSE file which can be found at the top level of
 # the distribution.
 #
 
-ARG VERSION=24.10
+ARG VERSION=25.04
 ARG OS_NAME=ubuntu
 FROM $OS_NAME:$VERSION
 
@@ -30,6 +30,7 @@ RUN chmod +x /usr/local/bin/install_dependencies.sh /usr/local/bin/builder.sh /u
     python3 -m venv /usr/local/builder_tools && \
     /usr/local/builder_tools/bin/pip install "pandas<3" "psutil"
 
+ADD lib /opt/lib
 ADD uhd /opt/uhd
 ADD dpdk /opt/dpdk
 

@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -30,17 +30,16 @@
 using namespace srsran;
 using namespace ether;
 
-std::unique_ptr<gateway> srsran::ether::create_gateway(const gw_config& config, srslog::basic_logger& logger)
+std::unique_ptr<transmitter> srsran::ether::create_transmitter(const transmitter_config& config,
+                                                               srslog::basic_logger&     logger)
 {
   return std::make_unique<transmitter_impl>(config, logger);
 }
 
-std::unique_ptr<receiver> srsran::ether::create_receiver(const std::string&    interface,
-                                                         bool                  is_promiscuous_mode_enabled,
-                                                         task_executor&        executor,
-                                                         srslog::basic_logger& logger)
+std::unique_ptr<receiver>
+srsran::ether::create_receiver(const receiver_config& config, task_executor& executor, srslog::basic_logger& logger)
 {
-  return std::make_unique<receiver_impl>(interface, is_promiscuous_mode_enabled, executor, logger);
+  return std::make_unique<receiver_impl>(config, executor, logger);
 }
 
 std::unique_ptr<frame_builder> srsran::ether::create_vlan_frame_builder(const vlan_frame_params& eth_params)
@@ -53,7 +52,8 @@ std::unique_ptr<frame_builder> srsran::ether::create_frame_builder(const vlan_fr
   return std::make_unique<frame_builder_impl>(eth_params);
 }
 
-std::unique_ptr<vlan_frame_decoder> srsran::ether::create_vlan_frame_decoder(srslog::basic_logger& logger)
+std::unique_ptr<vlan_frame_decoder> srsran::ether::create_vlan_frame_decoder(srslog::basic_logger& logger,
+                                                                             unsigned              sector_id)
 {
-  return std::make_unique<vlan_frame_decoder_impl>(logger);
+  return std::make_unique<vlan_frame_decoder_impl>(logger, sector_id);
 }

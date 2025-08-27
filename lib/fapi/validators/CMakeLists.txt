@@ -1,5 +1,5 @@
 #
-# Copyright 2021-2024 Software Radio Systems Limited
+# Copyright 2021-2025 Software Radio Systems Limited
 #
 # This file is part of srsRAN
 #
@@ -22,6 +22,7 @@ set(SOURCES
         dl_csi_pdu.cpp
         dl_pdcch_pdu.cpp
         dl_pdsch_pdu.cpp
+        dl_prs_pdu.cpp
         dl_ssb_pdu.cpp
         message_validators.cpp
         tx_precoding_and_beamforming_pdu.cpp

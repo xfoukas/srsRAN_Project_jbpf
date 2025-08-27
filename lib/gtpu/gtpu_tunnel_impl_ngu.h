@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -39,10 +39,10 @@ public:
                        dlt_pcap&                                   gtpu_pcap,
                        gtpu_tunnel_ngu_rx_lower_layer_notifier&    rx_lower,
                        gtpu_tunnel_common_tx_upper_layer_notifier& tx_upper,
-                       timer_factory                               ue_dl_timer_factory) :
+                       timer_factory                               ue_ctrl_timer_factory) :
     logger(srslog::fetch_basic_logger("GTPU"))
   {
-    rx = std::make_unique<gtpu_tunnel_ngu_rx_impl>(ue_index, cfg.rx, rx_lower, ue_dl_timer_factory);
+    rx = std::make_unique<gtpu_tunnel_ngu_rx_impl>(ue_index, cfg.rx, rx_lower, ue_ctrl_timer_factory);
     tx = std::make_unique<gtpu_tunnel_ngu_tx_impl>(ue_index, cfg.tx, gtpu_pcap, tx_upper);
   }
   ~gtpu_tunnel_ngu_impl() override = default;
@@ -53,7 +53,7 @@ public:
     rx->stop();
   }
   gtpu_tunnel_common_rx_upper_layer_interface* get_rx_upper_layer_interface() final { return rx.get(); }
-  gtpu_tunnel_ngu_tx_lower_layer_interface*    get_tx_lower_layer_interface() final { return tx.get(); };
+  gtpu_tunnel_ngu_tx_lower_layer_interface*    get_tx_lower_layer_interface() final { return tx.get(); }
 
 private:
   srslog::basic_logger& logger;

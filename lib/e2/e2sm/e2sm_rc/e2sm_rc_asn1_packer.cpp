@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -83,7 +83,7 @@ e2sm_rc_asn1_packer::handle_packed_ric_control_request(const asn1::e2ap::ric_ctr
         req->ric_ctrl_ack_request.value == asn1::e2ap::ric_ctrl_ack_request_e::ack;
   }
   return ric_control_request;
-};
+}
 
 e2_ric_control_response e2sm_rc_asn1_packer::pack_ric_control_response(const e2sm_ric_control_response& e2sm_response)
 {
@@ -152,16 +152,10 @@ asn1::unbounded_octstring<true> e2sm_rc_asn1_packer::pack_ran_function_descripti
 
   for (auto const& x : control_services) {
     ran_function_desc.ran_function_definition_ctrl_present = true;
-    e2sm_rc_control_service_base* control_service          = dynamic_cast<e2sm_rc_control_service_base*>(x.second);
-
-    if (!control_service) {
-      continue;
-    }
-
-    ran_function_definition_ctrl_item_s ran_function_definition_ctrl_item;
-    if (control_service->fill_ran_function_description(ran_function_definition_ctrl_item)) {
-      ran_function_desc.ran_function_definition_ctrl.ric_ctrl_style_list.push_back(ran_function_definition_ctrl_item);
-    }
+    e2sm_control_service*               control_service    = x.second;
+    ran_function_definition_ctrl_item_s ran_function_definition_ctrl_item =
+        control_service->get_control_style_definition();
+    ran_function_desc.ran_function_definition_ctrl.ric_ctrl_style_list.push_back(ran_function_definition_ctrl_item);
   }
   asn1::unbounded_octstring<true> ran_function_description;
 

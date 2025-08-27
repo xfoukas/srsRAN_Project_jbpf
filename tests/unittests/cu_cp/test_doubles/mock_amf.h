@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -40,6 +40,9 @@ public:
 
   /// Enqueue an NGAP PDU that the AMF will automatically send as a response to the next CU-CP Tx PDU.
   virtual void enqueue_next_tx_pdu(const ngap_message& pdu) = 0;
+
+  /// Simulate a drop of the AMF connection.
+  virtual void drop_connection() = 0;
 };
 
 /// Creates a mock AMF to interface with the CU-CP.

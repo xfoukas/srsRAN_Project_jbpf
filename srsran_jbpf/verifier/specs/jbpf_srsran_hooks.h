@@ -308,6 +308,20 @@ DECLARE_JBPF_HOOK(pdcp_dl_new_sdu,
     )
 )
 
+// trigger: when new SDU is received from higher layers
+DECLARE_JBPF_HOOK(pdcp_dl_dropped_sdu,
+    struct jbpf_ran_generic_ctx ctx,
+    ctx,
+    HOOK_PROTO(
+        struct jbpf_pdcp_ctx_info *bearer,
+        uint32_t reason),
+    HOOK_ASSIGN(
+        ctx.data = (uint64_t)bearer;
+        ctx.data_end = (uint64_t) ((uint8_t*)bearer + sizeof(struct jbpf_pdcp_ctx_info));
+        ctx.srs_meta_data1 = (uint64_t)reason;
+    )
+)
+
 // trigger: when a PDCP PDU is sent to lower layers
 DECLARE_JBPF_HOOK(pdcp_dl_tx_data_pdu,
     struct jbpf_ran_generic_ctx ctx,
@@ -436,6 +450,20 @@ DECLARE_JBPF_HOOK(pdcp_ul_rx_control_pdu,
         ctx.data = (uint64_t)bearer;
         ctx.data_end = (uint64_t) ((uint8_t*)bearer + sizeof(struct jbpf_pdcp_ctx_info));
         ctx.srs_meta_data1 = (uint64_t)pdu_length;
+    )
+)
+
+// trigger: when a control PDU is received from lower layers
+DECLARE_JBPF_HOOK(pdcp_ul_rx_pdu_dropped,  
+    struct jbpf_ran_generic_ctx ctx,
+    ctx,
+    HOOK_PROTO(
+        struct jbpf_pdcp_ctx_info *bearer,
+        uint32_t reason),
+    HOOK_ASSIGN(
+        ctx.data = (uint64_t)bearer;
+        ctx.data_end = (uint64_t) ((uint8_t*)bearer + sizeof(struct jbpf_pdcp_ctx_info));
+        ctx.srs_meta_data1 = (uint64_t)reason;
     )
 )
 

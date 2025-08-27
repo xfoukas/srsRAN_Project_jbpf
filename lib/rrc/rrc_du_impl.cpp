@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -81,10 +81,11 @@ bool rrc_du_impl::handle_served_cell_list(const std::vector<cu_cp_du_served_cell
 
     cell_info_db.emplace(served_cell.served_cell_info.nr_cgi.nci, cell_info);
 
-    // fill cell meas config
+    // Fill cell meas config.
     serving_cell_meas_config meas_cfg;
     meas_cfg.nci               = served_cell.served_cell_info.nr_cgi.nci;
     meas_cfg.gnb_id_bit_length = cfg.gnb_id.bit_length;
+    meas_cfg.plmn              = served_cell.served_cell_info.nr_cgi.plmn_id;
     meas_cfg.pci               = served_cell.served_cell_info.nr_pci;
     meas_cfg.band              = cell_info.band;
     // TODO: which meas timing to use here?
@@ -92,7 +93,7 @@ bool rrc_du_impl::handle_served_cell_list(const std::vector<cu_cp_du_served_cell
     meas_cfg.ssb_arfcn = cell_info.meas_timings.begin()->freq_and_timing.value().carrier_freq;
     meas_cfg.ssb_scs   = cell_info.meas_timings.begin()->freq_and_timing.value().ssb_subcarrier_spacing;
 
-    // Update cell config in cell meas manager
+    // Update cell config in cell meas manager.
     logger.debug("Updating cell={:#x} with band={} ssb_arfcn={} ssb_scs={}",
                  meas_cfg.nci,
                  nr_band_to_uint(meas_cfg.band.value()),
@@ -109,7 +110,7 @@ bool rrc_du_impl::handle_served_cell_list(const std::vector<cu_cp_du_served_cell
 
 byte_buffer rrc_du_impl::get_rrc_reject()
 {
-  // pack RRC Reconfig
+  // Pack RRC Reconfig.
   dl_ccch_msg_s dl_ccch_msg;
   dl_ccch_msg.msg.set_c1().set_rrc_reject().crit_exts.set_rrc_reject();
   return pack_into_pdu(dl_ccch_msg, "RRCReject");
@@ -120,7 +121,7 @@ rrc_ue_interface* rrc_du_impl::add_ue(const rrc_ue_creation_message& msg)
   // If the DU to CU container is missing, assume the DU can't serve the UE, so the CU-CP should reject the UE, see
   // TS 38.473 section 8.4.1.2.
   if (!msg.du_to_cu_container.empty()) {
-    // Unpack DU to CU container
+    // Unpack DU to CU container.
     asn1::rrc_nr::cell_group_cfg_s cell_group_cfg;
     asn1::cbit_ref                 bref_cell({msg.du_to_cu_container.begin(), msg.du_to_cu_container.end()});
     if (cell_group_cfg.unpack(bref_cell) != asn1::SRSASN_SUCCESS) {
@@ -135,7 +136,7 @@ rrc_ue_interface* rrc_du_impl::add_ue(const rrc_ue_creation_message& msg)
     }
   }
 
-  // create UE object
+  // Create UE object.
   ue_index_t   ue_index                 = msg.ue_index;
   rrc_ue_cfg_t ue_cfg                   = {};
   ue_cfg.force_reestablishment_fallback = cfg.force_reestablishment_fallback;
@@ -146,12 +147,16 @@ rrc_ue_interface* rrc_du_impl::add_ue(const rrc_ue_creation_message& msg)
   rrc_cell_context rrc_cell = msg.cell;
   rrc_cell.ssb_arfcn        = ue_cfg.meas_timings.front().freq_and_timing.value().carrier_freq;
 
+  // Add RRC UE to RRC DU adapter.
+  rrc_ue_rrc_du_adapters.emplace(ue_index, rrc_ue_rrc_du_adapter{get_rrc_du_connection_event_handler()});
+
   auto res = ue_db.emplace(ue_index,
                            std::make_unique<rrc_ue_impl>(*msg.f1ap_pdu_notifier,
                                                          *msg.ngap_notifier,
                                                          *msg.rrc_ue_cu_cp_notifier,
                                                          *msg.measurement_notifier,
                                                          *msg.cu_cp_ue_notifier,
+                                                         rrc_ue_rrc_du_adapters.at(ue_index),
                                                          msg.ue_index,
                                                          msg.c_rnti,
                                                          rrc_cell,
@@ -183,6 +188,12 @@ void rrc_du_impl::remove_ue(ue_index_t ue_index)
     return;
   }
 
+  // Delete RRC UE to RRC DU adapter.
+  rrc_ue_rrc_du_adapters.erase(ue_index);
+
+  // Notify metrics.
+  metrics_aggregator.aggregate_successful_rrc_release();
+
 #ifdef JBPF_ENABLED 
   {
     struct jbpf_rrc_ctx_info ctx_info = {0, (uint64_t)ue_index};
@@ -194,7 +205,41 @@ void rrc_du_impl::remove_ue(ue_index_t ue_index)
   ue_db.erase(ue_it);
 }
 
+void rrc_du_impl::handle_successful_rrc_setup(std::optional<establishment_cause_t> cause)
+{
+  if (cause.has_value()) {
+    metrics_aggregator.aggregate_successful_connection_establishment(cause.value());
+    return;
+  }
+  metrics_aggregator.aggregate_successful_rrc_setup();
+}
+
+void rrc_du_impl::handle_successful_rrc_release()
+{
+  metrics_aggregator.aggregate_successful_rrc_release();
+}
+
+void rrc_du_impl::handle_attempted_rrc_setup(establishment_cause_t cause)
+{
+  metrics_aggregator.aggregate_attempted_connection_establishment(cause);
+}
+
+void rrc_du_impl::handle_attempted_rrc_reestablishment()
+{
+  metrics_aggregator.aggregate_attempted_connection_reestablishment();
+}
+
+void rrc_du_impl::handle_successful_rrc_reestablishment()
+{
+  metrics_aggregator.aggregate_successful_connection_reestablishment(true);
+}
+
+void rrc_du_impl::handle_successful_rrc_reestablishment_fallback()
+{
+  metrics_aggregator.aggregate_successful_connection_reestablishment(false);
+}
+
 void rrc_du_impl::release_ues()
 {
-  // release all UEs connected to this RRC entity
+  // TODO: release all UEs connected to this RRC entity.
 }

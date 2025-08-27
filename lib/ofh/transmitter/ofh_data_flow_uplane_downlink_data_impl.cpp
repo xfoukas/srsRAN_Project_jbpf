@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -22,7 +22,8 @@
 
 #include "ofh_data_flow_uplane_downlink_data_impl.h"
 #include "ofh_uplane_fragment_size_calculator.h"
-#include "scoped_frame_buffer.h"
+#include "srsran/ofh/ethernet/ethernet_frame_pool.h"
+#include "srsran/ofh/timing/slot_symbol_point.h"
 #include "srsran/phy/support/resource_grid_context.h"
 #include "srsran/phy/support/resource_grid_reader.h"
 #include "srsran/phy/support/shared_resource_grid.h"
@@ -43,7 +44,7 @@ static uplane_message_params generate_dl_ofh_user_parameters(slot_point         
   uplane_message_params params;
   params.direction                     = data_direction::downlink;
   params.slot                          = slot;
-  params.filter_index                  = srsran::ofh::filter_index_type::standard_channel_filter;
+  params.filter_index                  = filter_index_type::standard_channel_filter;
   params.start_prb                     = start_prb;
   params.nof_prb                       = nof_prb;
   params.symbol_id                     = symbol_id;
@@ -77,6 +78,7 @@ data_flow_uplane_downlink_data_impl::data_flow_uplane_downlink_data_impl(
   logger(*dependencies.logger),
   nof_symbols_per_slot(get_nsymb_per_slot(config.cp)),
   ru_nof_prbs(config.ru_nof_prbs),
+  sector_id(config.sector),
   compr_params(config.compr_params),
   frame_pool(std::move(dependencies.frame_pool)),
   compressor_sel(std::move(dependencies.compressor_sel)),
@@ -123,18 +125,7 @@ void data_flow_uplane_downlink_data_impl::enqueue_section_type_1_message_symbol_
   for (unsigned symbol_id = context.symbol_range.start(), symbol_end = context.symbol_range.length();
        symbol_id != symbol_end;
        ++symbol_id) {
-    trace_point         pool_access_tp = ofh_tracer.now();
-    slot_symbol_point   symbol_point(context.slot, symbol_id, nof_symbols_per_slot);
-    scoped_frame_buffer scoped_buffer(*frame_pool, symbol_point, message_type::user_plane, data_direction::downlink);
-    if (scoped_buffer.empty()) {
-      logger.warning("Not enough space in the buffer pool to create a downlink User-Plane message for slot '{}' and "
-                     "eAxC '{}', symbol_id '{}'",
-                     context.slot,
-                     context.eaxc,
-                     symbol_id);
-      return;
-    }
-    ofh_tracer << trace_event("ofh_uplane_pool_access", pool_access_tp);
+    slot_symbol_point symbol_point(context.slot, symbol_id, nof_symbols_per_slot);
 
     span<const cbf16_t> iq_data;
     if (SRSRAN_LIKELY(ru_nof_prbs * NOF_SUBCARRIERS_PER_RB == reader.get_nof_subc())) {
@@ -151,24 +142,38 @@ void data_flow_uplane_downlink_data_impl::enqueue_section_type_1_message_symbol_
     unsigned                            fragment_start_prb = 0U;
     unsigned                            fragment_nof_prbs  = 0U;
     do {
-      ether::frame_buffer& frame_buffer = scoped_buffer.get_next_frame();
-      span<uint8_t>        data         = frame_buffer.data();
+      trace_point pool_access_tp = ofh_tracer.now();
+      auto        scoped_buffer  = frame_pool->reserve(symbol_point);
+      ofh_tracer << trace_event("ofh_uplane_pool_access", pool_access_tp);
+
+      if (SRSRAN_UNLIKELY(!scoped_buffer)) {
+        logger.warning(
+            "Sector#{}: not enough space in the buffer pool to create a downlink User-Plane message for slot "
+            "'{}' and eAxC '{}', symbol_id '{}'",
+            sector_id,
+            context.slot,
+            context.eaxc,
+            symbol_id);
+        return;
+      }
+      span<uint8_t> data = scoped_buffer->get_buffer();
 
       is_last_fragment = prb_fragment_calculator.calculate_fragment_size(
           fragment_start_prb, fragment_nof_prbs, data.size() - headers_size.value());
 
       // Skip frame buffers so small that cannot carry one PRB.
-      if (fragment_nof_prbs == 0) {
-        logger.warning(
-            "Skipped frame buffer as it cannot store data for a single PRB, required buffer size is '{}' bytes",
-            data.size());
+      if (SRSRAN_UNLIKELY(fragment_nof_prbs == 0)) {
+        logger.warning("Sector#{}: skipped frame buffer as it cannot store data for a single PRB, required buffer size "
+                       "is '{}' bytes",
+                       sector_id,
+                       data.size());
 
         continue;
       }
 
       ofh_tracer << instant_trace_event{"ofh_uplane_symbol", instant_trace_event::cpu_scope::thread};
 
-      const uplane_message_params& up_params =
+      uplane_message_params up_params =
           generate_dl_ofh_user_parameters(context.slot, symbol_id, fragment_start_prb, fragment_nof_prbs, compr_params);
 
       unsigned used_size = enqueue_section_type_1_message_symbol(
@@ -176,7 +181,7 @@ void data_flow_uplane_downlink_data_impl::enqueue_section_type_1_message_symbol_
           up_params,
           context.eaxc,
           data);
-      frame_buffer.set_size(used_size);
+      scoped_buffer->set_size(used_size);
     } while (!is_last_fragment);
   }
 }
@@ -205,14 +210,22 @@ unsigned data_flow_uplane_downlink_data_impl::enqueue_section_type_1_message_sym
   span<uint8_t> eth_buffer = span<uint8_t>(buffer).first(ether_header_size.value() + bytes_written);
   eth_builder->build_frame(eth_buffer);
 
-  logger.debug("Packing a downlink User-Plane message for slot '{}' and eAxC '{}', symbol_id '{}', PRB range '{}:{}', "
-               "size '{}' bytes",
-               params.slot,
-               eaxc,
-               params.symbol_id,
-               params.start_prb,
-               params.nof_prb,
-               eth_buffer.size());
+  if (SRSRAN_UNLIKELY(logger.debug.enabled())) {
+    logger.debug("Sector#{}: packing a downlink User-Plane message for slot '{}' and eAxC '{}', symbol_id '{}', PRB "
+                 "range '{}:{}', size '{}' bytes",
+                 sector_id,
+                 params.slot,
+                 eaxc,
+                 params.symbol_id,
+                 params.start_prb,
+                 params.nof_prb,
+                 eth_buffer.size());
+  }
 
   return eth_buffer.size();
+}
+
+data_flow_message_encoding_metrics_collector* data_flow_uplane_downlink_data_impl::get_metrics_collector()
+{
+  return nullptr;
 }

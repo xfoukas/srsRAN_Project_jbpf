@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -23,9 +23,12 @@
 #pragma once
 
 #include "du_bearer_resource_manager.h"
+#include "du_drx_resource_manager.h"
+#include "du_meas_config_manager.h"
 #include "du_pucch_resource_manager.h"
 #include "du_ran_resource_manager.h"
 #include "du_srs_resource_manager.h"
+#include "ra_resource_manager.h"
 #include "ue_capability_manager.h"
 #include "srsran/ran/qos/five_qi.h"
 
@@ -37,9 +40,10 @@ class du_ran_resource_manager_impl;
 class du_ue_ran_resource_updater_impl final : public ue_ran_resource_configurator::resource_updater
 {
 public:
-  du_ue_ran_resource_updater_impl(du_ue_resource_config*        cell_cfg_,
-                                  du_ran_resource_manager_impl& parent_,
-                                  du_ue_index_t                 ue_index_);
+  du_ue_ran_resource_updater_impl(du_ue_resource_config*                      cell_cfg_,
+                                  const std::optional<ue_capability_summary>& ue_caps_,
+                                  du_ran_resource_manager_impl&               parent_,
+                                  du_ue_index_t                               ue_index_);
   du_ue_ran_resource_updater_impl(const du_ue_ran_resource_updater_impl&)            = delete;
   du_ue_ran_resource_updater_impl(const du_ue_ran_resource_updater_impl&&)           = delete;
   du_ue_ran_resource_updater_impl& operator=(const du_ue_ran_resource_updater_impl&) = delete;
@@ -48,14 +52,20 @@ public:
 
   du_ue_resource_update_response update(du_cell_index_t                       pcell_index,
                                         const f1ap_ue_context_update_request& upd_req,
-                                        const du_ue_resource_config*          reestablished_context) override;
+                                        const du_ue_resource_config*          reestablished_context,
+                                        const ue_capability_summary*          reestablished_ue_caps) override;
+
+  void config_applied() override;
 
   const du_ue_resource_config& get() override { return *cell_grp; }
 
+  const std::optional<ue_capability_summary>& ue_capabilities() const override { return *ue_caps; }
+
 private:
-  du_ue_resource_config*        cell_grp;
-  du_ran_resource_manager_impl* parent;
-  du_ue_index_t                 ue_index;
+  du_ue_resource_config*                      cell_grp;
+  const std::optional<ue_capability_summary>* ue_caps;
+  du_ran_resource_manager_impl*               parent;
+  du_ue_index_t                               ue_index;
 };
 
 class du_ran_resource_manager_impl : public du_ran_resource_manager
@@ -72,7 +82,7 @@ public:
   du_ran_resource_manager_impl& operator=(const du_ran_resource_manager_impl&) = delete;
 
   expected<ue_ran_resource_configurator, std::string>
-  create_ue_resource_configurator(du_ue_index_t ue_index, du_cell_index_t pcell_index) override;
+  create_ue_resource_configurator(du_ue_index_t ue_index, du_cell_index_t pcell_index, bool has_tc_rnti) override;
 
   /// \brief Updates a UE's cell configuration context based on the F1 UE Context Update request.
   ///
@@ -87,12 +97,16 @@ public:
   du_ue_resource_update_response update_context(du_ue_index_t                         ue_index,
                                                 du_cell_index_t                       pcell_idx,
                                                 const f1ap_ue_context_update_request& upd_req,
-                                                const du_ue_resource_config*          reestablished_context);
+                                                const du_ue_resource_config*          reestablished_context,
+                                                const ue_capability_summary*          reestablished_ue_caps);
 
   /// \brief Deallocates the RAN resources taken by the UE, so that they can be used by future UEs.
   ///
   /// \param ue_index Id of the UE whose context is being deallocated.
   void deallocate_context(du_ue_index_t ue_index);
+
+  /// The UE has confirmed that correct application of the new configuration.
+  void ue_config_applied(du_ue_index_t ue_index);
 
 private:
   error_type<std::string>
@@ -109,19 +123,28 @@ private:
     /// Processor of UE capabilities.
     ue_capability_manager ue_cap_manager;
 
-    ue_resource_context(const du_ran_resource_manager_impl& parent_);
+    ue_resource_context(du_ran_resource_manager_impl& parent_);
   };
 
-  /// Current UE Resource Allocations.
+  // Current UE Resource Allocations.
   slotted_array<ue_resource_context, MAX_NOF_DU_UES, false> ue_res_pool;
 
-  /// Allocator of UE PUCCH resources.
+  // Allocator of UE PUCCH resources.
   du_pucch_resource_manager pucch_res_mng;
 
-  /// Allocator of UE bearer resources.
+  // Allocator of UE bearer resources.
   du_bearer_resource_manager bearer_res_mng;
 
   std::unique_ptr<du_srs_resource_manager> srs_res_mng;
+
+  // measConfig resources.
+  du_meas_config_manager meas_cfg_mng;
+
+  // Allocator of DRX and measGap resources for the DU.
+  du_drx_resource_manager drx_res_mng;
+
+  // Allocator of RA resources.
+  ra_resource_manager ra_res_alloc;
 };
 
 } // namespace srs_du

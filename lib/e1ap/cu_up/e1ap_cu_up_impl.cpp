@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -29,6 +29,7 @@
 #include "procedures/e1ap_cu_up_setup_procedure.h"
 #include "srsran/e1ap/common/e1ap_message.h"
 #include "srsran/ran/bcd_helper.h"
+#include "srsran/support/format/fmt_to_c_str.h"
 #include "srsran/support/timers.h"
 #include <memory>
 
@@ -59,18 +60,32 @@ private:
 
 } // namespace
 
-e1ap_cu_up_impl::e1ap_cu_up_impl(e1_connection_client&        e1_client_handler_,
+e1ap_cu_up_impl::e1ap_cu_up_impl(const e1ap_configuration&    e1ap_cfg_,
+                                 e1_connection_client&        e1_client_handler_,
                                  e1ap_cu_up_manager_notifier& cu_up_notifier_,
                                  timer_manager&               timers_,
                                  task_executor&               cu_up_exec_) :
+  e1ap_cfg(e1ap_cfg_),
   logger(srslog::fetch_basic_logger("CU-UP-E1")),
   cu_up_notifier(cu_up_notifier_),
   timers(timers_),
   cu_up_exec(cu_up_exec_),
   connection_handler(e1_client_handler_, *this),
   ue_ctxt_list(logger),
-  ev_mng(std::make_unique<e1ap_event_manager>(timer_factory{timers, cu_up_exec}))
+  ev_mng(std::make_unique<e1ap_event_manager>(timer_factory{timers, cu_up_exec})),
+  metrics(e1ap_cfg.metrics_period.count())
 {
+  if (e1ap_cfg.metrics_period.count()) {
+    metrics_timer = timers.create_unique_timer(cu_up_exec);
+    metrics_timer.set(std::chrono::milliseconds(e1ap_cfg.metrics_period), [this](timer_id_t tid) {
+      // TODO push metrics to notifier.
+      auto  m        = metrics.get_metrics_and_reset();
+      auto& m_logger = srslog::fetch_basic_logger("METRICS");
+      m_logger.info("CU-UP E1AP metrics: {}", format_e1ap_cu_up_metrics(e1ap_cfg.metrics_period, m));
+      metrics_timer.run();
+    });
+    metrics_timer.run();
+  }
 }
 
 // Note: For fwd declaration of member types, dtor cannot be trivial.
@@ -98,11 +113,12 @@ void e1ap_cu_up_impl::handle_bearer_context_inactivity_notification(
     const e1ap_bearer_context_inactivity_notification& msg)
 {
   if (!ue_ctxt_list.contains(msg.ue_index)) {
-    logger.error("ue={}: Dropping BearerContextInactivityNotification. UE does not exist", msg.ue_index);
+    logger.error("ue={}: Dropping BearerContextInactivityNotification. UE does not exist",
+                 fmt::underlying(msg.ue_index));
     return;
   }
 
-  // Get UE context
+  // Get UE context.
   e1ap_ue_context& ue_ctxt = ue_ctxt_list[msg.ue_index];
 
   e1ap_message e1ap_msg;
@@ -173,7 +189,7 @@ void e1ap_cu_up_impl::handle_initiating_message(const asn1::e1ap::init_msg_s& ms
 
 void e1ap_cu_up_impl::handle_bearer_context_setup_request(const asn1::e1ap::bearer_context_setup_request_s& msg)
 {
-  // create failure message for early returns
+  // Create failure message for early returns.
   e1ap_message e1ap_msg;
   e1ap_msg.pdu.set_unsuccessful_outcome();
   e1ap_msg.pdu.unsuccessful_outcome().load_info_obj(ASN1_E1AP_ID_BEARER_CONTEXT_SETUP);
@@ -194,7 +210,7 @@ void e1ap_cu_up_impl::handle_bearer_context_setup_request(const asn1::e1ap::bear
   gnb_cu_up_ue_e1ap_id_t cu_up_ue_e1ap_id = ue_ctxt_list.next_gnb_cu_up_ue_e1ap_id();
   if (cu_up_ue_e1ap_id == gnb_cu_up_ue_e1ap_id_t::invalid) {
     logger.error("Sending BearerContextSetupFailure. Cause: No CU-UP-UE-E1AP-ID available");
-    
+
 #ifdef JBPF_ENABLED 
     {
       struct jbpf_cuup_e1_ctx_info bearer_info = {0, 0, msg->gnb_cu_cp_ue_e1ap_id, 0};
@@ -202,18 +218,23 @@ void e1ap_cu_up_impl::handle_bearer_context_setup_request(const asn1::e1ap::bear
     }
   #endif
 
-    // send response
+    // Send response.
     pdu_notifier->on_new_message(e1ap_msg);
     return;
   }
 
-  // Add gnb_cu_up_ue_e1ap_id to failure message
+  // Add gnb_cu_up_ue_e1ap_id to failure message.
   e1ap_msg.pdu.unsuccessful_outcome().value.bearer_context_setup_fail()->gnb_cu_up_ue_e1ap_id =
       gnb_cu_up_ue_e1ap_id_to_uint(cu_up_ue_e1ap_id);
 
-  // Forward message to CU-UP
+  // Forward message to CU-UP.
   e1ap_bearer_context_setup_request bearer_context_setup = {};
-  fill_e1ap_bearer_context_setup_request(bearer_context_setup, msg);
+  if (!fill_e1ap_bearer_context_setup_request(bearer_context_setup, msg)) {
+    logger.error("Sending BearerContextSetupFailure. Cause: Invalid BearerContextSetupRequest");
+    // Send response.
+    pdu_notifier->on_new_message(e1ap_msg);
+    return;
+  }
 
   e1ap_bearer_context_setup_response bearer_context_setup_response_msg =
       cu_up_notifier.on_bearer_context_setup_request_received(bearer_context_setup);
@@ -228,12 +249,12 @@ void e1ap_cu_up_impl::handle_bearer_context_setup_request(const asn1::e1ap::bear
     }
 #endif
 
-    // send response
+    // Send response.
     pdu_notifier->on_new_message(e1ap_msg);
     return;
   }
 
-  // Create UE context and store it
+  // Create UE context and store it.
   ue_ctxt_list.add_ue(bearer_context_setup_response_msg.ue_index,
                       cu_up_ue_e1ap_id,
                       int_to_gnb_cu_cp_ue_e1ap_id(msg->gnb_cu_cp_ue_e1ap_id),
@@ -261,8 +282,10 @@ void e1ap_cu_up_impl::handle_bearer_context_setup_request(const asn1::e1ap::bear
     }
 #endif
       
-    // send response
+    // Send response.
     pdu_notifier->on_new_message(e1ap_msg);
+
+    metrics.add_successful_context_setup();
   } else {
     e1ap_msg.pdu.unsuccessful_outcome().value.bearer_context_setup_fail()->cause =
         cause_to_asn1(bearer_context_setup_response_msg.cause.value());
@@ -274,14 +297,14 @@ void e1ap_cu_up_impl::handle_bearer_context_setup_request(const asn1::e1ap::bear
     }
 #endif
 
-    // send response
+    // Send response.
     pdu_notifier->on_new_message(e1ap_msg);
   }
 }
 
 void e1ap_cu_up_impl::handle_bearer_context_modification_request(const asn1::e1ap::bearer_context_mod_request_s& msg)
 {
-  // create failure message for early returns
+  // Create failure message for early returns.
   e1ap_message e1ap_msg;
   e1ap_msg.pdu.set_unsuccessful_outcome();
   e1ap_msg.pdu.unsuccessful_outcome().load_info_obj(ASN1_E1AP_ID_BEARER_CONTEXT_MOD);
@@ -307,17 +330,17 @@ void e1ap_cu_up_impl::handle_bearer_context_modification_request(const asn1::e1a
 
   cu_up_notifier.on_schedule_ue_async_task(
       ue_ctxt.ue_ids.ue_index,
-      launch_async<bearer_context_modification_procedure>(ue_ctxt, msg, *pdu_notifier, cu_up_notifier));
+      launch_async<bearer_context_modification_procedure>(ue_ctxt, msg, *pdu_notifier, cu_up_notifier, metrics));
 }
 
 void e1ap_cu_up_impl::handle_bearer_context_release_command(const asn1::e1ap::bearer_context_release_cmd_s& msg)
 {
   if (!ue_ctxt_list.contains(int_to_gnb_cu_up_ue_e1ap_id(msg->gnb_cu_up_ue_e1ap_id))) {
-    // create failure message for early returns
+    // Create failure message for early returns.
     e1ap_message e1ap_msg;
     e1ap_msg.pdu.set_unsuccessful_outcome();
     e1ap_msg.pdu.unsuccessful_outcome().load_info_obj(ASN1_E1AP_ID_BEARER_CONTEXT_RELEASE);
-    // TODO fill other values
+    // TODO fill other values.
 
 #ifdef JBPF_ENABLED 
     { 
@@ -334,12 +357,13 @@ void e1ap_cu_up_impl::handle_bearer_context_release_command(const asn1::e1ap::be
   e1ap_ue_context& ue_ctxt  = ue_ctxt_list[int_to_gnb_cu_up_ue_e1ap_id(msg->gnb_cu_up_ue_e1ap_id)];
   ue_index_t       ue_index = ue_ctxt.ue_ids.ue_index;
 
-  // Remove UE context at E1AP before switching to UE execution context to avoid concurrent access of ue_ctxt_list
+  // Remove UE context at E1AP before switching to UE execution context to avoid concurrent access of ue_ctxt_list.
   ue_ctxt_list.remove_ue(ue_ctxt.ue_ids.ue_index);
 
-  // Handle the release procedure
+  // Handle the release procedure.
   cu_up_notifier.on_schedule_ue_async_task(
-      ue_index, launch_async<bearer_context_release_procedure>(ue_index, msg, *pdu_notifier, cu_up_notifier, logger));
+      ue_index,
+      launch_async<bearer_context_release_procedure>(ue_index, msg, *pdu_notifier, cu_up_notifier, metrics, logger));
 }
 
 void e1ap_cu_up_impl::handle_successful_outcome(const asn1::e1ap::successful_outcome_s& outcome)
@@ -387,7 +411,7 @@ void e1ap_cu_up_impl::log_pdu(bool is_rx, const e1ap_message& e1ap_pdu)
   }
 
   // Log PDU.
-  log_e1ap_pdu(logger, is_rx, ue_idx, e1ap_pdu, logger.debug.enabled());
+  log_e1ap_pdu(logger, is_rx, ue_idx, e1ap_pdu, e1ap_cfg.json_log_enabled);
 }
 
 // ---- e1ap_message_notifier_with_logging

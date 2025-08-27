@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -19,6 +19,7 @@
  * and at http://www.gnu.org/licenses/.
  *
  */
+
 #if defined(__GNUC__) && (__GNUC__ > 10) && (__GNUC__ < 14) && defined(__OPTIMIZE__)
 #pragma GCC diagnostic ignored "-Warray-bounds"
 #pragma message "GCC versions greater than 10 give a likely false array-bounds alarm."
@@ -46,9 +47,9 @@ void test_merge_even()
   // - even subcarrier indexes, and
   // - even symbol indexes.
   re_pattern pattern_1 = {};
-  pattern_1.prb_mask   = bounded_bitset<MAX_RB>(rb_end);
+  pattern_1.crb_mask   = crb_bitmap(rb_end);
   for (unsigned i_prb = rb_begin; i_prb < rb_end; i_prb += rb_stride) {
-    pattern_1.prb_mask.set(i_prb);
+    pattern_1.crb_mask.set(i_prb);
   }
   for (unsigned k = 0; k != NRE; ++k) {
     pattern_1.re_mask.set(k, k % 2 == 0);
@@ -116,9 +117,9 @@ void test_merge_odd()
   // - even subcarrier indexes, and
   // - even symbol indexes.
   re_pattern pattern_1 = {};
-  pattern_1.prb_mask   = bounded_bitset<MAX_RB>(rb_end);
+  pattern_1.crb_mask   = crb_bitmap(rb_end);
   for (unsigned i_prb = rb_begin; i_prb < rb_end; i_prb += rb_stride) {
-    pattern_1.prb_mask.set(i_prb);
+    pattern_1.crb_mask.set(i_prb);
   }
   for (unsigned k = 0; k != NRE; ++k) {
     pattern_1.re_mask.set(k, k % 2 == 0);
@@ -174,8 +175,8 @@ void test_merge_same()
 {
   // Create a pattern.
   re_pattern pattern;
-  pattern.prb_mask = bounded_bitset<MAX_RB>(MAX_RB);
-  pattern.prb_mask.set(0);
+  pattern.crb_mask = crb_bitmap(MAX_RB);
+  pattern.crb_mask.set(0);
   pattern.re_mask.set(0);
   pattern.symbols.set(0);
 
@@ -193,15 +194,15 @@ void test_merge_diff_rb()
 {
   // Create pattern 1.
   re_pattern pattern1;
-  pattern1.prb_mask = bounded_bitset<MAX_RB>(MAX_RB);
-  pattern1.prb_mask.set(0);
+  pattern1.crb_mask = crb_bitmap(MAX_RB);
+  pattern1.crb_mask.set(0);
   pattern1.re_mask.set(0);
   pattern1.symbols.set(0);
 
   // Create a pattern 2.
   re_pattern pattern2;
-  pattern1.prb_mask = bounded_bitset<MAX_RB>(MAX_RB);
-  pattern1.prb_mask.set(1);
+  pattern1.crb_mask = crb_bitmap(MAX_RB);
+  pattern1.crb_mask.set(1);
   pattern2.re_mask.set(0);
   pattern2.symbols = {};
   pattern2.symbols.set(0);
@@ -219,8 +220,8 @@ void test_inclusion_count()
 {
   // Create a pattern.
   re_pattern pattern;
-  pattern.prb_mask = bounded_bitset<MAX_RB>(MAX_RB);
-  pattern.prb_mask.set(0);
+  pattern.crb_mask = crb_bitmap(MAX_RB);
+  pattern.crb_mask.set(0);
   pattern.re_mask.set(0);
   pattern.symbols.set(0);
 
@@ -229,12 +230,12 @@ void test_inclusion_count()
   list.merge(pattern);
 
   // Validate the inclusion count with an RB mask that matches.
-  bounded_bitset<MAX_RB> rb_mask_match(2);
+  crb_bitmap rb_mask_match(2);
   rb_mask_match.set(0, true);
   TESTASSERT_EQ(list.get_inclusion_count(0, MAX_NSYMB_PER_SLOT, rb_mask_match), 1);
 
   // Validate the inclusion count with an RB mask that does not match.
-  bounded_bitset<MAX_RB> rb_mask_unmatch(2);
+  crb_bitmap rb_mask_unmatch(2);
   rb_mask_unmatch.set(1, true);
   TESTASSERT_EQ(list.get_inclusion_count(0, MAX_NSYMB_PER_SLOT, rb_mask_unmatch), 0);
 }
@@ -244,8 +245,8 @@ void test_equal()
 {
   // Create a pattern.
   re_pattern pattern;
-  pattern.prb_mask = bounded_bitset<MAX_RB>(MAX_RB);
-  pattern.prb_mask.set(0);
+  pattern.crb_mask = crb_bitmap(MAX_RB);
+  pattern.crb_mask.set(0);
   pattern.re_mask.set(0);
   pattern.symbols.set(0);
 
@@ -278,8 +279,8 @@ void test_bracket_initializer()
 
   // Create same pattern using parameters.
   re_pattern pattern;
-  pattern.prb_mask = bounded_bitset<MAX_RB>(MAX_RB);
-  pattern.prb_mask.fill(0, 52);
+  pattern.crb_mask = crb_bitmap(MAX_RB);
+  pattern.crb_mask.fill(0, 52);
   pattern.re_mask = re_prb_mask();
   pattern.re_mask.set(0);
   pattern.re_mask.set(4);

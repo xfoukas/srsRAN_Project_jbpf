@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -35,12 +35,38 @@ using namespace asn1::f1ap;
 // Time waiting for RRC container delivery.
 constexpr std::chrono::milliseconds rrc_container_delivery_timeout{120};
 
+static bool requires_ue_ran_config_update(const ue_context_setup_request_s& msg)
+{
+  return msg->srbs_to_be_setup_list_present or msg->drbs_to_be_setup_list_present or
+         msg->scell_to_be_setup_list_present;
+}
+
+static expected<default_success_t, asn1::f1ap::cause_c>
+validate_drb_to_be_setup_item(const asn1::f1ap::drbs_to_be_setup_item_s& drb_to_be_setup_item)
+{
+  asn1::f1ap::cause_c cause;
+  cause.set_protocol().value = asn1::f1ap::cause_protocol_opts::semantic_error;
+
+  // Check DL PDCP SN length information present.
+  // DL PDCP SN information is mandatory in the IE extension field.
+  if (not drb_to_be_setup_item.ie_exts_present) {
+    return make_unexpected(cause);
+  }
+  return default_success_t{};
+}
+
 f1ap_du_ue_context_setup_procedure::f1ap_du_ue_context_setup_procedure(
     const asn1::f1ap::ue_context_setup_request_s& msg_,
     f1ap_du_ue_manager&                           ue_mng_,
     f1ap_du_configurator&                         du_mng_,
-    du_ue_index_t                                 ue_index_) :
-  msg(msg_), ue_mng(ue_mng_), du_mng(du_mng_), ue_index(ue_index_), logger(srslog::fetch_basic_logger("DU-F1"))
+    du_ue_index_t                                 ue_index_,
+    const f1ap_du_context&                        ctxt_) :
+  msg(msg_),
+  ue_mng(ue_mng_),
+  du_mng(du_mng_),
+  ue_index(ue_index_),
+  logger(srslog::fetch_basic_logger("DU-F1")),
+  du_ctxt(ctxt_)
 {
 }
 
@@ -61,14 +87,34 @@ void f1ap_du_ue_context_setup_procedure::operator()(coro_context<async_task<void
       send_ue_context_setup_failure();
       CORO_EARLY_RETURN();
     }
+
+    if (requires_ue_ran_config_update(msg)) {
+      // Set that the UE has a pending configuration.
+      ue->context.rrc_state = f1ap_ue_context::ue_rrc_state::config_pending;
+    }
+
   } else {
     // [TS38.473, 8.3.1.2] If no UE-associated logical F1-connection exists, the UE-associated logical F1-connection
     // shall be established as part of the procedure.
 
+    // Find the cell index from the NR-CGI
+    sp_cell_index =
+        get_cell_index_from_nr_cgi({plmn_identity::from_bytes(msg->sp_cell_id.plmn_id.to_bytes()).value(),
+                                    nr_cell_identity::create(msg->sp_cell_id.nr_cell_id.to_number()).value()});
+    if (not sp_cell_index.has_value()) {
+      // Failed to create UE context in the DU.
+      logger.warning("{}: Failed to to find spCell with PLMN '{}' and NCI '{}' in DU.",
+                     f1ap_log_prefix{int_to_gnb_cu_ue_f1ap_id(msg->gnb_cu_ue_f1ap_id), name()},
+                     plmn_identity::from_bytes(msg->sp_cell_id.plmn_id.to_bytes()).value(),
+                     nr_cell_identity::create(msg->sp_cell_id.nr_cell_id.to_number()).value());
+      send_ue_context_setup_failure();
+      CORO_EARLY_RETURN();
+    }
+
     // Request the creation of a new UE context in the DU.
-    CORO_AWAIT_VALUE(
-        du_ue_create_response,
-        du_mng.request_ue_creation(f1ap_ue_context_creation_request{ue_index, to_du_cell_index(msg->serv_cell_idx)}));
+    CORO_AWAIT_VALUE(du_ue_create_response,
+                     du_mng.request_ue_creation(
+                         f1ap_ue_context_creation_request{ue_index, to_du_cell_index(sp_cell_index.value())}));
     if (not du_ue_create_response->result) {
       // Failed to create UE context in the DU.
       logger.warning("{}: Failed to allocate new UE context in DU.",
@@ -133,14 +179,30 @@ async_task<bool> f1ap_du_ue_context_setup_procedure::handle_rrc_container()
     return launch_no_op_task(false);
   }
 
-  return srb1->handle_pdu_and_await_transmission(msg->rrc_container.copy(), rrc_container_delivery_timeout);
+  return srb1->handle_pdu_and_await_transmission(
+      msg->rrc_container.copy(), msg->rrc_delivery_status_request_present, rrc_container_delivery_timeout);
+}
+
+expected<unsigned> f1ap_du_ue_context_setup_procedure::get_cell_index_from_nr_cgi(nr_cell_global_id_t nr_cgi) const
+{
+  // Find the spCell index in the F1AP DU context.
+  const auto* cell = du_ctxt.find_cell(nr_cgi);
+  if (cell != nullptr) {
+    return static_cast<unsigned>(cell->cell_index);
+  }
+
+  return make_unexpected(default_error_t());
 }
 
 async_task<f1ap_ue_context_update_response> f1ap_du_ue_context_setup_procedure::request_du_ue_config()
 {
   // Construct DU request.
-  f1ap_ue_context_update_request du_request;
-  du_request.ue_index = ue->context.ue_index;
+  f1ap_ue_context_update_request du_request = {};
+  du_request.ue_index                       = ue->context.ue_index;
+
+  auto plmn = plmn_identity::from_bytes(msg->sp_cell_id.plmn_id.to_bytes());
+  auto nci  = nr_cell_identity::create(msg->sp_cell_id.nr_cell_id.to_number());
+  du_request.spcell_id.emplace(plmn.value(), nci.value());
 
   // > Set whether full configuration is required.
   // [TS 38.473, section 8.3.1.1] If the received CU to DU RRC Information IE does not include source cell group
@@ -156,8 +218,21 @@ async_task<f1ap_ue_context_update_response> f1ap_du_ue_context_setup_procedure::
 
   // > Pass DRBs to setup.
   for (const auto& drb : msg->drbs_to_be_setup_list) {
-    du_request.drbs_to_setup.push_back(make_drb_to_setup(drb.value().drbs_to_be_setup_item()));
+    expected<default_success_t, asn1::f1ap::cause_c> drb_valid =
+        validate_drb_to_be_setup_item(drb->drbs_to_be_setup_item());
+    if (drb_valid.has_value()) {
+      du_request.drbs_to_setup.push_back(make_drb_to_setup(drb.value().drbs_to_be_setup_item()));
+    } else {
+      f1ap_drb_failed_to_setupmod failed_drb = {uint_to_drb_id(drb->drbs_to_be_setup_item().drb_id),
+                                                asn1_to_cause(drb_valid.error())};
+      failed_drbs.push_back(failed_drb);
+    }
   }
+
+  // > measConfig IE.
+  // [TS 38.473, 8.3.1.2] If the MeasConfig IE is included in the CU to DU RRC Information IE in the UE CONTEXT SETUP
+  // REQUEST message, the gNB-DU shall deduce that changes to the measurements configuration need to be applied.
+  du_request.meas_cfg = msg->cu_to_du_rrc_info.meas_cfg.copy();
 
   if (msg->cu_to_du_rrc_info.ie_exts_present) {
     // > Add HO preparation information in case of Handover.
@@ -189,11 +264,11 @@ void f1ap_du_ue_context_setup_procedure::send_ue_context_setup_response()
   resp->gnb_du_ue_f1ap_id = gnb_du_ue_f1ap_id_to_uint(ue->context.gnb_du_ue_f1ap_id);
   resp->gnb_cu_ue_f1ap_id = gnb_cu_ue_f1ap_id_to_uint(ue->context.gnb_cu_ue_f1ap_id);
 
-  // > DU-to-CU RRC Container.
-  if (not resp->du_to_cu_rrc_info.cell_group_cfg.append(du_ue_cfg_response.du_to_cu_rrc_container)) {
-    logger.error("{}: Failed to append DU-to-CU RRC container.", f1ap_log_prefix{ue->context, name()});
-    return;
-  }
+  // Prepare DU to CU RRC Container.
+  // > cellGroupConfig
+  resp->du_to_cu_rrc_info.cell_group_cfg = du_ue_cfg_response.cell_group_cfg.copy();
+  // > measGapConfig
+  resp->du_to_cu_rrc_info.meas_gap_cfg = du_ue_cfg_response.meas_gap_cfg.copy();
 
   // > Check if DU-to-CU RRC Container is a full cellGroupConfig or a delta.
   if (du_ue_cfg_response.full_config_present) {
@@ -225,7 +300,9 @@ void f1ap_du_ue_context_setup_procedure::send_ue_context_setup_response()
   resp->drbs_setup_list         = make_drbs_setup_list(du_ue_cfg_response.drbs_setup);
   resp->drbs_setup_list_present = resp->drbs_setup_list.size() > 0;
   // > DRBs-FailedToBeSetup-List.
-  resp->drbs_failed_to_be_setup_list         = make_drbs_failed_to_be_setup_list(du_ue_cfg_response.failed_drbs_setups);
+  failed_drbs.insert(
+      failed_drbs.end(), du_ue_cfg_response.failed_drbs_setups.begin(), du_ue_cfg_response.failed_drbs_setups.end());
+  resp->drbs_failed_to_be_setup_list         = make_drbs_failed_to_be_setup_list(failed_drbs);
   resp->drbs_failed_to_be_setup_list_present = resp->drbs_failed_to_be_setup_list.size() > 0;
 
   // Send Response to CU-CP.
@@ -250,7 +327,9 @@ void f1ap_du_ue_context_setup_procedure::send_ue_context_setup_failure()
   resp->cause.set_radio_network().value = asn1::f1ap::cause_radio_network_opts::no_radio_res_available;
 
   // Send UE CONTEXT SETUP FAILURE to CU-CP.
-  ue->f1ap_msg_notifier.on_new_message(f1ap_msg);
+  if (ue != nullptr) {
+    ue->f1ap_msg_notifier.on_new_message(f1ap_msg);
+  }
 
   logger.debug("{}: Procedure finished with failure.",
                ue == nullptr ? f1ap_log_prefix{int_to_gnb_cu_ue_f1ap_id(resp->gnb_cu_ue_f1ap_id), name()}

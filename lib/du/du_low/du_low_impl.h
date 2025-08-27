@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -22,15 +22,17 @@
 
 #pragma once
 
+#include "du_low_metrics_collector_impl.h"
 #include "srsran/du/du_low/du_low.h"
-#include "srsran/du/du_power_controller.h"
+#include "srsran/du/du_operation_controller.h"
 #include "srsran/phy/upper/upper_phy.h"
+#include <memory>
 
 namespace srsran {
 namespace srs_du {
 
 /// DU low implementation.
-class du_low_impl final : public du_low, public du_power_controller
+class du_low_impl final : public du_low, public du_operation_controller
 {
 public:
   explicit du_low_impl(std::vector<std::unique_ptr<upper_phy>> upper_);
@@ -39,20 +41,21 @@ public:
   upper_phy& get_upper_phy(unsigned cell_id) override;
 
   // See interface for documentation.
-  du_power_controller& get_power_controller() override { return *this; }
+  du_operation_controller& get_operation_controller() override { return *this; }
 
   // See interface for documentation.
-  void start() override{};
+  du_low_metrics_collector* get_metrics_collector() override;
+
+  // See interface for documentation.
+  void start() override;
 
   // See interface for documentation.
   void stop() override;
 
-  // See interface for documentation.
-  span<upper_phy*> get_all_upper_phys() override;
-
 private:
   std::vector<std::unique_ptr<upper_phy>> upper;
   std::vector<upper_phy*>                 upper_ptrs;
+  du_low_metrics_collector_impl           metrics_collector;
 };
 
 } // namespace srs_du

@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -28,7 +28,7 @@ using namespace srsran;
 using namespace fapi_adaptor;
 
 /// Fills the optional codeword description parameter of the PUSCH PDU, if present.
-static void fill_codeword(uplink_processor::pusch_pdu& pdu, const fapi::ul_pusch_pdu& fapi_pdu)
+static void fill_codeword(uplink_pdu_slot_repository::pusch_pdu& pdu, const fapi::ul_pusch_pdu& fapi_pdu)
 {
   if (!fapi_pdu.pdu_bitmap[fapi::ul_pusch_pdu::PUSCH_DATA_BIT]) {
     return;
@@ -53,7 +53,7 @@ static void fill_rb_allocation(pusch_processor::pdu_t& proc_pdu, const fapi::ul_
   }
 
   // Unpack the VRB bitmap. LSB of byte 0 of the bitmap represents the VRB 0.
-  bounded_bitset<MAX_RB> vrb_bitmap(fapi_pdu.bwp_size);
+  vrb_bitmap vrb_bitmap(fapi_pdu.bwp_size);
   for (unsigned vrb_index = 0, vrb_index_end = fapi_pdu.bwp_size; vrb_index != vrb_index_end; ++vrb_index) {
     unsigned byte = vrb_index / 8;
     unsigned bit  = vrb_index % 8;
@@ -108,12 +108,12 @@ static void fill_uci(pusch_processor::pdu_t&              proc_pdu,
   }
 }
 
-void srsran::fapi_adaptor::convert_pusch_fapi_to_phy(uplink_processor::pusch_pdu&         pdu,
-                                                     const fapi::ul_pusch_pdu&            fapi_pdu,
-                                                     uint16_t                             sfn,
-                                                     uint16_t                             slot,
-                                                     uint16_t                             num_rx_ant,
-                                                     uci_part2_correspondence_repository& part2_repo)
+void srsran::fapi_adaptor::convert_pusch_fapi_to_phy(uplink_pdu_slot_repository::pusch_pdu& pdu,
+                                                     const fapi::ul_pusch_pdu&              fapi_pdu,
+                                                     uint16_t                               sfn,
+                                                     uint16_t                               slot,
+                                                     uint16_t                               num_rx_ant,
+                                                     uci_part2_correspondence_repository&   part2_repo)
 {
   // Fill the PUSCH processor parameters.
   pusch_processor::pdu_t& proc_pdu    = pdu.pdu;

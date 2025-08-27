@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -43,6 +43,9 @@ public:
 
   /// Connects the PRACH processor with a notifier.
   virtual void connect(prach_processor_notifier& notifier) = 0;
+
+  /// Stops the processor.
+  virtual void stop() = 0;
 
   /// \brief Gets the PRACH processor request handler.
   /// \return A reference to the internal PRACH processor request handler.

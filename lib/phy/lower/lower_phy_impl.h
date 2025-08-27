@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -26,7 +26,6 @@
 #include "processors/adaptors/processor_handler_adaptor.h"
 #include "processors/adaptors/processor_notifier_adaptor.h"
 #include "srsran/adt/circular_array.h"
-#include "srsran/adt/optional.h"
 #include "srsran/gateways/baseband/baseband_gateway.h"
 #include "srsran/phy/lower/amplitude_controller/amplitude_controller.h"
 #include "srsran/phy/lower/lower_phy.h"
@@ -42,12 +41,12 @@
 #include "srsran/phy/lower/processors/downlink/downlink_processor.h"
 #include "srsran/phy/lower/processors/uplink/uplink_processor.h"
 #include "srsran/phy/support/resource_grid_pool.h"
-#include "srsran/support/stats.h"
+#include "srsran/support/math/stats.h"
 
 namespace srsran {
 
 /// Lower physical layer implementation.
-class lower_phy_impl : public lower_phy
+class ue_lower_phy_impl : public lower_phy, private lower_phy_controller
 {
 public:
   /// Collects the injected dependencies of the lower physical layer.
@@ -69,10 +68,10 @@ public:
   };
 
   /// Constructs a generic lower physical layer.
-  lower_phy_impl(configuration& config);
+  ue_lower_phy_impl(configuration& config);
 
   // See interface for documentation.
-  lower_phy_controller& get_controller() override { return *controller; }
+  lower_phy_controller& get_controller() override { return *this; }
 
   // See interface for documentation.
   lower_phy_request_handler& get_request_handler() override { return handler_adaptor.get_request_handler(); }
@@ -80,6 +79,33 @@ public:
   // See interface for documentation.
   lower_phy_rg_handler& get_rg_handler() override { return handler_adaptor.get_rg_handler(); }
 
+  // See interface for documentation.
+  lower_phy_cfo_controller& get_tx_cfo_control() override;
+
+  // See interface for documentation.
+  lower_phy_cfo_controller& get_rx_cfo_control() override;
+
+  // See interface for documentation.
+  lower_phy_center_freq_controller& get_tx_center_freq_control() override;
+
+  // See interface for documentation.
+  lower_phy_center_freq_controller& get_rx_center_freq_control() override;
+
+  // See lower_phy_controller interface for documentation.
+  void start(baseband_gateway_timestamp init_time) override { controller->start(init_time); }
+
+  // See lower_phy_controller interface for documentation.
+  void stop() override
+  {
+    downlink_proc->stop();
+    uplink_proc->stop();
+    controller->stop();
+  }
+
+  // See lower_phy_controller interface for documentation.
+  lower_phy_tx_time_offset_controller& get_tx_time_offset_control() override;
+
+private:
   /// Downlink processor.
   std::unique_ptr<lower_phy_downlink_processor> downlink_proc;
   /// Uplink processor.

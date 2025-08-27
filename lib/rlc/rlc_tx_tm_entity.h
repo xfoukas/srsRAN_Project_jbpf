@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -57,13 +57,13 @@ public:
                    rlc_tx_upper_layer_data_notifier&    upper_dn_,
                    rlc_tx_upper_layer_control_notifier& upper_cn_,
                    rlc_tx_lower_layer_notifier&         lower_dn_,
-                   rlc_metrics_aggregator&              metrics_agg_,
+                   rlc_bearer_metrics_collector&        metrics_coll_,
                    rlc_pcap&                            pcap_,
                    task_executor&                       pcell_executor_,
                    task_executor&                       ue_executor_,
                    timer_manager&                       timers);
 
-  ~rlc_tx_tm_entity() override { 
+  ~rlc_tx_tm_entity() override {
 #ifdef JBPF_ENABLED
     struct jbpf_rlc_ctx_info jbpf_ctx = {0}; 
     jbpf_ctx.ctx_id = 0;
@@ -80,16 +80,19 @@ public:
         0};
     hook_rlc_dl_deletion(&jbpf_ctx);
 #endif
-    stop();
+    stop(); 
   }
-  
 
   void stop() final
   {
     // Stop all timers. Any queued handlers of timers that just expired before this call are canceled automatically
     if (not stopped) {
       high_metrics_timer.stop();
-      low_metrics_timer.stop();
+      // stop lower timers from cell executor
+      auto stop_low_timers = TRACE_TASK([this]() { low_metrics_timer.stop(); });
+      if (!pcell_executor.execute(std::move(stop_low_timers))) {
+        logger.log_error("Unable to stop lower timers.");
+      }
       stopped = true;
     }
   }
@@ -99,8 +102,8 @@ public:
   void discard_sdu(uint32_t pdcp_sn) override;
 
   // Interfaces for lower layers
-  size_t   pull_pdu(span<uint8_t> rlc_pdu_buf) override;
-  uint32_t get_buffer_state() override;
+  size_t           pull_pdu(span<uint8_t> rlc_pdu_buf) noexcept override;
+  rlc_buffer_state get_buffer_state() override;
 
 private:
   /// Called whenever the buffer state has been changed by upper layers (new SDUs or SDU discard) so that lower layers
@@ -116,7 +119,7 @@ private:
   /// its execution is queued by \c handle_changed_buffer_state.
   ///
   /// Safe execution from: pcell_executor
-  void update_mac_buffer_state();
+  void update_mac_buffer_state() noexcept;
 
   bool stopped = false;
 };

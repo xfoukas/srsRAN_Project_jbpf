@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -24,8 +24,8 @@
 #include "srsran/phy/upper/channel_processors/channel_processor_factories.h"
 #include "srsran/phy/upper/channel_processors/channel_processor_formatters.h"
 #include "srsran/support/benchmark_utils.h"
-#include "srsran/support/complex_normal_random.h"
 #include "srsran/support/error_handling.h"
+#include "srsran/support/math/complex_normal_random.h"
 #include <getopt.h>
 #include <random>
 #include <set>
@@ -213,7 +213,7 @@ int main(int argc, char** argv)
 
     // Measurement description.
     fmt::memory_buffer meas_description;
-    fmt::format_to(meas_description, "{}", config);
+    fmt::format_to(std::back_inserter(meas_description), "{}", config);
 
     // Run the benchmark.
     perf_meas.new_measure(

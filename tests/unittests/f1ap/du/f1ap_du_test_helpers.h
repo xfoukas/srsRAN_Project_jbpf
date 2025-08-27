@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -27,6 +27,7 @@
 #include "srsran/asn1/f1ap/f1ap_ies.h"
 #include "srsran/f1ap/du/f1ap_du.h"
 #include "srsran/f1ap/du/f1ap_du_factory.h"
+#include "srsran/f1ap/du/f1ap_du_positioning_handler.h"
 #include "srsran/f1ap/f1ap_message.h"
 #include "srsran/f1ap/gateways/f1c_connection_client.h"
 #include "srsran/f1u/du/f1u_rx_sdu_notifier.h"
@@ -34,13 +35,14 @@
 #include "srsran/support/async/fifo_async_task_scheduler.h"
 #include "srsran/support/executors/manual_task_worker.h"
 #include <gtest/gtest.h>
+#include <queue>
 
 namespace srsran::srs_du {
 
 /// \brief Generate a random gnb_du_ue_f1ap_id
 gnb_du_ue_f1ap_id_t generate_random_gnb_du_ue_f1ap_id();
 
-class dummy_f1ap_du_configurator : public f1ap_du_configurator
+class dummy_f1ap_du_configurator : public f1ap_du_configurator, public f1ap_du_positioning_handler
 {
 public:
   struct dummy_ue_task_sched : public f1ap_ue_task_scheduler {
@@ -65,14 +67,20 @@ public:
   f1ap_ue_configuration_request                          next_ue_cfg_req;
   std::optional<f1ap_ue_configuration_response>          last_ue_cfg_response;
   std::optional<std::pair<du_ue_index_t, du_ue_index_t>> last_reestablishment_ue_indexes;
+  du_positioning_info_response                           next_positioning_info_response;
 
   // F1AP procedures.
+  std::optional<gnbcu_config_update_request>      last_cu_upd_req;
+  gnbcu_config_update_response                    next_cu_upd_resp;
   std::optional<f1ap_ue_context_creation_request> last_ue_context_creation_req;
   f1ap_ue_context_creation_response               next_ue_context_creation_response;
   std::optional<f1ap_ue_context_update_request>   last_ue_context_update_req;
   f1ap_ue_context_update_response                 next_ue_context_update_response;
   std::optional<f1ap_ue_delete_request>           last_ue_delete_req;
   std::optional<du_ue_index_t>                    last_ue_cfg_applied;
+  std::optional<std::vector<du_ue_index_t>>       last_ues_to_reset;
+  std::optional<du_positioning_info_request>      last_positioning_info_request;
+  std::optional<du_positioning_meas_request>      last_positioning_meas_request;
 
   explicit dummy_f1ap_du_configurator(timer_factory& timers_) : timers(timers_), task_loop(128), ue_sched(this) {}
 
@@ -83,6 +91,19 @@ public:
   void schedule_async_task(async_task<void>&& task) override { task_loop.schedule(std::move(task)); }
 
   void on_f1c_disconnection() override {}
+
+  async_task<void> request_reset(const std::vector<du_ue_index_t>& ues_to_reset) override
+  {
+    last_ues_to_reset = ues_to_reset;
+    return launch_no_op_task();
+  }
+
+  async_task<gnbcu_config_update_response>
+  request_cu_context_update(const gnbcu_config_update_request& request) override
+  {
+    last_cu_upd_req = request;
+    return launch_no_op_task(next_cu_upd_resp);
+  }
 
   du_ue_index_t find_free_ue_index() override { return next_ue_creation_req.ue_index; }
 
@@ -126,6 +147,29 @@ public:
     last_reestablishment_ue_indexes = std::make_pair(new_ue_index, old_ue_index);
   }
 
+  f1ap_du_positioning_handler& get_positioning_handler() override { return *this; }
+
+  du_trp_info_response request_trp_info() override
+  {
+    return du_trp_info_response{
+        {{.trp_id = trp_id_t{1}, .pci = MIN_PCI},
+         {.trp_id = trp_id_t{1}, .cgi = nr_cell_global_id_t{plmn_identity::test_value(), nr_cell_identity::min()}},
+         {.trp_id = trp_id_t{1}, .arfcn = 368500}}};
+  }
+
+  async_task<du_positioning_info_response> request_positioning_info(const du_positioning_info_request& req) override
+  {
+    last_positioning_info_request = req;
+    return launch_no_op_task(du_positioning_info_response{next_positioning_info_response});
+  }
+
+  async_task<du_positioning_meas_response>
+  request_positioning_measurement(const du_positioning_meas_request& req) override
+  {
+    last_positioning_meas_request = req;
+    return launch_no_op_task(du_positioning_meas_response{});
+  }
+
   /// \brief Retrieve task scheduler specific to a given UE.
   f1ap_ue_task_scheduler& get_ue_handler(du_ue_index_t ue_index) override { return ue_sched; }
 };
@@ -151,10 +195,6 @@ asn1::f1ap::drbs_to_be_setup_item_s generate_drb_am_setup_item(drb_id_t drbid);
 /// \brief Generate F1AP ASN.1 DRB AM Setup configuration.
 asn1::f1ap::drbs_to_be_setup_mod_item_s generate_drb_am_mod_item(drb_id_t drbid);
 
-/// \brief Generate an F1AP UE Context Modification Request message with specified list of DRBs.
-f1ap_message generate_ue_context_modification_request(const std::initializer_list<drb_id_t>& drbs_to_add,
-                                                      const std::initializer_list<drb_id_t>& drbs_to_rem = {});
-
 /// \brief Generate an F1AP UE Context Release Command message.
 f1ap_message generate_ue_context_release_command();
 
@@ -167,13 +207,26 @@ f1ap_message generate_dl_rrc_message_transfer(gnb_du_ue_f1ap_id_t du_ue_id,
 class dummy_f1c_connection_client : public srs_du::f1c_connection_client
 {
 public:
-  f1ap_message last_tx_f1ap_pdu;
+  bool                        tx_pdus_sent() const { return not tx_f1ap_pdus.empty(); }
+  const f1ap_message&         last_tx_pdu() const { return tx_f1ap_pdus.back(); }
+  std::optional<f1ap_message> pop_tx_pdu()
+  {
+    std::optional<f1ap_message> ret;
+    if (tx_f1ap_pdus.empty()) {
+      return ret;
+    }
+    ret = tx_f1ap_pdus.front();
+    tx_f1ap_pdus.pop_front();
+    return ret;
+  }
+  void clear_tx_pdus() { tx_f1ap_pdus.clear(); }
 
   std::unique_ptr<f1ap_message_notifier>
   handle_du_connection_request(std::unique_ptr<f1ap_message_notifier> du_rx_pdu_notifier) override;
 
 private:
   std::unique_ptr<f1ap_message_notifier> du_rx_pdu_notifier;
+  std::deque<f1ap_message>               tx_f1ap_pdus;
 };
 
 class dummy_f1c_rx_sdu_notifier : public f1c_rx_sdu_notifier
@@ -219,8 +272,8 @@ public:
 
 protected:
   struct f1c_test_bearer {
-    // This user provided constructor is added here to fix a Clang compilation error related to the use of nested types
-    // with std::optional.
+    // This user provided constructor is added here to fix a Clang compilation error related to the use of nested
+    // types with std::optional.
     f1c_test_bearer() {}
 
     srb_id_t                  srb_id = srb_id_t::nulltype;
@@ -228,8 +281,8 @@ protected:
     f1c_bearer*               bearer = nullptr;
   };
   struct f1u_test_bearer {
-    // This user provided constructor is added here to fix a Clang compilation error related to the use of nested types
-    // with std::optional.
+    // This user provided constructor is added here to fix a Clang compilation error related to the use of nested
+    // types with std::optional.
     f1u_test_bearer() {}
 
     drb_id_t                  drb_id = drb_id_t::invalid;

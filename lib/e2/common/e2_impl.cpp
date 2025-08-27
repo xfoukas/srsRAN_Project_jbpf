@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -22,6 +22,7 @@
 
 #include "e2_impl.h"
 #include "e2ap_asn1_helpers.h"
+#include "procedures/e2_connection_update_procedure.h"
 #include "srsran/asn1/e2ap/e2ap.h"
 #include "srsran/e2/e2.h"
 #include "srsran/ran/nr_cgi.h"
@@ -31,22 +32,34 @@ using namespace srsran;
 using namespace asn1::e2ap;
 using namespace asn1;
 
-e2_impl::e2_impl(e2ap_configuration&      cfg_,
-                 timer_factory            timers_,
-                 e2_message_notifier&     e2_pdu_notifier_,
-                 e2_subscription_manager& subscription_mngr_,
-                 e2sm_manager&            e2sm_mngr_) :
-  logger(srslog::fetch_basic_logger("E2")),
+e2_impl::e2_impl(srslog::basic_logger&     logger_,
+                 const e2ap_configuration& cfg_,
+                 e2ap_e2agent_notifier&    agent_notifier_,
+                 timer_factory             timers_,
+                 e2_connection_client&     e2_client_,
+                 e2_subscription_manager&  subscription_mngr_,
+                 e2sm_manager&             e2sm_mngr_,
+                 task_executor&            task_exec_) :
+  logger(logger_),
   cfg(cfg_),
   timers(timers_),
-  pdu_notifier(e2_pdu_notifier_),
-  subscription_mngr(subscription_mngr_),
+  subscription_proc(subscription_mngr_),
   e2sm_mngr(e2sm_mngr_),
-  subscribe_proc(e2_pdu_notifier_, subscription_mngr_, timers, logger),
-  subscribe_delete_proc(e2_pdu_notifier_, subscription_mngr_, timers, logger),
   events(std::make_unique<e2_event_manager>(timers)),
-  async_tasks(10)
+  async_tasks(10),
+  connection_handler(e2_client_, *this, agent_notifier_, task_exec_)
 {
+}
+
+bool e2_impl::handle_e2_tnl_connection_request()
+{
+  tx_pdu_notifier = connection_handler.connect_to_ric();
+  return tx_pdu_notifier != nullptr;
+}
+
+async_task<void> e2_impl::handle_e2_disconnection_request()
+{
+  return connection_handler.handle_tnl_association_removal();
 }
 
 async_task<e2_setup_response_message> e2_impl::handle_e2_setup_request(e2_setup_request_message& request)
@@ -71,13 +84,13 @@ async_task<e2_setup_response_message> e2_impl::handle_e2_setup_request(e2_setup_
     }
     candidate_ran_functions[id] = ran_function_item;
   }
-  return launch_async<e2_setup_procedure>(request, pdu_notifier, *events, timers, logger);
+  return launch_async<e2_setup_procedure>(request, *tx_pdu_notifier, *events, timers, logger);
 }
 
 async_task<e2_setup_response_message> e2_impl::start_initial_e2_setup_routine()
 {
   e2_setup_request_message request;
-  fill_asn1_e2ap_setup_request(request.request, cfg, e2sm_mngr);
+  fill_asn1_e2ap_setup_request(logger, request.request, cfg, e2sm_mngr);
 
   for (const auto& ran_function : request.request->ran_functions_added) {
     auto&    ran_function_item = ran_function.value().ran_function_item();
@@ -88,15 +101,7 @@ async_task<e2_setup_response_message> e2_impl::start_initial_e2_setup_routine()
     candidate_ran_functions[id] = ran_function_item;
   }
 
-  return launch_async<e2_setup_procedure>(request, pdu_notifier, *events, timers, logger);
-}
-async_task<void> e2_impl::handle_e2_disconnection_request()
-{
-  return launch_async([](coro_context<async_task<void>>& ctx) {
-    CORO_BEGIN(ctx);
-    // Placeholder
-    CORO_RETURN();
-  });
+  return launch_async<e2_setup_procedure>(request, *tx_pdu_notifier, *events, timers, logger);
 }
 
 void e2_impl::handle_e2_setup_response(const e2_setup_response_message& msg)
@@ -130,7 +135,7 @@ void e2_impl::handle_ric_control_request(const asn1::e2ap::ric_ctrl_request_s ms
   logger.info("Received RIC Control Request");
   e2_ric_control_request request;
   request.request = msg;
-  async_tasks.schedule<e2_ric_control_procedure>(request, pdu_notifier, e2sm_mngr, logger);
+  async_tasks.schedule<e2_ric_control_procedure>(request, *tx_pdu_notifier, e2sm_mngr, logger);
 }
 
 void e2_impl::handle_e2_setup_failure(const e2_setup_response_message& msg)
@@ -149,13 +154,21 @@ void e2_impl::handle_e2_setup_failure(const e2_setup_response_message& msg)
 void e2_impl::handle_ric_subscription_request(const asn1::e2ap::ric_sub_request_s& msg)
 {
   logger.info("Received RIC Subscription Request");
-  subscribe_proc.run_subscription_procedure(msg, *events);
+  async_tasks.schedule(
+      launch_async<e2_subscription_setup_procedure>(msg, *events, *tx_pdu_notifier, subscription_proc, timers, logger));
 }
 
 void e2_impl::handle_ric_subscription_delete_request(const asn1::e2ap::ric_sub_delete_request_s& msg)
 {
   logger.info("Received RIC Subscription Delete Request");
-  subscribe_delete_proc.run_subscription_delete_procedure(msg, *events);
+  async_tasks.schedule(launch_async<e2_subscription_delete_procedure>(
+      msg, *events, *tx_pdu_notifier, subscription_proc, timers, logger));
+}
+
+void e2_impl::handle_e2_connection_update(const asn1::e2ap::e2conn_upd_s& msg)
+{
+  logger.info("Received E2 Connection Update");
+  async_tasks.schedule(launch_async<e2_connection_update_procedure>(msg, *tx_pdu_notifier, timers, logger));
 }
 
 void e2_impl::handle_message(const e2_message& msg)
@@ -200,6 +213,9 @@ void e2_impl::handle_initiating_message(const asn1::e2ap::init_msg_s& msg)
       break;
     case asn1::e2ap::e2ap_elem_procs_o::init_msg_c::types_opts::options::ric_ctrl_request:
       handle_ric_control_request(msg.value.ric_ctrl_request());
+      break;
+    case asn1::e2ap::e2ap_elem_procs_o::init_msg_c::types_opts::options::e2conn_upd:
+      handle_e2_connection_update(msg.value.e2conn_upd());
       break;
     default:
       logger.error("Invalid E2AP initiating message type");

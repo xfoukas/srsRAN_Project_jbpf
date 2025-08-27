@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -22,7 +22,7 @@
 
 #pragma once
 
-#include "srsran/ru/ru_generic_configuration.h"
+#include "srsran/ru/generic/ru_generic_configuration.h"
 
 namespace srsran {
 
@@ -46,10 +46,6 @@ inline bool is_valid(const ru_generic_configuration& config)
   }
 
   if (!config.radio_exec) {
-    return false;
-  }
-
-  if (!config.statistics_printer_executor) {
     return false;
   }
 

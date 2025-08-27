@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -22,55 +22,84 @@
 
 #pragma once
 
+#include "segmented_sib_list.h"
+#include "srsran/adt/byte_buffer.h"
+#include "srsran/adt/lockfree_triple_buffer.h"
+#include "srsran/mac/cell_configuration.h"
 #include "srsran/mac/mac_cell_manager.h"
-#include "srsran/scheduler/scheduler_slot_handler.h"
+#include "srsran/scheduler/result/pdsch_info.h"
+#include "srsran/srslog/logger.h"
 
 namespace srsran {
 
-/// Class that manages the encoding of BCCH-DL-SCH messages to be fit in a Transport Block.
+/// Entity responsible for fetching encoded SIB1 and SI messages based on scheduled SI grants.
 class sib_pdu_assembler
 {
 public:
-  explicit sib_pdu_assembler(const std::vector<byte_buffer>& bcch_dl_sch_payloads)
+  class message_handler
   {
-    // Number of padding bytes to pre-reserve. This value is implementation-defined.
-    static constexpr unsigned MAX_PADDING_BYTES_LEN = 64;
+  public:
+    virtual ~message_handler() = default;
 
-    bcch_min_payload_sizes.resize(bcch_dl_sch_payloads.size());
-    bcch_payloads.resize(bcch_dl_sch_payloads.size());
-    for (unsigned i = 0; i != bcch_payloads.size(); ++i) {
-      bcch_min_payload_sizes[i] = units::bytes(bcch_dl_sch_payloads[i].length());
+    virtual si_version_type update(si_version_type si_version, const byte_buffer& pdu) = 0;
 
-      // Note: Resizing the bcch_payload after the ctor is forbidden, to avoid vector memory relocations and
-      // invalidation of pointers passed to the lower layers. For this reason, we pre-reserve any potential padding
-      // bytes.
-      bcch_payloads[i].resize(bcch_dl_sch_payloads[i].length() + MAX_PADDING_BYTES_LEN, 0);
-      std::copy(bcch_dl_sch_payloads[i].begin(), bcch_dl_sch_payloads[i].end(), bcch_payloads[i].begin());
-    }
-  }
+    /// \brief Enqueue encodes SI messages at proper Tx slots.
+    virtual bool enqueue_si_pdu_updates(const mac_cell_sys_info_pdu_update& pdu_update_req) = 0;
 
-  span<const uint8_t> encode_sib1_pdu(units::bytes tbs_bytes) const { return encode_si_pdu(0, tbs_bytes); }
+    /// Retrieve encoded SI bytes for a given SI scheduling opportunity.
+    virtual span<const uint8_t> get_pdu(slot_point sl_tx, const sib_information& si_info) = 0;
+  };
 
-  span<const uint8_t> encode_si_message_pdu(unsigned si_msg_idx, units::bytes tbs_bytes) const
-  {
-    return encode_si_pdu(si_msg_idx + 1, tbs_bytes);
-  }
+  sib_pdu_assembler(const mac_cell_sys_info_config& req);
+
+  /// Update the SIB1 and SI messages.
+  void handle_si_change_request(const mac_cell_sys_info_config& req);
+
+  /// \brief Retrieve the encoded SI message.
+  span<const uint8_t> encode_si_pdu(slot_point sl_tx, const sib_information& si_info);
+
+  /// \brief Enqueue encodes SI messages at proper Tx slots.
+  bool enqueue_si_message_pdu_updates(const mac_cell_sys_info_pdu_update& pdu_update_req);
 
 private:
-  span<const uint8_t> encode_si_pdu(unsigned idx, units::bytes tbs_bytes) const
-  {
-    srsran_assert(tbs_bytes >= bcch_min_payload_sizes[idx],
-                  "The allocated PDSCH TBS cannot be smaller than the respective SI{} payload",
-                  idx == 0 ? fmt::format("B1") : fmt::format("-message {}", idx + 1));
-    srsran_assert(tbs_bytes <= units::bytes(bcch_payloads[idx].size()),
-                  "Memory rellocations of the SIB1 payload not allowed. Consider reserving more bytes for PADDING");
-    return span<const uint8_t>(bcch_payloads[idx].data(), tbs_bytes.value());
-  }
+  using bcch_dl_sch_buffer = std::shared_ptr<const std::vector<uint8_t>>;
 
-  /// Holds the original BCCH-DL-SCH messages, defined in the MAC cell configuration, plus extra padding bytes.
-  std::vector<std::vector<uint8_t>> bcch_payloads;
-  /// Length of the original BCCH-DL-SCH message, without padding, defined in the MAC cell configuration.
-  std::vector<units::bytes> bcch_min_payload_sizes;
+  /// Variant that can either hold a single BCCH payload, or multiple versions of such payload for segmented messages.
+  using bcch_payload_type = std::variant<bcch_dl_sch_buffer, segmented_sib_list<bcch_dl_sch_buffer>>;
+
+  /// A snapshot of a SIB1 and SI messages within a given SI change window.
+  struct si_buffer_snapshot {
+    unsigned                                                version;
+    units::bytes                                            sib1_len;
+    bcch_dl_sch_buffer                                      sib1_buffer;
+    std::vector<std::pair<units::bytes, bcch_payload_type>> si_msg_buffers;
+  };
+
+  void save_buffers(si_version_type si_version, const mac_cell_sys_info_config& req);
+
+  srslog::basic_logger& logger;
+
+  // Last SI messages received by the assembler.
+  mac_cell_sys_info_config last_si_cfg;
+
+  // SI buffers of last SI message update request.
+  // Note: This member is only accessed from the control executor.
+  si_buffer_snapshot last_cfg_buffers;
+
+  // Buffers being transferred from configuration plane to assembler RT path.
+  lockfree_triple_buffer<si_buffer_snapshot> pending;
+
+  // SI buffers that are being currently encoded and sent to lower layers.
+  // Note: This member is only accessed from the RT path.
+  si_buffer_snapshot current_buffers;
+
+  std::unique_ptr<message_handler> message_ext_handler;
 };
+
+/// \brief Instantiates an SI message extension handler.
+/// \param[in] req    Request containing System Information signalled by the cell.
+/// \return A pointer to the SI message extension handler on success, otherwise \c nullptr.
+std::unique_ptr<sib_pdu_assembler::message_handler>
+create_si_message_extension_handler(const mac_cell_sys_info_config& req);
 
 } // namespace srsran

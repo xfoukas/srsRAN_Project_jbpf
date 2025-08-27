@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -102,6 +102,9 @@ ngap_message generate_ng_setup_response(plmn_identity plmn = plmn_identity::test
 /// \brief Generate a dummy NG Setup Failure.
 ngap_message generate_ng_setup_failure();
 
+/// \brief Generate a dummy NG Setup Failure with bad PLMN.
+ngap_message generate_ng_setup_failure_with_bad_plmn(asn1::ngap::time_to_wait_e time_to_wait);
+
 /// \brief Generate a dummy NG Setup Failure with a time to wait.
 ngap_message generate_ng_setup_failure_with_time_to_wait(asn1::ngap::time_to_wait_e time_to_wait);
 
@@ -156,18 +159,29 @@ struct qos_flow_test_params {
   uint16_t      five_qi;
 };
 
+struct pdu_session_test_params {
+  pdu_session_type_t                pdu_session_type;
+  std::vector<qos_flow_test_params> qos_flows;
+};
+
 /// \brief Generate a valid dummy PDU Session Resource Setup Request Message.
 ngap_message generate_valid_pdu_session_resource_setup_request_message(
-    amf_ue_id_t                                                          amf_ue_id,
-    ran_ue_id_t                                                          ran_ue_id,
-    const std::map<pdu_session_id_t, std::vector<qos_flow_test_params>>& pdu_sessions);
+    amf_ue_id_t                                                amf_ue_id,
+    ran_ue_id_t                                                ran_ue_id,
+    const std::map<pdu_session_id_t, pdu_session_test_params>& pdu_sessions);
 
 /// \brief Generate an invalid dummy PDU Session Resource Setup Request Message.
 ngap_message generate_invalid_pdu_session_resource_setup_request_message(amf_ue_id_t amf_ue_id, ran_ue_id_t ran_ue_id);
 
+/// \brief Generate a dummy PDU Session Resource Setup Request with IPv4 PDUSessionType but IPv4v6 transport layer
+/// address.
+ngap_message generate_pdu_session_resource_setup_request_with_pdu_session_type_ipv4_and_ipv4v6_transport_layer_address(
+    amf_ue_id_t amf_ue_id,
+    ran_ue_id_t ran_ue_id);
+
 /// \brief Generate a dummy PDU Session Resource Setup Response.
 cu_cp_pdu_session_resource_setup_response
-generate_cu_cp_pdu_session_resource_setup_response(pdu_session_id_t pdu_session_id);
+generate_cu_cp_pdu_session_resource_setup_response(cu_cp_pdu_session_resource_setup_request& request);
 
 /// \brief Generate a dummy PDU Session Resource Release Command base.
 ngap_message generate_pdu_session_resource_release_command_base(amf_ue_id_t amf_ue_id, ran_ue_id_t ran_ue_id);

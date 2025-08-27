@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -21,7 +21,9 @@
  */
 
 #pragma once
+
 #include "srsran/ran/slot_point.h"
+#include <chrono>
 
 namespace srsran {
 
@@ -29,6 +31,8 @@ namespace srsran {
 struct lower_phy_timing_context {
   /// Slot context.
   slot_point slot;
+  /// Time point of the current context.
+  std::chrono::time_point<std::chrono::system_clock> time_point;
 };
 
 } // namespace srsran

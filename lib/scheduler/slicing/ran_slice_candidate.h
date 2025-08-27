@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -40,8 +40,8 @@ public:
   ran_slice_id_t                               id() const { return inst->id; }
   [[nodiscard]] const slice_rrm_policy_config& cfg() const { return inst->cfg; }
 
-  bool is_candidate(du_ue_index_t ue_idx) const { return inst->contains(ue_idx); }
-  bool is_candidate(du_ue_index_t ue_idx, lcid_t lcid) const { return inst->contains(ue_idx, lcid); }
+  bool is_candidate(du_ue_index_t ue_idx) const { return inst->get_ues().contains(ue_idx); }
+  bool is_candidate(du_ue_index_t ue_idx, lcid_t lcid) const { return inst->get_ues().contains(ue_idx, lcid); }
 
   /// Get UEs belonging to a slice.
   const slice_ue_repository& get_slice_ues() const { return inst->get_ues(); }
@@ -56,7 +56,7 @@ public:
     }
   }
 
-  /// Remaining bytes to allocate for the given slice.
+  /// Remaining RBs available for allocation for the given slice.
   [[nodiscard]] unsigned remaining_rbs() const
   {
     if constexpr (IsDl) {

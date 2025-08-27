@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -59,6 +59,7 @@ TEST(ofh_uplane_packet_decoder_static_impl, valid_packet_should_decode_correctly
                                                          subcarrier_spacing::kHz30,
                                                          get_nsymb_per_slot(cyclic_prefix::NORMAL),
                                                          273,
+                                                         0,
                                                          std::make_unique<iq_decompressor_dummy>(),
                                                          {compression_type::none, 16});
 
@@ -96,6 +97,7 @@ TEST(ofh_uplane_packet_decoder_static_impl, missing_one_iq_sample_must_fail)
                                                          subcarrier_spacing::kHz30,
                                                          get_nsymb_per_slot(cyclic_prefix::NORMAL),
                                                          273,
+                                                         0,
                                                          std::make_unique<iq_decompressor_dummy>(),
                                                          {compression_type::none, 16});
 
@@ -119,6 +121,7 @@ TEST(ofh_uplane_packet_decoder_static_impl, missing_one_prb_must_fail)
                                                          subcarrier_spacing::kHz30,
                                                          get_nsymb_per_slot(cyclic_prefix::NORMAL),
                                                          273,
+                                                         0,
                                                          std::make_unique<iq_decompressor_dummy>(),
                                                          {compression_type::none, 16});
 
@@ -142,6 +145,7 @@ TEST(ofh_uplane_packet_decoder_static_impl, static_compression_with_compression_
                                                          subcarrier_spacing::kHz30,
                                                          get_nsymb_per_slot(cyclic_prefix::NORMAL),
                                                          273,
+                                                         0,
                                                          std::make_unique<iq_decompressor_dummy>(),
                                                          {compression_type::none, 16});
 
@@ -163,6 +167,7 @@ TEST(ofh_uplane_packet_decoder_static_impl, decoding_one_section_and_failing_to_
                                                          subcarrier_spacing::kHz30,
                                                          get_nsymb_per_slot(cyclic_prefix::NORMAL),
                                                          273,
+                                                         0,
                                                          std::make_unique<iq_decompressor_dummy>(),
                                                          {compression_type::none, 16});
 
@@ -181,6 +186,7 @@ TEST(ofh_uplane_packet_decoder_static_impl, missing_section_header_must_fail)
                                                          subcarrier_spacing::kHz30,
                                                          get_nsymb_per_slot(cyclic_prefix::NORMAL),
                                                          273,
+                                                         0,
                                                          std::make_unique<iq_decompressor_dummy>(),
                                                          {compression_type::none, 16});
 
@@ -198,6 +204,7 @@ TEST(ofh_uplane_packet_decoder_static_impl, missing_header_must_fail)
                                                          subcarrier_spacing::kHz30,
                                                          get_nsymb_per_slot(cyclic_prefix::NORMAL),
                                                          273,
+                                                         0,
                                                          std::make_unique<iq_decompressor_dummy>(),
                                                          {compression_type::none, 16});
 
@@ -218,6 +225,7 @@ TEST(ofh_uplane_packet_decoder_static_impl, downlink_packet_should_fail)
                                                          subcarrier_spacing::kHz30,
                                                          get_nsymb_per_slot(cyclic_prefix::NORMAL),
                                                          273,
+                                                         0,
                                                          std::make_unique<iq_decompressor_dummy>(),
                                                          {compression_type::none, 16});
 
@@ -238,6 +246,7 @@ TEST(ofh_uplane_packet_decoder_static_impl, reserved_filter_index_should_fail)
                                                          subcarrier_spacing::kHz30,
                                                          get_nsymb_per_slot(cyclic_prefix::NORMAL),
                                                          273,
+                                                         0,
                                                          std::make_unique<iq_decompressor_dummy>(),
                                                          {compression_type::none, 16});
 
@@ -258,6 +267,7 @@ TEST(ofh_uplane_packet_decoder_static_impl, symbol_index_out_of_range_should_fai
                                                          subcarrier_spacing::kHz30,
                                                          get_nsymb_per_slot(cyclic_prefix::NORMAL),
                                                          273,
+                                                         0,
                                                          std::make_unique<iq_decompressor_dummy>(),
                                                          {compression_type::none, 16});
 
@@ -278,6 +288,7 @@ TEST(ofh_uplane_packet_decoder_static_impl, none_compression_with_15_bits_should
                                                          subcarrier_spacing::kHz30,
                                                          get_nsymb_per_slot(cyclic_prefix::NORMAL),
                                                          273,
+                                                         0,
                                                          std::make_unique<iq_decompressor_dummy>(),
                                                          {compression_type::none, 15});
 
@@ -298,6 +309,7 @@ TEST(ofh_uplane_packet_decoder_static_impl, bfp_with_15_bits_should_pass)
                                                          subcarrier_spacing::kHz30,
                                                          get_nsymb_per_slot(cyclic_prefix::NORMAL),
                                                          273,
+                                                         0,
                                                          std::make_unique<iq_decompressor_dummy>(),
                                                          {compression_type::BFP, 15});
 
@@ -318,6 +330,7 @@ TEST(ofh_uplane_packet_decoder_static_impl, bfp_with_15_bits_without_ud_comp_len
                                                          subcarrier_spacing::kHz30,
                                                          get_nsymb_per_slot(cyclic_prefix::NORMAL),
                                                          273,
+                                                         0,
                                                          std::make_unique<iq_decompressor_dummy>(),
                                                          {compression_type::BFP, 15});
 
@@ -341,6 +354,7 @@ TEST(ofh_uplane_packet_decoder_static_impl, if_message_num_prbs_equals_zero_deco
                                                          subcarrier_spacing::kHz30,
                                                          get_nsymb_per_slot(cyclic_prefix::NORMAL),
                                                          ru_nof_prbs,
+                                                         0,
                                                          std::make_unique<iq_decompressor_dummy>(),
                                                          {compression_type::BFP, 9});
 
@@ -365,6 +379,7 @@ TEST(ofh_uplane_packet_decoder_static_impl, if_message_contains_one_valid_sectio
                                                          subcarrier_spacing::kHz30,
                                                          get_nsymb_per_slot(cyclic_prefix::NORMAL),
                                                          ru_nof_prbs,
+                                                         0,
                                                          std::make_unique<iq_decompressor_dummy>(),
                                                          {compression_type::BFP, 9});
 
@@ -384,31 +399,16 @@ TEST(ofh_uplane_packet_decoder_static_impl, peek_filter_index)
       0x9a, 0x01, 0xa4, 0x01, 0x86, 0x01, 0x86, 0x01, 0x90, 0x01, 0x90, 0x01, 0x9a, 0x01, 0x9a, 0x01, 0xa4, 0x01, 0x01,
       0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
 
-  const unsigned ru_nof_prbs = 2;
-
-  uplane_message_decoder_static_compression_impl decoder(srslog::fetch_basic_logger("TEST"),
-                                                         subcarrier_spacing::kHz30,
-                                                         get_nsymb_per_slot(cyclic_prefix::NORMAL),
-                                                         ru_nof_prbs,
-                                                         std::make_unique<iq_decompressor_dummy>(),
-                                                         {compression_type::BFP, 9});
-
   ASSERT_EQ(filter_index_type::standard_channel_filter, uplane_peeker::peek_filter_index(packet));
 }
 
 TEST(ofh_uplane_packet_decoder_static_impl, peek_filter_index_returns_reserved_on_peek_failure)
 {
   std::vector<uint8_t> packet;
-  const unsigned       ru_nof_prbs = 2;
 
-  uplane_message_decoder_static_compression_impl decoder(srslog::fetch_basic_logger("TEST"),
-                                                         subcarrier_spacing::kHz30,
-                                                         get_nsymb_per_slot(cyclic_prefix::NORMAL),
-                                                         ru_nof_prbs,
-                                                         std::make_unique<iq_decompressor_dummy>(),
-                                                         {compression_type::BFP, 9});
+  auto value = uplane_peeker::peek_filter_index(packet);
 
-  ASSERT_EQ(filter_index_type::reserved, uplane_peeker::peek_filter_index(packet));
+  ASSERT_FALSE(value.has_value());
 }
 
 TEST(ofh_uplane_packet_decoder_static_impl, peek_prach_filter_index)
@@ -419,16 +419,10 @@ TEST(ofh_uplane_packet_decoder_static_impl, peek_prach_filter_index)
       0x9a, 0x01, 0xa4, 0x01, 0x86, 0x01, 0x86, 0x01, 0x90, 0x01, 0x90, 0x01, 0x9a, 0x01, 0x9a, 0x01, 0xa4, 0x01, 0x01,
       0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
 
-  const unsigned ru_nof_prbs = 2;
+  auto value = uplane_peeker::peek_filter_index(packet);
 
-  uplane_message_decoder_static_compression_impl decoder(srslog::fetch_basic_logger("TEST"),
-                                                         subcarrier_spacing::kHz30,
-                                                         get_nsymb_per_slot(cyclic_prefix::NORMAL),
-                                                         ru_nof_prbs,
-                                                         std::make_unique<iq_decompressor_dummy>(),
-                                                         {compression_type::BFP, 9});
-
-  ASSERT_EQ(filter_index_type::ul_prach_preamble_1p25khz, uplane_peeker::peek_filter_index(packet));
+  ASSERT_TRUE(value.has_value());
+  ASSERT_EQ(filter_index_type::ul_prach_preamble_1p25khz, value.value());
 }
 
 TEST(ofh_uplane_packet_decoder_static_impl, peek_slot_symbol_point)
@@ -441,38 +435,84 @@ TEST(ofh_uplane_packet_decoder_static_impl, peek_slot_symbol_point)
       0x9a, 0x01, 0xa4, 0x01, 0x86, 0x01, 0x86, 0x01, 0x90, 0x01, 0x90, 0x01, 0x9a, 0x01, 0x9a, 0x01, 0xa4, 0x01, 0x01,
       0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
 
-  const unsigned           ru_nof_prbs = 2;
   const unsigned           nof_symbols = get_nsymb_per_slot(cyclic_prefix::NORMAL);
   const subcarrier_spacing scs         = subcarrier_spacing::kHz30;
 
-  uplane_message_decoder_static_compression_impl decoder(srslog::fetch_basic_logger("TEST"),
-                                                         scs,
-                                                         nof_symbols,
-                                                         ru_nof_prbs,
-                                                         std::make_unique<iq_decompressor_dummy>(),
-                                                         {compression_type::BFP, 9});
+  auto value = uplane_peeker::peek_slot_symbol_point(packet, nof_symbols, scs);
 
-  ASSERT_EQ(slot_point, uplane_peeker::peek_slot_symbol_point(packet, nof_symbols, scs));
+  ASSERT_TRUE(value.has_value());
+  ASSERT_EQ(slot_point, value.value());
 }
 
 TEST(ofh_uplane_packet_decoder_static_impl, return_invalid_slot_point_on_packet_size_smaller_than_required)
 {
-  std::vector<uint8_t> packet = {0x10, 0x30, 0x40};
+  std::vector<uint8_t> packet = {0x11, 0x02, 0x40};
 
-  const unsigned           ru_nof_prbs = 2;
   const unsigned           nof_symbols = get_nsymb_per_slot(cyclic_prefix::NORMAL);
   const subcarrier_spacing scs         = subcarrier_spacing::kHz30;
 
-  uplane_message_decoder_static_compression_impl decoder(srslog::fetch_basic_logger("TEST"),
-                                                         scs,
-                                                         nof_symbols,
-                                                         ru_nof_prbs,
-                                                         std::make_unique<iq_decompressor_dummy>(),
-                                                         {compression_type::BFP, 9});
+  auto slot = uplane_peeker::peek_slot_symbol_point(packet, nof_symbols, scs);
+  ASSERT_FALSE(slot.has_value());
+}
 
-  slot_symbol_point slot = uplane_peeker::peek_slot_symbol_point(packet, nof_symbols, scs);
+TEST(ofh_uplane_packet_decoder_static_impl, return_invalid_slot_point_on_invalid_subframe)
+{
+  std::vector<uint8_t> packet = {
+      0x11, 0x02, 0xa0, 0x42, 0x00, 0x70, 0x24, 0x00, 0x00, 0x01, 0x7c, 0x01, 0x7c, 0x01, 0x86, 0x01, 0x86, 0x01, 0x90,
+      0x01, 0x90, 0x01, 0x9a, 0x01, 0x9a, 0x01, 0xa4, 0x01, 0x86, 0x01, 0x86, 0x01, 0x90, 0x01, 0x90, 0x01, 0x9a, 0x01,
+      0x9a, 0x01, 0xa4, 0x01, 0x86, 0x01, 0x86, 0x01, 0x90, 0x01, 0x90, 0x01, 0x9a, 0x01, 0x9a, 0x01, 0xa4, 0x01, 0x01,
+      0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
 
-  ASSERT_FALSE(slot.get_slot().valid());
+  const unsigned           nof_symbols = get_nsymb_per_slot(cyclic_prefix::NORMAL);
+  const subcarrier_spacing scs         = subcarrier_spacing::kHz30;
+
+  auto slot = uplane_peeker::peek_slot_symbol_point(packet, nof_symbols, scs);
+  ASSERT_FALSE(slot.has_value());
+}
+
+TEST(ofh_uplane_packet_decoder_static_impl, return_invalid_slot_point_on_invalid_slot)
+{
+  std::vector<uint8_t> packet = {
+      0x11, 0x02, 0x40, 0xc2, 0x00, 0x70, 0x24, 0x00, 0x00, 0x01, 0x7c, 0x01, 0x7c, 0x01, 0x86, 0x01, 0x86, 0x01, 0x90,
+      0x01, 0x90, 0x01, 0x9a, 0x01, 0x9a, 0x01, 0xa4, 0x01, 0x86, 0x01, 0x86, 0x01, 0x90, 0x01, 0x90, 0x01, 0x9a, 0x01,
+      0x9a, 0x01, 0xa4, 0x01, 0x86, 0x01, 0x86, 0x01, 0x90, 0x01, 0x90, 0x01, 0x9a, 0x01, 0x9a, 0x01, 0xa4, 0x01, 0x01,
+      0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
+
+  const unsigned           nof_symbols = get_nsymb_per_slot(cyclic_prefix::NORMAL);
+  const subcarrier_spacing scs         = subcarrier_spacing::kHz30;
+
+  auto slot = uplane_peeker::peek_slot_symbol_point(packet, nof_symbols, scs);
+  ASSERT_FALSE(slot.has_value());
+}
+
+TEST(ofh_uplane_packet_decoder_static_impl, return_invalid_slot_point_on_invalid_symbol_high_byte)
+{
+  std::vector<uint8_t> packet = {
+      0x11, 0x02, 0x41, 0x42, 0x00, 0x70, 0x24, 0x00, 0x00, 0x01, 0x7c, 0x01, 0x7c, 0x01, 0x86, 0x01, 0x86, 0x01, 0x90,
+      0x01, 0x90, 0x01, 0x9a, 0x01, 0x9a, 0x01, 0xa4, 0x01, 0x86, 0x01, 0x86, 0x01, 0x90, 0x01, 0x90, 0x01, 0x9a, 0x01,
+      0x9a, 0x01, 0xa4, 0x01, 0x86, 0x01, 0x86, 0x01, 0x90, 0x01, 0x90, 0x01, 0x9a, 0x01, 0x9a, 0x01, 0xa4, 0x01, 0x01,
+      0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
+
+  const unsigned           nof_symbols = get_nsymb_per_slot(cyclic_prefix::NORMAL);
+  const subcarrier_spacing scs         = subcarrier_spacing::kHz30;
+
+  auto slot = uplane_peeker::peek_slot_symbol_point(packet, nof_symbols, scs);
+  ASSERT_FALSE(slot.has_value());
+}
+
+TEST(ofh_uplane_packet_decoder_static_impl, return_invalid_slot_point_on_invalid_symbol)
+{
+  std::vector<uint8_t> packet = {
+      0x11, 0x02, 0x40, 0x4f, 0x00, 0x70, 0x24, 0x00, 0x00, 0x01, 0x7c, 0x01, 0x7c, 0x01, 0x86, 0x01, 0x86, 0x01, 0x90,
+      0x01, 0x90, 0x01, 0x9a, 0x01, 0x9a, 0x01, 0xa4, 0x01, 0x86, 0x01, 0x86, 0x01, 0x90, 0x01, 0x90, 0x01, 0x9a, 0x01,
+      0x9a, 0x01, 0xa4, 0x01, 0x86, 0x01, 0x86, 0x01, 0x90, 0x01, 0x90, 0x01, 0x9a, 0x01, 0x9a, 0x01, 0xa4, 0x01, 0x01,
+      0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
+
+  const unsigned           nof_symbols = get_nsymb_per_slot(cyclic_prefix::NORMAL);
+  const subcarrier_spacing scs         = subcarrier_spacing::kHz30;
+
+  auto slot = uplane_peeker::peek_slot_symbol_point(packet, nof_symbols, scs);
+  ASSERT_FALSE(slot.has_value());
 }
 
 TEST(ofh_uplane_packet_decoder_static_impl, message_containing_more_than_one_section_should_fail_to_decode)
@@ -497,6 +537,7 @@ TEST(ofh_uplane_packet_decoder_static_impl, message_containing_more_than_one_sec
                                                          subcarrier_spacing::kHz30,
                                                          get_nsymb_per_slot(cyclic_prefix::NORMAL),
                                                          ru_nof_prbs,
+                                                         0,
                                                          std::make_unique<iq_decompressor_dummy>(),
                                                          {compression_type::BFP, 9});
 

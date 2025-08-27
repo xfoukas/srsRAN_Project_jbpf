@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -22,10 +22,10 @@
 
 #pragma once
 
-#include "srsran/adt/optional.h"
 #include "srsran/ran/pdsch/pdsch_mcs.h"
 #include "srsran/ran/pusch/pusch_mcs.h"
 #include "srsran/ran/sch/sch_mcs.h"
+#include <optional>
 
 namespace srsran {
 
@@ -42,7 +42,7 @@ std::optional<sch_mcs_index> map_cqi_to_mcs(unsigned cqi, pdsch_mcs_table mcs_ta
 ///
 /// The objective of this function is to find the maximum MCS that can be used for a given SNR.
 /// TODO: revise this function once the SNR to BLER curves will have been prepared.
-sch_mcs_index map_snr_to_mcs_ul(double snr, pusch_mcs_table mcs_table);
+sch_mcs_index map_snr_to_mcs_ul(double snr, pusch_mcs_table mcs_table, bool use_transform_precoder);
 
 /// \brief Retrieves the maximum MCS value for a given MCS table.
 ///

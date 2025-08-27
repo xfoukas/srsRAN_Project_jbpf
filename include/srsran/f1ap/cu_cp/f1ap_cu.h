@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -22,36 +22,23 @@
 
 #pragma once
 
-#include "du_setup_notifier.h"
-#include "f1ap_cu_ue_context_update.h"
 #include "srsran/adt/byte_buffer.h"
 #include "srsran/adt/expected.h"
 #include "srsran/cu_cp/cu_cp_types.h"
 #include "srsran/cu_cp/cu_cp_ue_messages.h"
+#include "srsran/f1ap/cu_cp/du_setup_notifier.h"
+#include "srsran/f1ap/cu_cp/f1ap_cu_configuration_update.h"
+#include "srsran/f1ap/cu_cp/f1ap_cu_ue_context_update.h"
 #include "srsran/f1ap/cu_cp/f1ap_du_context.h"
+#include "srsran/f1ap/cu_cp/f1ap_nrppa_msg_handling.h"
+#include "srsran/f1ap/cu_cp/f1ap_rrc_msg_transfer_handling.h"
 #include "srsran/f1ap/f1ap_message_handler.h"
 #include "srsran/f1ap/f1ap_ue_id_types.h"
-#include "srsran/ran/lcid.h"
+#include "srsran/ran/rb_id.h"
 #include "srsran/support/async/async_task.h"
 
 namespace srsran {
 namespace srs_cu_cp {
-
-struct f1ap_dl_rrc_message {
-  ue_index_t  ue_index = ue_index_t::invalid;
-  srb_id_t    srb_id   = srb_id_t::nulltype;
-  byte_buffer rrc_container;
-};
-
-class f1ap_rrc_message_handler
-{
-public:
-  virtual ~f1ap_rrc_message_handler() = default;
-
-  /// \brief Packs and transmits the DL RRC message transfer as per TS 38.473 section 8.4.2.
-  /// \param[in] msg The DL RRC message transfer message to transmit.
-  virtual void handle_dl_rrc_message_transfer(const f1ap_dl_rrc_message& msg) = 0;
-};
 
 struct f1ap_ue_context_release_command {
   ue_index_t              ue_index = ue_index_t::invalid;
@@ -99,28 +86,16 @@ public:
   virtual void handle_paging(const cu_cp_paging_message& msg) = 0;
 };
 
-/// Interface to notify the reception of an new RRC message.
-class f1ap_rrc_message_notifier
-{
-public:
-  virtual ~f1ap_rrc_message_notifier() = default;
-
-  /// This callback is invoked on each received UL CCCH RRC message.
-  virtual void on_ul_ccch_pdu(byte_buffer pdu) = 0;
-
-  /// This callback is invoked on each received UL DCCH RRC message.
-  virtual void on_ul_dcch_pdu(const srb_id_t srb_id, byte_buffer pdu) = 0;
-};
-
 /// \brief Request made by the F1AP-CU to create a RRC context for an existing UE context in the CU-CP.
 ///
 /// This request should be made once the C-RNTI and cell of the UE is known. That generally corresponds to the moment
 /// a Initial UL RRC Message or a F1AP UE Context Setup Response are received.
 struct ue_rrc_context_creation_request {
-  ue_index_t          ue_index = ue_index_t::invalid; ///> If this is invalid, a new UE will be created.
-  rnti_t              c_rnti;
-  nr_cell_global_id_t cgi;
-  byte_buffer         du_to_cu_rrc_container;
+  /// If ue_index is invalid, a new UE will be created.
+  ue_index_t                             ue_index = ue_index_t::invalid;
+  rnti_t                                 c_rnti;
+  nr_cell_global_id_t                    cgi;
+  byte_buffer                            du_to_cu_rrc_container;
   std::optional<rrc_ue_transfer_context> prev_context;
 };
 
@@ -128,7 +103,9 @@ struct ue_rrc_context_creation_request {
 struct ue_rrc_context_creation_response {
   ue_index_t ue_index = ue_index_t::invalid;
   /// Notifier to be used by the F1AP to push new RRC PDUs to the UE RRC layer.
-  f1ap_rrc_message_notifier* f1ap_rrc_notifier = nullptr;
+  f1ap_ul_ccch_notifier* f1ap_srb0_notifier = nullptr;
+  f1ap_ul_dcch_notifier* f1ap_srb1_notifier = nullptr;
+  f1ap_ul_dcch_notifier* f1ap_srb2_notifier = nullptr;
 };
 
 using ue_rrc_context_creation_outcome = expected<ue_rrc_context_creation_response, byte_buffer>;
@@ -191,13 +168,29 @@ public:
   virtual void remove_ue_context(ue_index_t ue_index) = 0;
 };
 
+/// Handle F1AP interface management procedures as defined in TS 38.473 section 8.2.
+class f1ap_interface_management_handler
+{
+public:
+  virtual ~f1ap_interface_management_handler() = default;
+
+  /// \brief Initiates the gNB-CU Configuration Update procedure  as per TS 38.473 section 8.2.5.
+  /// \param[in] request The gNB-CU Configuration Update message to transmit.
+  /// \return Returns a f1ap_gnb_cu_configuration_update_response struct with the success member set to
+  /// 'true' in case of a successful outcome, 'false' otherwise.
+  virtual async_task<f1ap_gnb_cu_configuration_update_response>
+  handle_gnb_cu_configuration_update(const f1ap_gnb_cu_configuration_update& request) = 0;
+};
+
 /// Combined entry point for F1AP handling.
 class f1ap_cu : public f1ap_message_handler,
                 public f1ap_rrc_message_handler,
                 public f1ap_ue_context_manager,
                 public f1ap_statistics_handler,
                 public f1ap_paging_manager,
-                public f1ap_ue_context_removal_handler
+                public f1ap_ue_context_removal_handler,
+                public f1ap_nrppa_message_handler,
+                public f1ap_interface_management_handler
 {
 public:
   virtual ~f1ap_cu() = default;
@@ -206,12 +199,14 @@ public:
 
   virtual async_task<void> stop() = 0;
 
-  virtual f1ap_message_handler&            get_f1ap_message_handler()            = 0;
-  virtual f1ap_rrc_message_handler&        get_f1ap_rrc_message_handler()        = 0;
-  virtual f1ap_ue_context_manager&         get_f1ap_ue_context_manager()         = 0;
-  virtual f1ap_statistics_handler&         get_f1ap_statistics_handler()         = 0;
-  virtual f1ap_paging_manager&             get_f1ap_paging_manager()             = 0;
-  virtual f1ap_ue_context_removal_handler& get_f1ap_ue_context_removal_handler() = 0;
+  virtual f1ap_message_handler&              get_f1ap_message_handler()              = 0;
+  virtual f1ap_rrc_message_handler&          get_f1ap_rrc_message_handler()          = 0;
+  virtual f1ap_ue_context_manager&           get_f1ap_ue_context_manager()           = 0;
+  virtual f1ap_statistics_handler&           get_f1ap_statistics_handler()           = 0;
+  virtual f1ap_paging_manager&               get_f1ap_paging_manager()               = 0;
+  virtual f1ap_ue_context_removal_handler&   get_f1ap_ue_context_removal_handler()   = 0;
+  virtual f1ap_nrppa_message_handler&        get_f1ap_nrppa_message_handler()        = 0;
+  virtual f1ap_interface_management_handler& get_f1ap_interface_management_handler() = 0;
 };
 
 } // namespace srs_cu_cp

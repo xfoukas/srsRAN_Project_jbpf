@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -54,6 +54,9 @@ protected:
   ngap_test();
   ~ngap_test() override;
 
+  /// \brief Helper method to successfully run NG setup in NGAP.
+  bool run_ng_setup();
+
   /// \brief Helper method to successfully create UE instance in NGAP and inject an InitialUEMessage.
   ue_index_t create_ue(rnti_t rnti = rnti_t::MIN_CRNTI);
 
@@ -92,6 +95,7 @@ protected:
 
   ue_manager                      ue_mng{cu_cp_cfg};
   dummy_n2_gateway                n2_gw;
+  dummy_ngap_message_handler      dummy_amf;
   dummy_ngap_cu_cp_notifier       cu_cp_notifier{ue_mng};
   std::unique_ptr<ngap_interface> ngap;
 };

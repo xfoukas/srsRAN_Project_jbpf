@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -22,7 +22,6 @@
 
 #pragma once
 
-#include "../../phy/support/resource_grid_mapper_test_doubles.h"
 #include "../../phy/support/resource_grid_test_doubles.h"
 #include "srsran/phy/support/prach_buffer.h"
 #include "srsran/ran/resource_block.h"
@@ -89,9 +88,9 @@ public:
     }
   }
 
-  unsigned get_nof_ports() const override { return 1; };
-  unsigned get_nof_subc() const override { return grid_data.size(); };
-  unsigned get_nof_symbols() const override { return MAX_NSYMB_PER_SLOT; };
+  unsigned get_nof_ports() const override { return 1; }
+  unsigned get_nof_subc() const override { return grid_data.size(); }
+  unsigned get_nof_symbols() const override { return MAX_NSYMB_PER_SLOT; }
 
   span<const cf_t> put(unsigned                                               port,
                        unsigned                                               l,

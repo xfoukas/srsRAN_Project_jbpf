@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -26,6 +26,8 @@
 #include "lib/scheduler/support/config_helpers.h"
 #include "lib/scheduler/support/pdsch/pdsch_default_time_allocation.h"
 #include "scheduler_output_test_helpers.h"
+#include "tests/test_doubles/scheduler/scheduler_test_message_validators.h"
+#include "srsran/ran/pdcch/dci_packing.h"
 #include "srsran/ran/prach/prach_configuration.h"
 #include "srsran/ran/resource_allocation/resource_allocation_frequency.h"
 #include "srsran/support/error_handling.h"
@@ -101,8 +103,8 @@ void srsran::assert_pdcch_pdsch_common_consistency(const cell_configuration&   c
   }
   const crb_interval cs_zero_crbs = get_coreset0_crbs(cell_cfg.dl_cfg_common.init_dl_bwp.pdcch_common);
 
-  uint8_t  time_assignment = 0;
-  uint8_t  freq_assignment = 0;
+  unsigned time_assignment = 0;
+  unsigned freq_assignment = 0;
   unsigned N_rb_dl_bwp     = 0;
   switch (pdcch.dci.type) {
     case dci_dl_rnti_config_type::si_f1_0: {
@@ -144,7 +146,7 @@ void srsran::assert_pdcch_pdsch_common_consistency(const cell_configuration&   c
       cell_cfg.dl_cfg_common.init_dl_bwp.pdsch_common.pdsch_td_alloc_list[time_assignment].symbols;
   TESTASSERT(symbols == pdsch.symbols, "Mismatch of time-domain resource assignment and PDSCH symbols");
 
-  uint8_t pdsch_freq_resource = ra_frequency_type1_get_riv(
+  unsigned pdsch_freq_resource = ra_frequency_type1_get_riv(
       ra_frequency_type1_configuration{N_rb_dl_bwp, pdsch.rbs.type1().start(), pdsch.rbs.type1().length()});
   TESTASSERT_EQ(pdsch_freq_resource, freq_assignment, "DCI frequency resource does not match PDSCH PRBs");
 }
@@ -159,8 +161,12 @@ void srsran::assert_pdcch_pdsch_common_consistency(const cell_configuration&    
       case dci_dl_rnti_config_type::si_f1_0: {
         const auto&     sibs = cell_res_grid[0].result.dl.bc.sibs;
         sib_information sib;
-        auto            it = std::find_if(
-            sibs.begin(), sibs.end(), [&pdcch](const auto& sib_) { return sib_.pdsch_cfg.rnti == pdcch.ctx.rnti; });
+        const auto&     it = std::find_if(sibs.begin(), sibs.end(), [&pdcch](const auto& sib_) {
+          unsigned pdsch_freq_resource = ra_frequency_type1_get_riv(ra_frequency_type1_configuration{
+              pdcch.dci.si_f1_0.N_rb_dl_bwp, sib_.pdsch_cfg.rbs.type1().start(), sib_.pdsch_cfg.rbs.type1().length()});
+          return (sib_.pdsch_cfg.rnti == pdcch.ctx.rnti) &&
+                 (pdsch_freq_resource == pdcch.dci.si_f1_0.frequency_resource);
+        });
         TESTASSERT(it != sibs.end());
         linked_pdsch = &it->pdsch_cfg;
       } break;
@@ -195,6 +201,11 @@ void srsran::assert_pdcch_pdsch_common_consistency(const cell_configuration&    
         linked_pdsch = &it->pdsch_cfg;
       } break;
       case dci_dl_rnti_config_type::p_rnti_f1_0: {
+        // No corresponding PDSCH.
+        if (pdcch.dci.p_rnti_f1_0.short_messages_indicator ==
+            dci_1_0_p_rnti_configuration::payload_info::short_messages) {
+          break;
+        }
         uint8_t k0 =
             cell_cfg.dl_cfg_common.init_dl_bwp.pdsch_common.pdsch_td_alloc_list[pdcch.dci.p_rnti_f1_0.time_resource].k0;
         const auto& pg_grants = cell_res_grid[k0].result.dl.paging_grants;
@@ -207,7 +218,9 @@ void srsran::assert_pdcch_pdsch_common_consistency(const cell_configuration&    
       default:
         srsran_terminate("DCI type not supported");
     }
-    assert_pdcch_pdsch_common_consistency(cell_cfg, pdcch, *linked_pdsch);
+    if (linked_pdsch) {
+      assert_pdcch_pdsch_common_consistency(cell_cfg, pdcch, *linked_pdsch);
+    }
   }
 }
 
@@ -227,7 +240,14 @@ void srsran::test_pdsch_sib_consistency(const cell_configuration& cell_cfg, span
     ASSERT_EQ(sib.pdsch_cfg.dci_fmt, dci_dl_format::f1_0);
     ASSERT_TRUE(sib.pdsch_cfg.rbs.is_type1());
     ASSERT_EQ(sib.pdsch_cfg.coreset_cfg->id, to_coreset_id(0));
-    ASSERT_EQ(sib.pdsch_cfg.ss_set_type, search_space_set_type::type0);
+    if (sib.si_indicator == sib_information::sib1) {
+      ASSERT_EQ(sib.pdsch_cfg.ss_set_type, search_space_set_type::type0);
+      ASSERT_FALSE(sib.si_msg_index.has_value());
+    } else {
+      ASSERT_TRUE(sib.pdsch_cfg.ss_set_type == search_space_set_type::type0 or
+                  sib.pdsch_cfg.ss_set_type == search_space_set_type::type0A);
+      ASSERT_TRUE(sib.si_msg_index.has_value());
+    }
     ASSERT_EQ(sib.pdsch_cfg.codewords.size(), 1);
     ASSERT_EQ(sib.pdsch_cfg.codewords[0].mcs_table, pdsch_mcs_table::qam64);
     vrb_interval vrbs = sib.pdsch_cfg.rbs.type1();
@@ -259,10 +279,23 @@ void srsran::test_pdsch_rar_consistency(const cell_configuration& cell_cfg, span
         rar.pdsch_cfg.rbs.type1().start() + rar.pdsch_cfg.coreset_cfg->get_coreset_start_crb(),
         rar.pdsch_cfg.rbs.type1().stop() + rar.pdsch_cfg.coreset_cfg->get_coreset_start_crb()};
     crb_interval rar_crbs = prb_to_crb(init_bwp_cfg, rar_vrbs);
-    TESTASSERT(coreset0_lims.contains(rar_crbs), "RAR outside of initial active DL BWP RB limits");
+    ASSERT_TRUE(coreset0_lims.contains(rar_crbs)) << "RAR outside of initial active DL BWP RB limits";
 
-    TESTASSERT(not ra_rntis.count(ra_rnti), "Repeated RA-rnti={} detected", ra_rnti);
+    ASSERT_FALSE(ra_rntis.count(ra_rnti)) << fmt::format("Repeated RA-rnti={} detected", ra_rnti);
     ra_rntis.emplace(ra_rnti);
+  }
+}
+
+void srsran::test_pdsch_ue_consistency(const cell_configuration& cell_cfg, span<const dl_msg_alloc> grants)
+{
+  ASSERT_TRUE(
+      test_helper::is_valid_dl_msg_alloc_list(grants, cell_cfg.dl_cfg_common.init_dl_bwp.pdcch_common.coreset0));
+}
+
+void srsran::test_pusch_ue_consistency(const cell_configuration& cell_cfg, span<const ul_sched_info> grants)
+{
+  for (const ul_sched_info& grant : grants) {
+    ASSERT_TRUE(test_helper::is_valid_ul_sched_info(grant));
   }
 }
 
@@ -413,9 +446,7 @@ void srsran::test_prach_opportunity_validity(const cell_configuration& cell_cfg,
     if (prach.start_preamble_index != 255) {
       ASSERT_EQ(0, prach.start_preamble_index);
     }
-    if (rach_cfg_common.total_nof_ra_preambles.has_value()) {
-      ASSERT_EQ(rach_cfg_common.total_nof_ra_preambles.value(), prach.nof_preamble_indexes);
-    }
+    ASSERT_EQ(rach_cfg_common.total_nof_ra_preambles, prach.nof_preamble_indexes);
     ASSERT_EQ(prach_cfg.nof_occasions_within_slot, prach.nof_prach_occasions);
     ASSERT_EQ(prach_cfg.starting_symbol, prach.start_symbol);
   }
@@ -444,6 +475,8 @@ void srsran::test_scheduler_result_consistency(const cell_configuration& cell_cf
   ASSERT_NO_FATAL_FAILURE(test_pdsch_sib_consistency(cell_cfg, result.dl.bc.sibs));
   ASSERT_NO_FATAL_FAILURE(test_prach_opportunity_validity(cell_cfg, result.ul.prachs));
   ASSERT_NO_FATAL_FAILURE(test_pdsch_rar_consistency(cell_cfg, result.dl.rar_grants));
+  ASSERT_NO_FATAL_FAILURE(test_pdsch_ue_consistency(cell_cfg, result.dl.ue_grants));
+  ASSERT_NO_FATAL_FAILURE(test_pusch_ue_consistency(cell_cfg, result.ul.puschs));
   ASSERT_NO_FATAL_FAILURE(test_pdcch_common_consistency(cell_cfg, sl_tx, result.dl.dl_pdcchs));
   ASSERT_NO_FATAL_FAILURE(test_dl_resource_grid_collisions(cell_cfg, result.dl));
   ASSERT_NO_FATAL_FAILURE(test_ul_resource_grid_collisions(cell_cfg, result.ul));
@@ -458,7 +491,7 @@ void assert_dl_resource_grid_filled(const cell_configuration& cell_cfg, const ce
       TESTASSERT(cell_res_grid[0].dl_res_grid.all_set(test_grant.grant),
                  "The allocation with rnti={}, type={}, crbs={} was not registered in the cell resource grid",
                  test_grant.rnti,
-                 test_grant.type,
+                 fmt::underlying(test_grant.type),
                  test_grant.grant.crbs);
     }
   }

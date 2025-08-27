@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -30,20 +30,27 @@ namespace srsran {
 class si_message_scheduler
 {
 public:
-  si_message_scheduler(const scheduler_si_expert_config&               expert_cfg_,
-                       const cell_configuration&                       cfg_,
-                       pdcch_resource_allocator&                       pdcch_sch,
-                       const sched_cell_configuration_request_message& msg);
+  si_message_scheduler(const cell_configuration&                  cfg_,
+                       pdcch_resource_allocator&                  pdcch_sch,
+                       const std::optional<si_scheduling_config>& si_sched_cfg_);
 
   /// \brief Performs broadcast SI message scheduling.
   ///
   /// \param[out,in] res_grid Resource grid with current allocations and scheduling results.
   void run_slot(cell_slot_resource_allocator& res_grid);
 
+  /// \brief Update the SI messages.
+  void handle_si_message_update_indication(unsigned                                   version,
+                                           const std::optional<si_scheduling_config>& new_si_sched_cfg);
+
 private:
   struct message_window_context {
+    /// SI message window.
     interval<slot_point> window;
-    unsigned             nof_tx = 0;
+    /// Number of SI message transmissions within the current window.
+    unsigned nof_tx_in_current_window = 0;
+    /// Total number of SI message transmissions.
+    unsigned long total_nof_tx = 0;
   };
 
   void update_si_message_windows(slot_point sl_tx);
@@ -57,7 +64,8 @@ private:
                      crb_interval                  si_crbs_grant,
                      uint8_t                       time_resource,
                      const dmrs_information&       dmrs_info,
-                     unsigned                      tbs);
+                     unsigned                      tbs,
+                     const message_window_context& message_context);
 
   // Configuration of the broadcast SI messages.
   const scheduler_si_expert_config&   expert_cfg;
@@ -67,6 +75,7 @@ private:
   srslog::basic_logger&               logger;
 
   std::vector<message_window_context> pending_messages;
+  unsigned                            version = 0;
 };
 
 } // namespace srsran

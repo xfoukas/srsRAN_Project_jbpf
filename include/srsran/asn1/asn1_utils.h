@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -134,6 +134,11 @@ void log_error_code(SRSASN_CODE code, const char* filename, int line);
   } while (0)
 
 const char* convert_enum_idx(const char* array[], uint32_t nof_types, uint32_t enum_val, const char* enum_type);
+bool        convert_enum_str(const char* array[],
+                             uint32_t    nof_types,
+                             const char* str,
+                             uint32_t&   enum_val,
+                             const char* enum_type);
 template <class ItemType>
 ItemType map_enum_number(ItemType* array, uint32_t nof_types, uint32_t enum_val, const char* enum_type);
 
@@ -661,7 +666,7 @@ public:
   IntType              value;
   integer() = default;
   integer(IntType value_) : value(value_) {}
-              operator IntType() const { return value; }
+  operator IntType() const { return value; }
   SRSASN_CODE pack(bit_ref& bref) const { return pack_integer(bref, value, lb, ub, has_ext, is_aligned); }
   SRSASN_CODE unpack(cbit_ref& bref) { return unpack_integer(value, bref, lb, ub, has_ext, is_aligned); }
 };
@@ -898,6 +903,7 @@ public:
 
   std::string              to_string() const;
   unbounded_octstring<Al>& from_string(const std::string& hexstr);
+  unbounded_octstring<Al>& from_bytes(srsran::span<const uint8_t> bytes);
 
   uint64_t                 to_number() const;
   unbounded_octstring<Al>& from_number(uint64_t val);
@@ -1387,8 +1393,7 @@ struct choice_buffer_base_t {
 
 template <typename... Ts>
 struct choice_buffer_t : public choice_buffer_base_t<max_size({sizeof(alignment_t), sizeof(Ts)...}),
-                                                     max_size({alignof(alignment_t), alignof(Ts)...})> {
-};
+                                                     max_size({alignof(alignment_t), alignof(Ts)...})> {};
 
 using pod_choice_buffer_t = choice_buffer_t<>;
 
@@ -1583,9 +1588,9 @@ class real_s
 public:
   float value;
   real_s() = default;
-  SRSASN_CODE pack(bit_ref& bref) const { return pack_unconstrained_real(bref, value, true); };
-  SRSASN_CODE unpack(cbit_ref& bref) { return unpack_unconstrained_real(value, bref, true); };
-  void        to_json(json_writer& j) const { j.write_float(value); };
+  SRSASN_CODE pack(bit_ref& bref) const { return pack_unconstrained_real(bref, value, true); }
+  SRSASN_CODE unpack(cbit_ref& bref) { return unpack_unconstrained_real(value, bref, true); }
+  void        to_json(json_writer& j) const { j.write_float(value); }
 };
 
 /*******************

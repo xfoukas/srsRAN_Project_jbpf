@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -23,9 +23,10 @@
 #pragma once
 
 #include "../converters/rlc_config_helpers.h"
+#include "srsran/adt/slotted_vector.h"
 #include "srsran/mac/mac_cell_group_config.h"
 #include "srsran/ran/du_types.h"
-#include "srsran/ran/lcid.h"
+#include "srsran/ran/logical_channel/lcid.h"
 #include "srsran/ran/physical_cell_group.h"
 #include "srsran/ran/qos/qos_parameters.h"
 #include "srsran/rlc/rlc_config.h"
@@ -66,6 +67,11 @@ struct du_ue_drb_config {
   }
 };
 
+/// Contention-free random access (CFRA) configuration for a UE.
+struct cfra_config {
+  unsigned preamble_id;
+};
+
 /// Snapshot of the DU resources taken by a UE at a given instant.
 struct du_ue_resource_config {
   slotted_id_table<srb_id_t, du_ue_srb_config, MAX_NOF_SRBS> srbs;
@@ -73,6 +79,10 @@ struct du_ue_resource_config {
   slotted_id_vector<drb_id_t, du_ue_drb_config> drbs;
   /// CellGroupConfiguration of the RAN resources allocated to a UE.
   cell_group_config cell_group;
+  /// measGapConfig chosen for the UE.
+  std::optional<meas_gap_config> meas_gap;
+  /// Resources allocated for contention-free random access (CFRA).
+  std::optional<cfra_config> cfra;
 };
 
 } // namespace srs_du

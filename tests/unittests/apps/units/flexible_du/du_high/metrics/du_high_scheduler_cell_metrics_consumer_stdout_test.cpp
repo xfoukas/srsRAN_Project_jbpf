@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -20,7 +20,7 @@
  *
  */
 
-#include "apps/units/flexible_du/du_high/metrics/du_high_scheduler_cell_metrics_consumers.h"
+#include "apps/units/flexible_o_du/o_du_high/du_high/metrics/consumers/scheduler_metrics_consumers.h"
 
 using namespace srsran;
 
@@ -30,7 +30,7 @@ using namespace srsran;
 /// This is meant to visually and (currently still) manually verify the correct
 /// metrics formatting and plotting.
 
-static scheduler_cell_metrics reports;
+static scheduler_metrics_report reports;
 
 void fill_metrics_single_ue()
 {
@@ -38,7 +38,8 @@ void fill_metrics_single_ue()
   ue.pci  = 500;
   ue.rnti = to_rnti(0x4601);
   ue.cqi_stats.update(4);
-  ue.ri_stats.update(1);
+  ue.dl_ri_stats.update(1);
+  ue.ul_ri_stats.update(1);
   ue.dl_mcs        = 28;
   ue.dl_brate_kbps = 1 * 1024; // 1Mbit
   ue.dl_nof_ok     = 900;
@@ -52,16 +53,17 @@ void fill_metrics_single_ue()
   ue.ul_nof_nok    = 1;
   ue.bsr           = 8192;
   ue.dl_bs         = 100000;
-  reports.ue_metrics.push_back(ue);
+  auto& cell       = reports.cells.emplace_back();
+  cell.ue_metrics.push_back(ue);
 }
 
 int main()
 {
-  scheduler_cell_metrics_consumer_stdout plotter(true);
+  scheduler_cell_metrics_consumer_stdout plotter;
 
   fill_metrics_single_ue();
 
-  plotter.handle_metric(scheduler_cell_metrics_impl(reports));
+  plotter.handle_metric(reports);
 
   return 0;
 }

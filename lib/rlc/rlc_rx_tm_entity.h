@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -23,7 +23,6 @@
 #pragma once
 
 #include "rlc_rx_entity.h"
-#include "srsran/rlc/rlc_metrics.h"
 
 #ifdef JBPF_ENABLED
 #include "jbpf_srsran_hooks.h"
@@ -39,7 +38,7 @@ public:
                    rb_id_t                           rb_id,
                    const rlc_rx_tm_config&           config,
                    rlc_rx_upper_layer_data_notifier& upper_dn_,
-                   rlc_metrics_aggregator&           metrics_agg_,
+                   rlc_bearer_metrics_collector&     metrics_coll_,
                    rlc_pcap&                         pcap_,
                    task_executor&                    ue_executor,
                    timer_manager&                    timers);

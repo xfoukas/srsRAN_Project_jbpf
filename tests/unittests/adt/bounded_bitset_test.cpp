@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -21,6 +21,7 @@
  */
 
 #include "srsran/adt/bounded_bitset.h"
+#include "srsran/adt/interval.h"
 #include "srsran/support/test_utils.h"
 #include <bitset>
 #include <gtest/gtest.h>
@@ -615,11 +616,14 @@ TEST(bounded_bitset_test, contiguous_bitset_format)
   ASSERT_EQ(fmt::format("{:xr}", bitset), "0e0");
   ASSERT_EQ(fmt::format("{:n}", bitset), "[1, 4)");
   ASSERT_EQ(fmt::format("{:n}", bitset_reversed), "[1, 4)");
+  ASSERT_EQ(fmt::format("{:i}", bitset), "{[1, 4)}");
+  ASSERT_EQ(fmt::format("{:i}", bitset_reversed), "{[1, 4)}");
   ASSERT_EQ(fmt::format("{:b}", bitset), fmt::format("{:br}", bitset_reversed));
   ASSERT_EQ(fmt::format("{:br}", bitset), fmt::format("{:b}", bitset_reversed));
   ASSERT_EQ(fmt::format("{:x}", bitset), fmt::format("{:xr}", bitset_reversed));
   ASSERT_EQ(fmt::format("{:xr}", bitset), fmt::format("{:x}", bitset_reversed));
   ASSERT_EQ(fmt::format("{:n}", bitset), fmt::format("{:nr}", bitset));
+  ASSERT_EQ(fmt::format("{:i}", bitset), fmt::format("{:ir}", bitset));
 
   bitset.reset();
   bitset_reversed.reset();
@@ -640,11 +644,14 @@ TEST(bounded_bitset_test, contiguous_bitset_format)
   ASSERT_EQ(fmt::format("{:xr}", bitset), "09b");
   ASSERT_EQ(fmt::format("{:n}", bitset), "1 4 5 7 8");
   ASSERT_EQ(fmt::format("{:n}", bitset_reversed), "1 4 5 7 8");
+  ASSERT_EQ(fmt::format("{:i}", bitset), "{1, [4, 6), [7, 9)}");
+  ASSERT_EQ(fmt::format("{:i}", bitset_reversed), "{1, [4, 6), [7, 9)}");
   ASSERT_EQ(fmt::format("{:b}", bitset), fmt::format("{:br}", bitset_reversed));
   ASSERT_EQ(fmt::format("{:br}", bitset), fmt::format("{:b}", bitset_reversed));
   ASSERT_EQ(fmt::format("{:x}", bitset), fmt::format("{:xr}", bitset_reversed));
   ASSERT_EQ(fmt::format("{:xr}", bitset), fmt::format("{:x}", bitset_reversed));
   ASSERT_EQ(fmt::format("{:n}", bitset), fmt::format("{:nr}", bitset));
+  ASSERT_EQ(fmt::format("{:i}", bitset), fmt::format("{:ir}", bitset));
 }
 
 TEST(bounded_bitset_test, two_word_bitset_format)
@@ -958,8 +965,7 @@ TEST(BoundedBitset, for_each)
   ASSERT_EQ(output, std::vector<int>({2, 4, 6, 8, 10}));
 
   output.resize(0);
-  mask.for_each(
-      0, mask.size(), [&output, &values](int n) { output.emplace_back(values[n]); }, false);
+  mask.for_each(0, mask.size(), [&output, &values](int n) { output.emplace_back(values[n]); }, false);
   ASSERT_EQ(output, std::vector<int>({1, 3, 5, 7, 9}));
 
   output.resize(0);
@@ -969,6 +975,36 @@ TEST(BoundedBitset, for_each)
   output.resize(0);
   mask.for_each(0, 9, [&output, &values](int n) { output.emplace_back(values[n]); });
   ASSERT_EQ(output, std::vector<int>({2, 4, 6, 8}));
+}
+
+TEST(BoundedBitset, for_each_interval)
+{
+  std::vector<interval<unsigned>> intervals = {{1, 5}, {7, 9}, {15, 20}};
+
+  bounded_bitset<32> bitset(20);
+  for (interval<unsigned> interv : intervals) {
+    bitset.fill(interv.start(), interv.stop());
+  }
+
+  for_each_interval(bitset, [n = 0, &intervals](size_t start, size_t stop) mutable {
+    ASSERT_EQ(intervals[n].start(), start);
+    ASSERT_EQ(intervals[n].stop(), stop);
+    ++n;
+  });
+
+  for_each_interval(bitset, 2, 19, [n = 0U, &intervals](size_t start, size_t stop) mutable {
+    unsigned expected_start = intervals[n].start();
+    unsigned expected_stop  = intervals[n].stop();
+    if (n == 0) {
+      expected_start = 2;
+    }
+    if (n == (intervals.size() - 1U)) {
+      expected_stop = 19;
+    }
+    ASSERT_EQ(expected_start, start);
+    ASSERT_EQ(expected_stop, stop);
+    ++n;
+  });
 }
 
 TEST(bounded_bitset_test, to_packed_bits_one_byte)
@@ -1001,4 +1037,15 @@ TEST(bounded_bitset_test, to_packed_bits_two_byte)
   ASSERT_EQ(bitset_rev.to_packed_bits(span<uint8_t>{packed_bits2}), 2);
   std::array<uint8_t, 2> expected_packed_bits2 = {0b11000000, 0b01000000};
   ASSERT_TRUE(std::equal(expected_packed_bits2.begin(), expected_packed_bits2.end(), packed_bits2.begin()));
+}
+
+TEST(bounded_bitset_test, bit_positions_to_bitset)
+{
+  std::vector<unsigned> positions = {1, 2, 5};
+  auto                  bset      = bit_positions_to_bitset<7>(positions);
+  ASSERT_EQ(bset.size(), 6);
+  ASSERT_EQ(bset.count(), 3);
+  ASSERT_TRUE(bset.test(1));
+  ASSERT_TRUE(bset.test(2));
+  ASSERT_TRUE(bset.test(5));
 }

@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -22,12 +22,13 @@
 
 #pragma once
 
-#include "common.h"
+#include "srsran/ran/cause/common.h"
 #include "fmt/format.h"
 #include <variant>
 
 namespace srsran {
 
+/// The E1AP radio network cause, see TS 38.463 section 9.3.1.2.
 enum class e1ap_cause_radio_network_t : uint8_t {
   unspecified = 0,
   unknown_or_already_allocated_gnb_cu_cp_ue_e1ap_id,
@@ -65,8 +66,11 @@ enum class e1ap_cause_radio_network_t : uint8_t {
   meas_not_supported_for_the_obj
 };
 
+/// The E1AP transport cause, see TS 38.463 section 9.3.1.2.
 enum class e1ap_cause_transport_t : uint8_t { unspecified = 0, transport_res_unavailable, unknown_tnl_address_for_iab };
 
+/// The E1AP cause to indicate the reason for a particular event, see TS 38.463 section 9.3.1.2.
+/// The E1AP cause is a union of the radio network cause, transport cause, protocol cause and misc cause.
 using e1ap_cause_t = std::variant<e1ap_cause_radio_network_t, e1ap_cause_transport_t, cause_protocol_t, cause_misc_t>;
 
 } // namespace srsran
@@ -77,24 +81,24 @@ namespace fmt {
 template <>
 struct formatter<srsran::e1ap_cause_t> {
   template <typename ParseContext>
-  auto parse(ParseContext& ctx) -> decltype(ctx.begin())
+  auto parse(ParseContext& ctx)
   {
     return ctx.begin();
   }
 
   template <typename FormatContext>
-  auto format(srsran::e1ap_cause_t o, FormatContext& ctx) -> decltype(std::declval<FormatContext>().out())
+  auto format(srsran::e1ap_cause_t o, FormatContext& ctx) const
   {
     if (const auto* result = std::get_if<srsran::e1ap_cause_radio_network_t>(&o)) {
-      return format_to(ctx.out(), "radio_network-id{}", *result);
+      return format_to(ctx.out(), "radio_network-id{}", fmt::underlying(*result));
     }
     if (const auto* result = std::get_if<srsran::e1ap_cause_transport_t>(&o)) {
-      return format_to(ctx.out(), "transport-id{}", *result);
+      return format_to(ctx.out(), "transport-id{}", fmt::underlying(*result));
     }
     if (const auto* result = std::get_if<srsran::cause_protocol_t>(&o)) {
-      return format_to(ctx.out(), "protocol-id{}", *result);
+      return format_to(ctx.out(), "protocol-id{}", fmt::underlying(*result));
     }
-    return format_to(ctx.out(), "misc-id{}", std::get<srsran::cause_misc_t>(o));
+    return format_to(ctx.out(), "misc-id{}", fmt::underlying(std::get<srsran::cause_misc_t>(o)));
   }
 };
 

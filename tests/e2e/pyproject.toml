@@ -1,5 +1,5 @@
 #
-# Copyright 2021-2024 Software Radio Systems Limited
+# Copyright 2021-2025 Software Radio Systems Limited
 #
 # This file is part of srsRAN
 #
@@ -34,6 +34,7 @@ markers = [
   "rf",
   "android",
   "android_hp",
+  "android_drx",
   "udp",
   "tcp",
   "downlink",
@@ -45,15 +46,21 @@ markers = [
   "rf_n300",
   "rf_not_crash",
   "reattach",
-  "test",
   "zmq_2x2_mimo",
   "zmq_4x4_mimo",
   "zmq_srsue",
+  "zmq_ric",
+  "zmq_ntn",
   "test_mode",
+  "test_mode_acc100",
   "test_mode_not_crash",
+  "test_mode_many_ues",
   "viavi",
   "viavi_manual",
   "viavi_debug",
+  "example",
+  "example_srsue",
+  "s72",
 ]
 minversion = "6.0"
 python_files = [
@@ -82,7 +89,7 @@ warn_return_any = true
 warn_unused_configs = true
 
 [tool.pylint]
-disable = ["no-name-in-module", "duplicate-code", "import-error"]
+disable = ["no-name-in-module", "duplicate-code", "import-error", "too-many-lines"]
 ignore-signatures = true
 max-line-length = 120
 
@@ -90,7 +97,7 @@ max-line-length = 120
 legacy_tox_ini = """
 [tox]
 minversion = 4.4.0
-envlist = 
+envlist =
   format
   lint
   type
@@ -122,8 +129,8 @@ commands =
 
 [testenv:type]
 skip_install = true
-deps = 
+deps =
   mypy
-commands = 
+commands =
   mypy tests
 """

@@ -1,5 +1,5 @@
 #
-# Copyright 2013-2024 Software Radio Systems Limited
+# Copyright 2013-2025 Software Radio Systems Limited
 #
 # By using this file, you agree to the terms and conditions set
 # forth in the LICENSE file which can be found at the top level of
@@ -16,4 +16,5 @@ ADD install_dependencies.sh /usr/local/bin
 RUN chmod +x /usr/local/bin/install_dependencies.sh
 
 RUN DEBIAN_FRONTEND=noninteractive apt-get update && install_dependencies.sh \
+  && apt-get install -y --no-install-recommends git \
   && apt-get autoremove && apt-get clean && rm -rf /var/lib/apt/lists/*

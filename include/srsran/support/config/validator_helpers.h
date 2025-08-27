@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -22,8 +22,9 @@
 
 #pragma once
 
-#include "srsran/adt/optional.h"
 #include "srsran/support/config/validator_result.h"
+#include <algorithm>
+#include <optional>
 
 namespace srsran {
 
@@ -77,8 +78,7 @@ bool has_unique_ids(const Range& r, IdType ValueType::*id_field)
 template <typename Range>
 bool are_all_unique(const Range& r)
 {
-  return has_unique_ids(
-      r, [](const auto& e) -> const auto& { return e; });
+  return has_unique_ids(r, [](const auto& e) -> const auto& { return e; });
 }
 
 /// \brief Find an ID in \c id_set_list of \c set that is not present in range \c r.

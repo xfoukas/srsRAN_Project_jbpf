@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -27,13 +27,12 @@
 #include "tests/test_doubles/rrc/rrc_test_message_validators.h"
 #include "tests/unittests/cu_cp/test_helpers.h"
 #include "tests/unittests/e1ap/common/e1ap_cu_cp_test_messages.h"
-#include "tests/unittests/f1ap/common/f1ap_cu_test_messages.h"
 #include "tests/unittests/ngap/ngap_test_messages.h"
 #include "srsran/e1ap/common/e1ap_types.h"
 #include "srsran/f1ap/f1ap_message.h"
 #include "srsran/ngap/ngap_message.h"
 #include "srsran/ran/cu_types.h"
-#include "srsran/ran/lcid.h"
+#include "srsran/ran/rb_id.h"
 #include <gtest/gtest.h>
 #include <optional>
 
@@ -94,7 +93,7 @@ public:
   ngap_message generate_pdu_session_resource_setup_request_with_unconfigured_fiveqi() const
   {
     ngap_message request = generate_valid_pdu_session_resource_setup_request_message(
-        ue_ctx->amf_ue_id.value(), ue_ctx->ran_ue_id.value(), {{psi, {{qfi, 99}}}});
+        ue_ctx->amf_ue_id.value(), ue_ctx->ran_ue_id.value(), {{psi, {pdu_session_type_t::ipv4, {{qfi, 99}}}}});
 
     return request;
   }
@@ -165,7 +164,7 @@ public:
   {
     // Inject UE Context Modification Failure and wait for PDU Session Resource Setup Response
     get_du(du_idx).push_ul_pdu(
-        generate_ue_context_modification_failure(ue_ctx->cu_ue_id.value(), ue_ctx->du_ue_id.value()));
+        test_helpers::generate_ue_context_modification_failure(ue_ctx->cu_ue_id.value(), ue_ctx->du_ue_id.value()));
     report_fatal_error_if_not(this->wait_for_ngap_tx_pdu(ngap_pdu),
                               "Failed to receive PDU Session Resource Setup Response");
     report_fatal_error_if_not(test_helpers::is_valid_pdu_session_resource_setup_response(ngap_pdu),
@@ -199,7 +198,8 @@ public:
       const std::map<pdu_session_id_t, drb_test_params>& pdu_sessions_to_add = {},
       const std::map<pdu_session_id_t, drb_id_t>& pdu_sessions_to_modify   = {{pdu_session_id_t::min, drb_id_t::drb1}},
       const std::optional<std::vector<srb_id_t>>& expected_srbs_to_add_mod = std::nullopt,
-      const std::optional<std::vector<drb_id_t>>& expected_drbs_to_add_mod = std::nullopt)
+      const std::optional<std::vector<drb_id_t>>& expected_drbs_to_add_mod = std::nullopt,
+      const std::vector<pdu_session_id_t>&        pdu_sessions_failed_to_modify = {})
   {
     return cu_cp_test_environment::send_bearer_context_modification_response_and_await_rrc_reconfiguration(
         du_idx,
@@ -208,7 +208,8 @@ public:
         pdu_sessions_to_add,
         pdu_sessions_to_modify,
         expected_srbs_to_add_mod,
-        expected_drbs_to_add_mod);
+        expected_drbs_to_add_mod,
+        pdu_sessions_failed_to_modify);
   }
 
   [[nodiscard]] bool timeout_rrc_reconfiguration_and_await_pdu_session_setup_response()
@@ -275,7 +276,7 @@ TEST_F(cu_cp_pdu_session_resource_setup_test, when_bearer_context_setup_failure_
   // Inject NGAP PDU Session Resource Setup Request and await Bearer Context Setup Request
   ASSERT_TRUE(send_pdu_session_resource_setup_request_and_await_bearer_context_setup_request(
       generate_valid_pdu_session_resource_setup_request_message(
-          ue_ctx->amf_ue_id.value(), ue_ctx->ran_ue_id.value(), {{psi, {{qfi, 9}}}})));
+          ue_ctx->amf_ue_id.value(), ue_ctx->ran_ue_id.value(), {{psi, {pdu_session_type_t::ipv4, {{qfi, 9}}}}})));
 
   // Inject Bearer Context Setup Failure and await PDU Session Resource Setup Response
   ASSERT_TRUE(send_bearer_context_setup_failure_and_await_pdu_session_setup_response());
@@ -286,7 +287,7 @@ TEST_F(cu_cp_pdu_session_resource_setup_test, when_ue_context_modification_failu
   // Inject NGAP PDU Session Resource Setup Request and await Bearer Context Setup Request
   ASSERT_TRUE(send_pdu_session_resource_setup_request_and_await_bearer_context_setup_request(
       generate_valid_pdu_session_resource_setup_request_message(
-          ue_ctx->amf_ue_id.value(), ue_ctx->ran_ue_id.value(), {{psi, {{qfi, 9}}}})));
+          ue_ctx->amf_ue_id.value(), ue_ctx->ran_ue_id.value(), {{psi, {pdu_session_type_t::ipv4, {{qfi, 9}}}}})));
 
   // Inject Bearer Context Setup Response and await UE Context Modification Request
   ASSERT_TRUE(send_bearer_context_setup_response_and_await_ue_context_modification_request());
@@ -300,7 +301,7 @@ TEST_F(cu_cp_pdu_session_resource_setup_test, when_bearer_context_modification_f
   // Inject NGAP PDU Session Resource Setup Request and await Bearer Context Setup Request
   ASSERT_TRUE(send_pdu_session_resource_setup_request_and_await_bearer_context_setup_request(
       generate_valid_pdu_session_resource_setup_request_message(
-          ue_ctx->amf_ue_id.value(), ue_ctx->ran_ue_id.value(), {{psi, {{qfi, 9}}}})));
+          ue_ctx->amf_ue_id.value(), ue_ctx->ran_ue_id.value(), {{psi, {pdu_session_type_t::ipv4, {{qfi, 9}}}}})));
 
   // Inject Bearer Context Setup Response and await UE Context Modification Request
   ASSERT_TRUE(send_bearer_context_setup_response_and_await_ue_context_modification_request());
@@ -312,12 +313,35 @@ TEST_F(cu_cp_pdu_session_resource_setup_test, when_bearer_context_modification_f
   ASSERT_TRUE(send_bearer_context_modification_failure_and_await_pdu_session_setup_response());
 }
 
+TEST_F(cu_cp_pdu_session_resource_setup_test,
+       when_bearer_context_modification_response_contains_failed_to_modify_list_then_no_pdu_session_is_setup)
+{
+  // Inject NGAP PDU Session Resource Setup Request and await Bearer Context Setup Request
+  ASSERT_TRUE(send_pdu_session_resource_setup_request_and_await_bearer_context_setup_request(
+      generate_valid_pdu_session_resource_setup_request_message(
+          ue_ctx->amf_ue_id.value(), ue_ctx->ran_ue_id.value(), {{psi, {pdu_session_type_t::ipv4, {{qfi, 9}}}}})));
+
+  // Inject Bearer Context Setup Response and await UE Context Modification Request
+  ASSERT_TRUE(send_bearer_context_setup_response_and_await_ue_context_modification_request());
+
+  // Inject UE Context Modification Response and await Bearer Context Modification Request
+  ASSERT_TRUE(send_ue_context_modification_response_and_await_bearer_context_modification_request());
+
+  // Inject Bearer Context Modification Response and await DL RRC Message Transfer containing RRC Reconfiguration
+  ASSERT_TRUE(send_bearer_context_modification_response_and_await_rrc_reconfiguration(
+      {}, {}, std::vector<srb_id_t>{srb_id_t::srb2}, {}, {psi}));
+
+  // Inject RRC Reconfiguration Complete and await successful PDU Session Resource Setup Response
+  ASSERT_TRUE(send_rrc_reconfiguration_complete_and_await_pdu_session_setup_response(
+      generate_rrc_reconfiguration_complete_pdu(3, 7), {}, {psi}));
+}
+
 TEST_F(cu_cp_pdu_session_resource_setup_test, when_rrc_reconfiguration_fails_then_setup_fails)
 {
   // Inject NGAP PDU Session Resource Setup Request and await Bearer Context Setup Request
   ASSERT_TRUE(send_pdu_session_resource_setup_request_and_await_bearer_context_setup_request(
       generate_valid_pdu_session_resource_setup_request_message(
-          ue_ctx->amf_ue_id.value(), ue_ctx->ran_ue_id.value(), {{psi, {{qfi, 9}}}})));
+          ue_ctx->amf_ue_id.value(), ue_ctx->ran_ue_id.value(), {{psi, {pdu_session_type_t::ipv4, {{qfi, 9}}}}})));
 
   // Inject Bearer Context Setup Response and await UE Context Modification Request
   ASSERT_TRUE(send_bearer_context_setup_response_and_await_ue_context_modification_request());
@@ -338,7 +362,7 @@ TEST_F(cu_cp_pdu_session_resource_setup_test, when_rrc_reconfiguration_succeeds_
   // Inject NGAP PDU Session Resource Setup Request and await Bearer Context Setup Request
   ASSERT_TRUE(send_pdu_session_resource_setup_request_and_await_bearer_context_setup_request(
       generate_valid_pdu_session_resource_setup_request_message(
-          ue_ctx->amf_ue_id.value(), ue_ctx->ran_ue_id.value(), {{psi, {{qfi, 9}}}})));
+          ue_ctx->amf_ue_id.value(), ue_ctx->ran_ue_id.value(), {{psi, {pdu_session_type_t::ipv4, {{qfi, 9}}}}})));
 
   // Inject Bearer Context Setup Response and await UE Context Modification Request
   ASSERT_TRUE(send_bearer_context_setup_response_and_await_ue_context_modification_request());
@@ -363,7 +387,7 @@ TEST_F(cu_cp_pdu_session_resource_setup_test, when_pdu_session_setup_for_existin
   // Inject NGAP PDU Session Resource Setup Request and await PDU Session Setup Response
   ASSERT_TRUE(send_pdu_session_resource_setup_request_and_await_pdu_session_setup_response(
       generate_valid_pdu_session_resource_setup_request_message(
-          ue_ctx->amf_ue_id.value(), ue_ctx->ran_ue_id.value(), {{psi, {{qfi, 9}}}})));
+          ue_ctx->amf_ue_id.value(), ue_ctx->ran_ue_id.value(), {{psi, {pdu_session_type_t::ipv4, {{qfi, 9}}}}})));
 }
 
 TEST_F(cu_cp_pdu_session_resource_setup_test, when_setup_for_pdu_sessions_with_two_qos_flows_received_setup_succeeds)
@@ -371,7 +395,9 @@ TEST_F(cu_cp_pdu_session_resource_setup_test, when_setup_for_pdu_sessions_with_t
   // Inject NGAP PDU Session Resource Setup Request and await Bearer Context Setup Request
   ASSERT_TRUE(send_pdu_session_resource_setup_request_and_await_bearer_context_setup_request(
       generate_valid_pdu_session_resource_setup_request_message(
-          ue_ctx->amf_ue_id.value(), ue_ctx->ran_ue_id.value(), {{psi, {{qfi, 9}, {qfi2, 9}}}})));
+          ue_ctx->amf_ue_id.value(),
+          ue_ctx->ran_ue_id.value(),
+          {{psi, {pdu_session_type_t::ipv4, {{qfi, 9}, {qfi2, 9}}}}})));
 
   // Inject Bearer Context Setup Response and await UE Context Modification Request
   ASSERT_TRUE(send_bearer_context_setup_response_and_await_ue_context_modification_request());
@@ -382,7 +408,7 @@ TEST_F(cu_cp_pdu_session_resource_setup_test, when_setup_for_pdu_sessions_with_t
   // Inject Bearer Context Modification Response and await DL RRC Message Transfer containing RRC Reconfiguration
   ASSERT_TRUE(send_bearer_context_modification_response_and_await_rrc_reconfiguration(
       {},
-      {{psi, drb_id_t::drb1}, {psi2, drb_id_t::drb2}},
+      {{psi, drb_id_t::drb1}},
       std::vector<srb_id_t>{srb_id_t::srb2},
       std::vector<drb_id_t>{drb_id_t::drb1, drb_id_t::drb2}));
 
@@ -400,7 +426,8 @@ TEST_F(
       generate_valid_pdu_session_resource_setup_request_message(
           ue_ctx->amf_ue_id.value(),
           ue_ctx->ran_ue_id.value(),
-          {{psi, {qos_flow_test_params{qfi, 9}}}, {psi2, {qos_flow_test_params{qfi2, 7}}}})));
+          {{psi, {pdu_session_type_t::ipv4, {qos_flow_test_params{qfi, 9}}}},
+           {psi2, {pdu_session_type_t::ipv4, {qos_flow_test_params{qfi2, 7}}}}})));
 
   // Inject Bearer Context Setup Response and await UE Context Modification Request
   get_cu_up(cu_up_idx).push_tx_pdu(generate_bearer_context_setup_response(
@@ -412,8 +439,8 @@ TEST_F(
   ASSERT_TRUE(send_ue_context_modification_response_and_await_bearer_context_modification_request());
 
   // Inject Bearer Context Modification Response and await DL RRC Message Transfer containing RRC Reconfiguration
-  get_cu_up(cu_up_idx).push_tx_pdu(
-      generate_bearer_context_modification_response(ue_ctx->cu_cp_e1ap_id.value(), cu_up_e1ap_id));
+  get_cu_up(cu_up_idx).push_tx_pdu(generate_bearer_context_modification_response(
+      ue_ctx->cu_cp_e1ap_id.value(), cu_up_e1ap_id, {}, {{uint_to_pdu_session_id(1), drb_id_t::drb1}}));
   ASSERT_TRUE(this->wait_for_f1ap_tx_pdu(du_idx, f1ap_pdu));
   ASSERT_TRUE(test_helpers::is_valid_dl_rrc_message_transfer(f1ap_pdu));
   {
@@ -425,7 +452,7 @@ TEST_F(
   }
 
   // Inject RRC Reconfiguration Complete and await successful PDU Session Resource Setup Response
-  get_du(du_idx).push_ul_pdu(test_helpers::create_ul_rrc_message_transfer(
+  get_du(du_idx).push_ul_pdu(test_helpers::generate_ul_rrc_message_transfer(
       du_ue_id, ue_ctx->cu_ue_id.value(), srb_id_t::srb1, make_byte_buffer("00070e00cc6fcda5").value()));
   ASSERT_TRUE(this->wait_for_ngap_tx_pdu(ngap_pdu));
   ASSERT_TRUE(test_helpers::is_valid_pdu_session_resource_setup_response(ngap_pdu));
@@ -438,7 +465,9 @@ TEST_F(cu_cp_pdu_session_resource_setup_test,
   // Inject NGAP PDU Session Resource Setup Request and await Bearer Context Setup Request
   ASSERT_TRUE(send_pdu_session_resource_setup_request_and_await_bearer_context_setup_request(
       generate_valid_pdu_session_resource_setup_request_message(
-          ue_ctx->amf_ue_id.value(), ue_ctx->ran_ue_id.value(), {{psi, {{qfi, 9}}}, {psi2, {{qfi2, 9}}}})));
+          ue_ctx->amf_ue_id.value(),
+          ue_ctx->ran_ue_id.value(),
+          {{psi, {pdu_session_type_t::ipv4, {{{qfi, 9}}}}}, {psi2, {pdu_session_type_t::ipv4, {{qfi2, 9}}}}})));
 
   // Inject Bearer Context Setup Response and await UE Context Modification Request
   ASSERT_TRUE(send_bearer_context_setup_response_and_await_ue_context_modification_request());

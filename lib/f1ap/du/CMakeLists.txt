@@ -1,5 +1,5 @@
 #
-# Copyright 2021-2024 Software Radio Systems Limited
+# Copyright 2021-2025 Software Radio Systems Limited
 #
 # This file is part of srsRAN
 #
@@ -18,11 +18,16 @@
 # and at http://www.gnu.org/licenses/.
 #
 
+add_library(srsran_f1ap_du_helpers f1ap_asn1_converters.cpp)
+target_include_directories(srsran_f1ap_du_helpers PRIVATE ..)
+target_link_libraries(srsran_f1ap_du_helpers f1ap_asn1)
+
 add_subdirectory(procedures)
 add_library(srsran_f1ap_du
         f1ap_du_impl.cpp
         f1ap_du_factory.cpp
         f1ap_du_connection_handler.cpp
+        f1ap_du_metrics_collector_impl.cpp
         ue_context/f1ap_du_ue.cpp
         ue_context/ue_bearer_manager.cpp
         ue_context/f1c_du_bearer_impl.cpp

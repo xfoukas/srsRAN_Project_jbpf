@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -22,7 +22,10 @@
 
 #pragma once
 
+#include "context_repository_helpers.h"
 #include "srsran/adt/expected.h"
+#include "srsran/adt/mpmc_queue.h"
+#include "srsran/adt/unique_function.h"
 #include "srsran/ofh/ofh_constants.h"
 #include "srsran/phy/support/resource_grid.h"
 #include "srsran/phy/support/resource_grid_context.h"
@@ -32,6 +35,7 @@
 #include "srsran/ran/cyclic_prefix.h"
 #include "srsran/ran/resource_allocation/ofdm_symbol_range.h"
 #include "srsran/ran/resource_block.h"
+#include "srsran/srslog/logger.h"
 #include "srsran/srsvec/copy.h"
 #include <mutex>
 
@@ -140,20 +144,25 @@ private:
 /// Uplink context repository.
 class uplink_context_repository
 {
-  /// System frame number maximum value in this repository.
-  static constexpr unsigned SFN_MAX_VALUE = 1U << 8;
+  using queue_type =
+      concurrent_queue<unique_task, concurrent_queue_policy::lockfree_mpmc, concurrent_queue_wait_policy::non_blocking>;
 
+  queue_type                                                  pending_context_to_add;
   std::vector<std::array<uplink_context, MAX_NSYMB_PER_SLOT>> buffer;
   //: TODO: make this lock free
   mutable std::mutex mutex;
+
+  // :TODO: temporal solution to not allow adding more entries when the repo is not running. This mechanism should be
+  // changed when the start/stop procedure is implemented (probably not needed in that case as no grid will arrive after
+  // commanding the stop).
+  bool is_running = true;
 
   /// Returns the entry of the repository for the given slot and symbol.
   uplink_context& entry(slot_point slot, unsigned symbol)
   {
     srsran_assert(symbol < MAX_NSYMB_PER_SLOT, "Invalid symbol index '{}'", symbol);
 
-    slot_point entry_slot(slot.numerology(), slot.sfn() % SFN_MAX_VALUE, slot.slot_index());
-    unsigned   index = entry_slot.system_slot() % buffer.size();
+    unsigned index = calculate_repository_index(slot, buffer.size());
     return buffer[index][symbol];
   }
 
@@ -162,23 +171,41 @@ class uplink_context_repository
   {
     srsran_assert(symbol < MAX_NSYMB_PER_SLOT, "Invalid symbol index '{}'", symbol);
 
-    slot_point entry_slot(slot.numerology(), slot.sfn() % SFN_MAX_VALUE, slot.slot_index());
-    unsigned   index = entry_slot.system_slot() % buffer.size();
+    unsigned index = calculate_repository_index(slot, buffer.size());
     return buffer[index][symbol];
   }
 
 public:
-  explicit uplink_context_repository(unsigned size_) : buffer(size_) {}
+  explicit uplink_context_repository(unsigned size_) : pending_context_to_add(size_), buffer(size_) {}
 
   /// Adds the given entry to the repository at slot.
-  void
-  add(const resource_grid_context& context, const shared_resource_grid& grid, const ofdm_symbol_range& symbol_range)
+  void add(const resource_grid_context& context,
+           const shared_resource_grid&  grid,
+           const ofdm_symbol_range&     symbol_range,
+           srslog::basic_logger&        logger)
   {
-    std::lock_guard<std::mutex> lock(mutex);
+    // Do not add entry if repo is not running.
+    if (!is_running) {
+      return;
+    }
 
-    for (unsigned symbol_id = symbol_range.start(), symbol_end = symbol_range.stop(); symbol_id != symbol_end;
-         ++symbol_id) {
-      entry(context.slot, symbol_id) = uplink_context(symbol_id, context, grid);
+    if (!pending_context_to_add.try_push([context, rg = grid.copy(), symbol_range, this]() {
+          std::lock_guard<std::mutex> lock(mutex);
+          for (unsigned symbol_id = symbol_range.start(), symbol_end = symbol_range.stop(); symbol_id != symbol_end;
+               ++symbol_id) {
+            entry(context.slot, symbol_id) = uplink_context(symbol_id, context, rg);
+          }
+        })) {
+      logger.warning("Failed to enqueue task to add the uplink context to the repository");
+    }
+  }
+
+  /// Process the enqueued contexts to the repository.
+  void process_pending_contexts()
+  {
+    unique_task task;
+    while (pending_context_to_add.try_pop(task)) {
+      task();
     }
   }
 
@@ -203,11 +230,10 @@ public:
                                                                                                         unsigned symbol)
   {
     std::lock_guard<std::mutex> lock(mutex);
-
-    auto result = entry(slot, symbol).try_getting_complete_resource_grid();
+    auto                        result = entry(slot, symbol).try_getting_complete_resource_grid();
 
     // Symbol is complete or exists. Clear the context.
-    if (result.has_value()) {
+    if (result) {
       entry(slot, symbol) = {};
     }
 
@@ -221,7 +247,7 @@ public:
 
     auto& result = entry(slot, symbol);
 
-    // Symbol does not exists. Do nothing.
+    // Symbol does not exist. Do nothing.
     if (result.empty()) {
       return make_unexpected(default_error_t{});
     }
@@ -236,6 +262,19 @@ public:
   {
     std::lock_guard<std::mutex> lock(mutex);
     entry(slot, symbol) = {};
+  }
+
+  /// \brief Clears the whole repository.
+  void clear()
+  {
+    std::lock_guard<std::mutex> lock(mutex);
+
+    is_running = false;
+    for (auto& elem : buffer) {
+      for (auto& symbol : elem) {
+        symbol = {};
+      }
+    }
   }
 };
 

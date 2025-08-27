@@ -1,5 +1,5 @@
 #
-# Copyright 2013-2024 Software Radio Systems Limited
+# Copyright 2013-2025 Software Radio Systems Limited
 #
 # By using this file, you agree to the terms and conditions set
 # forth in the LICENSE file which can be found at the top level of
@@ -62,18 +62,18 @@ RUN DEBIAN_FRONTEND=noninteractive apt-get update && apt-get install -y --no-ins
     && apt-get autoremove && apt-get clean
 
 # To set a fixed version of open5gs use
-ARG OPEN5GS_VERSION=v2.7.0
+ARG OPEN5GS_VERSION=v2.7.5
 RUN echo $OPEN5GS_VERSION > ./open5gsversion
 # get latest open5gs tag (must be stored in a file, because docker does not allow to use the return value directly)
 # RUN git ls-remote --tags https://github.com/open5gs/open5gs | sort -t '/' -k 3 -V | awk -F/ '{ print $3 }' | awk '!/\^\{\}/' | tail -n 1 > ./open5gsversion
 
 # open5gs
-ARG NUM_CORES=""
-RUN if [ -z "$NUM_CORES" ]; then NUM_CORES=$(nproc); fi && \
+ARG NUM_JOBS=""
+RUN if [ -z "$NUM_JOBS" ]; then NUM_JOBS=$(nproc); fi && \
     git clone --depth 1 --branch $(cat ./open5gsversion) https://github.com/open5gs/open5gs open5gs\
     && cd open5gs \
     && meson build --prefix=`pwd`/install \
-    && ninja -j ${NUM_CORES} -C build \
+    && ninja -j ${NUM_JOBS} -C build \
     && cd build \
     && ninja install
 

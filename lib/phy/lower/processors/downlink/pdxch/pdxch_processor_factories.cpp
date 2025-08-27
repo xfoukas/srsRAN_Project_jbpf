@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -45,7 +45,7 @@ public:
     mod_config.dft_size       = config.srate.get_dft_size(config.scs);
     mod_config.cp             = config.cp;
     mod_config.scale          = modulator_scaling;
-    mod_config.center_freq_hz = config.center_freq_Hz;
+    mod_config.center_freq_Hz = config.center_freq_Hz;
 
     pdxch_processor_impl::configuration pdxch_config;
     pdxch_config.cp                 = config.cp;

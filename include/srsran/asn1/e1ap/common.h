@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -22,7 +22,7 @@
 
 /*******************************************************************************
  *
- *                     3GPP TS ASN1 E1AP v16.10.0 (2022-06)
+ *                     3GPP TS ASN1 E1AP v18.5.0 (2025-06)
  *
  ******************************************************************************/
 

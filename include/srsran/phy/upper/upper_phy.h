@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -31,11 +31,12 @@ class uplink_pdu_validator;
 class uplink_request_processor;
 class upper_phy_error_handler;
 class upper_phy_error_notifier;
+class upper_phy_metrics_collector;
 class upper_phy_rx_results_notifier;
 class upper_phy_rx_symbol_handler;
 class upper_phy_timing_handler;
 class upper_phy_timing_notifier;
-class uplink_slot_pdu_repository;
+class uplink_pdu_slot_repository_pool;
 
 /// \brief Upper PHY interface.
 ///
@@ -52,9 +53,6 @@ public:
   /// Default destructor.
   virtual ~upper_phy() = default;
 
-  /// Returns the sector identifier of this upper PHY.
-  virtual unsigned get_sector_id() const = 0;
-
   /// Returns a reference to the receive symbol handler of this upper PHY.
   virtual upper_phy_rx_symbol_handler& get_rx_symbol_handler() = 0;
 
@@ -70,14 +68,14 @@ public:
   /// Returns the downlink resource grid pool of this upper PHY.
   virtual resource_grid_pool& get_downlink_resource_grid_pool() = 0;
 
-  /// Returns the uplink resource grid pool of this upper PHY.
-  virtual resource_grid_pool& get_uplink_resource_grid_pool() = 0;
-
   /// Returns the uplink request processor of this upper PHY.
   virtual uplink_request_processor& get_uplink_request_processor() = 0;
 
   /// Returns the uplink slot PDU repository of this upper PHY.
-  virtual uplink_slot_pdu_repository& get_uplink_slot_pdu_repository() = 0;
+  virtual uplink_pdu_slot_repository_pool& get_uplink_pdu_slot_repository() = 0;
+
+  /// Returns the metrics collector of this upper PHY or nullptr if upper PHY metrics are not enabled.
+  virtual upper_phy_metrics_collector* get_metrics_collector() = 0;
 
   /// Returns the downlink PDU validator of this upper PHY.
   virtual const downlink_pdu_validator& get_downlink_pdu_validator() const = 0;

@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -48,15 +48,15 @@ static void signal_handler(int signal)
     case SIGALRM:
       fmt::print(stderr, "Could not stop application after {} seconds. Forcing exit.\n", TERMINATION_TIMEOUT_S);
       if (auto handler = cleanup_handler.exchange(nullptr)) {
-        handler();
+        handler(signal);
       }
-      ::raise(SIGKILL);
+      std::raise(SIGKILL);
       [[fallthrough]];
     default:
       // All other registered signals try to stop the application gracefully.
       // Call the user handler, if present, and remove it so that further signals are treated by the default handler.
       if (auto handler = interrupt_handler.exchange(nullptr)) {
-        handler();
+        handler(signal);
       } else {
         return;
       }
@@ -69,10 +69,10 @@ void srsran::register_interrupt_signal_handler(srsran_signal_handler handler)
 {
   interrupt_handler.store(handler);
 
-  ::signal(SIGINT, signal_handler);
-  ::signal(SIGTERM, signal_handler);
-  ::signal(SIGHUP, signal_handler);
-  ::signal(SIGALRM, signal_handler);
+  std::signal(SIGINT, signal_handler);
+  std::signal(SIGTERM, signal_handler);
+  std::signal(SIGHUP, signal_handler);
+  std::signal(SIGALRM, signal_handler);
 }
 
 void srsran::register_cleanup_signal_handler(srsran_signal_handler handler)

@@ -188,6 +188,20 @@ struct jbpf_rlc_ctx_info {
 
 
 /* PDCP context */
+typedef enum {
+    JBPF_PDCP_DL_SDU_DROP__EARLY = 1,
+    JBPF_PDCP_DL_SDU_DROP__ENTITY_STOPPED,
+    JBPF_PDCP_DL_SDU_DROP__MAXIMUM_COUNT,
+    JBPF_PDCP_DL_SDU_DROP__INTERNAL_ERROR,
+    JBPF_PDCP_DL_SDU_DROP__CIPH_INTEG_ERROR
+} JbpfPdcpDlSduDrop_t;
+
+typedef enum {
+    JBPF_PDCP_UL_PDU_DROP__EMPTY_PDU = 1,
+    JBPF_PDCP_UL_PDU_DROP__INTERNAL_ERROR,
+    JBPF_PDCP_UL_PDU_DROP__MALFORMED,
+    JBPF_PDCP_UL_PDU_DROP__MAXIMUM_COUNT
+} JbpfPdcpUlPduDrop_t;
 
 struct jbpf_pdcp_ctx_info {
     uint16_t ctx_id;   /* Context id (could be implementation specific) */

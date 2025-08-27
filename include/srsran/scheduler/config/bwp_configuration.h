@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -22,22 +22,15 @@
 
 #pragma once
 
-#include "srsran/adt/optional.h"
-#include "srsran/adt/slotted_array.h"
-#include "srsran/ran/band_helper.h"
-#include "srsran/ran/cyclic_prefix.h"
-#include "srsran/ran/frame_types.h"
+#include "srsran/ran/bwp/bwp_configuration.h"
 #include "srsran/ran/pcch/pcch_configuration.h"
 #include "srsran/ran/pdcch/coreset.h"
 #include "srsran/ran/pdcch/search_space.h"
 #include "srsran/ran/prach/rach_config_common.h"
-#include "srsran/ran/prach/restricted_set_config.h"
 #include "srsran/ran/pucch/pucch_configuration.h"
-#include "srsran/ran/resource_allocation/ofdm_symbol_range.h"
-#include "srsran/ran/resource_block.h"
-#include "srsran/scheduler/config/dmrs.h"
-#include "srsran/scheduler/vrb_alloc.h"
-#include <bitset>
+#include "srsran/ran/scs_specific_carrier.h"
+#include "srsran/scheduler/config/pxsch_time_domain_resource.h"
+#include <optional>
 
 namespace srsran {
 
@@ -54,6 +47,14 @@ struct pdcch_config_common {
   std::optional<search_space_id>          paging_search_space_id;
   /// SearchSpace of RA procedure. If field is invalid, the UE does not receive RAR in this BWP.
   search_space_id ra_search_space_id;
+
+  bool operator==(const pdcch_config_common& other) const
+  {
+    return coreset0 == other.coreset0 and common_coreset == other.common_coreset and
+           search_spaces == other.search_spaces and sib1_search_space_id == other.sib1_search_space_id and
+           other_si_search_space_id == other.other_si_search_space_id and
+           paging_search_space_id == other.paging_search_space_id and ra_search_space_id == other.ra_search_space_id;
+  }
 };
 
 /// BWP-Id used to identify a BWP from the perspective of a UE.
@@ -61,55 +62,16 @@ struct pdcch_config_common {
 enum bwp_id_t : uint8_t { MIN_BWP_ID = 0, MAX_BWP_ID = 3, MAX_NOF_BWPS = 4 };
 
 /// Converts integer value to BWP-Id".
-constexpr inline bwp_id_t to_bwp_id(std::underlying_type_t<bwp_id_t> value)
+constexpr bwp_id_t to_bwp_id(std::underlying_type_t<bwp_id_t> value)
 {
   return static_cast<bwp_id_t>(value);
 }
 
-/// Generic parameters of a bandwidth part as defined in TS 38.211, clause 4.5 and TS 38.213, clause 12.
-/// \remark See TS 38.331, Bandwidth-Part (BWP).
-struct bwp_configuration {
-  cyclic_prefix      cp;
-  subcarrier_spacing scs;
-  /// Common RBs where the BWP is located. CRB=0 overlaps with pointA.
-  crb_interval crbs;
-
-  bool operator==(const bwp_configuration& other) const
-  {
-    return std::tie(cp, scs, crbs) == std::tie(other.cp, other.scs, other.crbs);
-  }
-
-  bool operator<(const bwp_configuration& other) const
-  {
-    return std::tie(cp, scs, crbs) < std::tie(other.cp, other.scs, other.crbs);
-  }
-};
-
-/// \brief Physical shared channels Mapping Type.
-/// \remark see TS38.214 Section 5.3 for PDSCH and TS38.214 Section 6.4 for PUSCH.
-enum class sch_mapping_type {
-  /// TypeA time allocation, it can start only at symbol 2 or 3 within a slot.
-  typeA,
-  /// TypeB time allocation.
-  typeB
-};
-
-struct pdsch_time_domain_resource_allocation {
-  /// Values: (0..32).
-  uint8_t           k0;
-  sch_mapping_type  map_type;
-  ofdm_symbol_range symbols;
-
-  bool operator==(const pdsch_time_domain_resource_allocation& rhs) const
-  {
-    return k0 == rhs.k0 && map_type == rhs.map_type && symbols == rhs.symbols;
-  }
-  bool operator!=(const pdsch_time_domain_resource_allocation& rhs) const { return !(rhs == *this); }
-};
-
 struct pdsch_config_common {
   /// PDSCH time domain resource allocations. Size: (0..maxNrofDL-Allocations=16).
   std::vector<pdsch_time_domain_resource_allocation> pdsch_td_alloc_list;
+
+  bool operator==(const pdsch_config_common& other) const { return pdsch_td_alloc_list == other.pdsch_td_alloc_list; }
 };
 
 /// Used to configure the common, cell-specific parameters of a DL BWP.
@@ -118,20 +80,12 @@ struct bwp_downlink_common {
   bwp_configuration   generic_params;
   pdcch_config_common pdcch_common;
   pdsch_config_common pdsch_common;
-};
 
-struct pusch_time_domain_resource_allocation {
-  /// Values: (0..32).
-  unsigned         k2;
-  sch_mapping_type map_type;
-  /// OFDM symbol boundaries for PUSCH. Network configures the fields so it does not cross the slot boundary.
-  ofdm_symbol_range symbols;
-
-  bool operator==(const pusch_time_domain_resource_allocation& rhs) const
+  bool operator==(const bwp_downlink_common& other) const
   {
-    return k2 == rhs.k2 && map_type == rhs.map_type && symbols == rhs.symbols;
+    return generic_params == other.generic_params and pdcch_common == other.pdcch_common and
+           pdsch_common == other.pdsch_common;
   }
-  bool operator!=(const pusch_time_domain_resource_allocation& rhs) const { return !(rhs == *this); }
 };
 
 /// \remark See TS 38.331, "PUSCH-ConfigCommon".
@@ -149,6 +103,12 @@ struct pusch_config_common {
   /// \brief Power level corresponding to MSG-3 TPC command in dB, as per Table 8.2-2, TS 38.213.
   /// Values {-6,...,8} and must be a multiple of 2.
   bounded_integer<int, -6, 8> msg3_delta_power;
+
+  bool operator==(const pusch_config_common& other) const
+  {
+    return pusch_td_alloc_list == other.pusch_td_alloc_list and msg3_delta_preamble == other.msg3_delta_preamble and
+           p0_nominal_with_grant == other.p0_nominal_with_grant and msg3_delta_power == other.msg3_delta_power;
+  }
 };
 
 /// \remark See TS 38.331, "PUCCH-ConfigCommon".
@@ -160,6 +120,12 @@ struct pucch_config_common {
   std::optional<unsigned> hopping_id;
   /// Values: {-202, ..., 24}
   int p0_nominal;
+
+  bool operator==(const pucch_config_common& other) const
+  {
+    return pucch_resource_common == other.pucch_resource_common and group_hopping == other.group_hopping and
+           hopping_id == other.hopping_id and p0_nominal == other.p0_nominal;
+  }
 };
 
 /// Used to configure the common, cell-specific parameters of an UL BWP.
@@ -169,21 +135,12 @@ struct bwp_uplink_common {
   std::optional<rach_config_common>  rach_cfg_common;
   std::optional<pusch_config_common> pusch_cfg_common;
   std::optional<pucch_config_common> pucch_cfg_common;
-};
 
-/// \brief It provides parameters determining the location and width of the actual carrier.
-/// \remark See TS 38.331, "SCS-SpecificCarrier".
-struct scs_specific_carrier {
-  /// Offset between Point A (lowest subcarrier of common RB 0) and the lowest usable subcarrier in this carrier in
-  /// number of PRBs. Values: (0..2199).
-  unsigned           offset_to_carrier;
-  subcarrier_spacing scs;
-  /// Width of this carrier in number of PRBs. Values: (0..MAX_NOF_PRBS).
-  unsigned carrier_bandwidth;
-  /// Indicates the downlink Tx Direct Current location for the carrier. A value in the range 0..3299 indicates the
-  /// subcarrier index within the carrier. The values in the value range 3301..4095 are reserved and ignored by the UE.
-  /// If this field is absent, the UE assumes the default value of 3300 (i.e. "Outside the carrier").
-  std::optional<unsigned> tx_direct_current_location;
+  bool operator==(const bwp_uplink_common& other) const
+  {
+    return generic_params == other.generic_params and rach_cfg_common == other.rach_cfg_common and
+           pusch_cfg_common == other.pusch_cfg_common and pucch_cfg_common == other.pucch_cfg_common;
+  }
 };
 
 /// \brief Used to indicate a frequency band
@@ -209,11 +166,20 @@ struct frequency_info_dl {
   std::vector<freq_band_indicator> freq_band_list;
 };
 
+/// Configuration for BCCH.
+struct bcch_config {
+  enum class modification_period_coeff : uint8_t { n2 = 2, n4 = 4, n8 = 8, n16 = 16 };
+
+  /// Modification period coefficient used to determine the modification period of the SI as per TS 38.331, 5.2.2.2.2.
+  modification_period_coeff mod_period_coeff = modification_period_coeff::n4;
+};
+
 /// \brief Downlink Configuration, common to the serving cell.
 /// \remark See TS 38.331, "DownlinkConfigCommonSIB".
 struct dl_config_common {
   frequency_info_dl   freq_info_dl;
   bwp_downlink_common init_dl_bwp;
+  bcch_config         bcch_cfg;
   pcch_config         pcch_cfg;
 };
 

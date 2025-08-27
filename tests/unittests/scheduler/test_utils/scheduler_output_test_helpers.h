@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -23,9 +23,11 @@
 #pragma once
 
 #include "lib/scheduler/cell/resource_grid.h"
-#include "srsran/scheduler/scheduler_slot_handler.h"
 
 namespace srsran {
+
+struct dl_sched_result;
+struct ul_sched_result;
 
 /// Parameters of a grant allocation in the cell resource grid.
 
@@ -72,7 +74,9 @@ grant_info get_pdsch_grant_info(const bwp_downlink_common& bwp_cfg, const dl_pag
 ///
 /// \param ue_grant UE PDSCH grant parameters.
 /// \return Parameters of the grant.
-grant_info get_pdsch_grant_info(const bwp_downlink_common& bwp_cfg, const dl_msg_alloc& ue_grant);
+std::pair<grant_info, grant_info> get_pdsch_grant_info(const bwp_downlink_common& bwp_cfg,
+                                                       const dl_msg_alloc&        ue_grant,
+                                                       vrb_to_prb::mapping_type   interleaving_bundle_size);
 
 /// \brief Creates a list with the grants allocated in a cell DL resource grid. This includes PDCCHs, PDSCHs and SSB.
 std::vector<test_grant_info> get_dl_grants(const cell_configuration& cell_cfg, const dl_sched_result& dl_res);

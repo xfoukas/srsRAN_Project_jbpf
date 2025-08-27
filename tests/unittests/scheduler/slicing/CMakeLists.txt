@@ -1,5 +1,5 @@
 #
-# Copyright 2021-2024 Software Radio Systems Limited
+# Copyright 2021-2025 Software Radio Systems Limited
 #
 # This file is part of srsRAN
 #
@@ -18,12 +18,13 @@
 # and at http://www.gnu.org/licenses/.
 #
 
-add_executable(slice_scheduler_test slice_scheduler_test.cpp)
+add_executable(slice_scheduler_test slice_scheduler_test.cpp slice_ue_repository_test.cpp)
 target_link_libraries(slice_scheduler_test
         srsran_sched
         scheduler_test_utils
         scheduler_test_suite
         mac_configuration_helpers
+        sched_test_doubles
         gtest
         gtest_main
 )

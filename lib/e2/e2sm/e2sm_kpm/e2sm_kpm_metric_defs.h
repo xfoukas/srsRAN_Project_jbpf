@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -19,6 +19,7 @@
  * and at http://www.gnu.org/licenses/.
  *
  */
+
 #pragma once
 
 #include "srsran/e2/e2sm/e2sm_kpm.h"
@@ -95,7 +96,7 @@ inline span<const e2sm_kpm_metric_t> get_e2sm_kpm_28_552_metrics()
   // 5.1.1.1.1 Average delay DL air-interface
   // Description: This measurement provides the average (arithmetic mean) time it takes for packet transmission
   //              over the air-interface in the downlink direction.
-  {"DRB.AirIfDelayDl", NRCellDU, DER, REAL, "ms", PLMN_ID_LABEL | FIVE_QI_LABEL | SLICE_ID_LABEL, ALL_LEVELS},
+  {"DRB.AirIfDelayDl", NRCellDU, DER, REAL, "0.1ms", PLMN_ID_LABEL | FIVE_QI_LABEL | SLICE_ID_LABEL, ALL_LEVELS},
 
   // 5.1.1.1.2 Distribution of delay DL air-interface
   // Description: This measurement is an integer representing the number of RLC SDU packets measured with the delay
@@ -105,16 +106,16 @@ inline span<const e2sm_kpm_metric_t> get_e2sm_kpm_28_552_metrics()
 
   // 5.1.1.1.3 Average delay UL on over-the-air interface
   // Description: This measurement provides the average (arithmetic mean) over-the-air packet delay on the uplink.
-  {"DRB.AirIfDelayUl", NRCellDU, DER, REAL, "ms", PLMN_ID_LABEL | FIVE_QI_LABEL | SLICE_ID_LABEL, ALL_LEVELS},
+  {"DRB.AirIfDelayUl", NRCellDU, DER, REAL, "0.1ms", PLMN_ID_LABEL | FIVE_QI_LABEL | SLICE_ID_LABEL, ALL_LEVELS},
 
   // 5.1.1.1.4 Average RLC packet delay in the UL
   // Description: This measurement provides the average RLC packet delay on the uplink.
-  {"DRB.RlcDelayUl", NRCellDU, DER, REAL, "ms", PLMN_ID_LABEL | FIVE_QI_LABEL | SLICE_ID_LABEL, ALL_LEVELS},
+  {"DRB.RlcDelayUl", NRCellDU, DER, REAL, "0.1ms", PLMN_ID_LABEL | FIVE_QI_LABEL | SLICE_ID_LABEL, ALL_LEVELS},
 
   // 5.1.1.1.5 Average PDCP re-ordering delay in the UL
   // Description: This measurement provides the average (arithmetic mean) PDCP re-ordering delay on the uplink,
   //              i.e., the delay within the gNB-CU-UP.
-  {"DRB.PdcpReordDelayUl", GNBCUUP, DER, REAL, "ms", PLMN_ID_LABEL | FIVE_QI_LABEL | SLICE_ID_LABEL, ALL_LEVELS},
+  {"DRB.PdcpReordDelayUl", GNBCUUP, DER, REAL, "0.1ms", PLMN_ID_LABEL | FIVE_QI_LABEL | SLICE_ID_LABEL, ALL_LEVELS},
 
   // 5.1.1.1.6 Distribution of DL delay between NG-RAN and UE
   // Description: This measurement provides the distribution of DL packet delay between NG-RAN and UE, which
@@ -1701,7 +1702,7 @@ inline span<const e2sm_kpm_metric_t> get_e2sm_kpm_28_552_metrics()
   {"VR.VDiskUsageMean", ANY, OM, INTEGER, "%", NO_LABEL, E2_NODE_LEVEL}}};
   // clang-format on
   return metrics;
-};
+}
 
 // E2SM_KPM O-RAN specific Measurements defined in O-RAN.WG3.E2SM-KPM-R003-v3.00
 inline span<const e2sm_kpm_metric_t> get_e2sm_kpm_oran_metrics()

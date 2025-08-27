@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -20,11 +20,15 @@
  *
  */
 
-#include "../test_utils/config_generators.h"
+#include "lib/scheduler/config/du_cell_group_config_pool.h"
 #include "lib/scheduler/pdcch_scheduling/pdcch_resource_allocator_impl.h"
 #include "lib/scheduler/support/pdcch/pdcch_mapping.h"
+#include "tests/test_doubles/scheduler/scheduler_config_helper.h"
 #include "srsran/ran/pdcch/pdcch_candidates.h"
+#include "srsran/scheduler/config/scheduler_expert_config_factory.h"
+#include "srsran/scheduler/config/serving_cell_config_factory.h"
 #include "srsran/support/test_utils.h"
+#include "fmt/std.h"
 #include <gtest/gtest.h>
 #include <random>
 #include <unordered_map>
@@ -60,9 +64,10 @@ protected:
     rnti_t                                 rnti;
     std::unique_ptr<ue_cell_configuration> cfg;
 
-    test_ue(const cell_configuration& cell_cfg, const sched_ue_creation_request_message& req) :
-      rnti(req.crnti),
-      cfg(std::make_unique<ue_cell_configuration>(req.crnti, cell_cfg, (*req.cfg.cells)[0].serv_cell_cfg))
+    test_ue(const cell_configuration&                cell_cfg,
+            const sched_ue_creation_request_message& req,
+            const ue_cell_config_ptr&                ue_cfg_ptr) :
+      rnti(req.crnti), cfg(std::make_unique<ue_cell_configuration>(req.crnti, cell_cfg, ue_cfg_ptr))
     {
       srslog::fetch_basic_logger("SCHED", true).set_level(srslog::basic_levels::debug);
 
@@ -71,10 +76,14 @@ protected:
   };
 
   base_pdcch_resource_allocator_tester(
-      rnti_t                                   crnti   = to_rnti(0x4601),
-      sched_cell_configuration_request_message msg     = test_helpers::make_default_sched_cell_configuration_request(),
-      cell_config_dedicated                    ue_cell = test_helpers::create_test_initial_ue_spcell_cell_config()) :
-    cell_cfg{sched_cfg, msg}, default_ue_cfg{crnti, cell_cfg, ue_cell.serv_cell_cfg}
+      rnti_t                                   crnti = to_rnti(0x4601),
+      sched_cell_configuration_request_message msg =
+          sched_config_helper::make_default_sched_cell_configuration_request(),
+      cell_config_dedicated ue_cell = sched_config_helper::create_test_initial_ue_spcell_cell_config()) :
+    cfg_pool(msg),
+    cell_cfg{sched_cfg, msg},
+    default_ue_cell_req(ue_cell.serv_cell_cfg),
+    default_ue_cfg{crnti, cell_cfg, cfg_pool.update_ue(default_ue_cell_req)}
   {
     test_logger.set_level(srslog::basic_levels::debug);
     srslog::init();
@@ -92,15 +101,21 @@ protected:
 
   test_ue* add_ue(const sched_ue_creation_request_message& ue_creation_req)
   {
-    return &test_ues.insert(std::make_pair(ue_creation_req.crnti, test_ue{cell_cfg, ue_creation_req})).first->second;
+    return &test_ues
+                .insert(std::make_pair(
+                    ue_creation_req.crnti,
+                    test_ue{cell_cfg,
+                            ue_creation_req,
+                            cfg_pool.update_ue(ue_creation_req.cfg.cells.value()[to_du_cell_index(0)].serv_cell_cfg)}))
+                .first->second;
   }
 
   sched_ue_creation_request_message create_ue_cfg(rnti_t rnti)
   {
-    sched_ue_creation_request_message ue_creation_req = test_helpers::create_default_sched_ue_creation_request();
+    sched_ue_creation_request_message ue_creation_req = sched_config_helper::create_default_sched_ue_creation_request();
     ue_creation_req.crnti                             = rnti;
     ue_creation_req.starts_in_fallback                = false;
-    (*ue_creation_req.cfg.cells)[0].serv_cell_cfg     = default_ue_cfg.cfg_dedicated();
+    (*ue_creation_req.cfg.cells)[0].serv_cell_cfg     = default_ue_cell_req;
     return ue_creation_req;
   }
 
@@ -221,21 +236,24 @@ protected:
   void print_cfg()
   {
     fmt::memory_buffer fmtbuf;
-    fmt::format_to(fmtbuf, "\nTest config:");
-    fmt::format_to(fmtbuf, "\n- initial BWP: RBs={}", cell_cfg.dl_cfg_common.init_dl_bwp.generic_params.crbs);
-    const auto& cs0_cfg = default_ue_cfg.coreset(to_coreset_id(0));
-    fmt::format_to(fmtbuf, "\n- CORESET#0: RBs={}, duration={}", cs0_cfg.coreset0_crbs(), cs0_cfg.duration);
-    const auto& cs1_cfg = default_ue_cfg.coreset(to_coreset_id(1));
-    fmt::format_to(fmtbuf, "\n- CORESET#1: RBs={}, duration={}", get_coreset_crbs(cs1_cfg), cs1_cfg.duration);
+    fmt::format_to(std::back_inserter(fmtbuf), "\nTest config:");
     fmt::format_to(
-        fmtbuf,
+        std::back_inserter(fmtbuf), "\n- initial BWP: RBs={}", cell_cfg.dl_cfg_common.init_dl_bwp.generic_params.crbs);
+    const auto& cs0_cfg = default_ue_cfg.coreset(to_coreset_id(0));
+    fmt::format_to(
+        std::back_inserter(fmtbuf), "\n- CORESET#0: RBs={}, duration={}", cs0_cfg.coreset0_crbs(), cs0_cfg.duration);
+    const auto& cs1_cfg = default_ue_cfg.coreset(to_coreset_id(1));
+    fmt::format_to(
+        std::back_inserter(fmtbuf), "\n- CORESET#1: RBs={}, duration={}", get_coreset_crbs(cs1_cfg), cs1_cfg.duration);
+    fmt::format_to(
+        std::back_inserter(fmtbuf),
         "\n- SearchSpace#0: nof_candidates={}",
         fmt::join(cell_cfg.dl_cfg_common.init_dl_bwp.pdcch_common.search_spaces[0].get_nof_candidates(), ", "));
     fmt::format_to(
-        fmtbuf,
+        std::back_inserter(fmtbuf),
         "\n- SearchSpace#1: nof_candidates={}",
         fmt::join(cell_cfg.dl_cfg_common.init_dl_bwp.pdcch_common.search_spaces[1].get_nof_candidates(), ", "));
-    fmt::format_to(fmtbuf,
+    fmt::format_to(std::back_inserter(fmtbuf),
                    "\n- SearchSpace#2: nof_candidates={}",
                    fmt::join(default_ue_cfg.search_space(to_search_space_id(2)).cfg->get_nof_candidates(), ", "));
     test_logger.info("{}", to_string(fmtbuf));
@@ -244,7 +262,9 @@ protected:
   srslog::basic_logger&         logger      = srslog::fetch_basic_logger("SCHED");
   srslog::basic_logger&         test_logger = srslog::fetch_basic_logger("TEST");
   const scheduler_expert_config sched_cfg   = config_helpers::make_default_scheduler_expert_config();
+  du_cell_config_pool           cfg_pool;
   cell_configuration            cell_cfg;
+  const serving_cell_config     default_ue_cell_req;
   ue_cell_configuration         default_ue_cfg;
 
   cell_resource_allocator res_grid{cell_cfg};
@@ -398,7 +418,7 @@ TEST_P(ue_pdcch_resource_allocator_scrambling_tester,
   ASSERT_TRUE(res_grid[0].result.dl.ul_pdcchs.empty());
   ASSERT_EQ(res_grid[0].result.dl.dl_pdcchs.size(), 1);
   ASSERT_EQ(pdcch, &res_grid[0].result.dl.dl_pdcchs[0]) << "Returned PDCCH ptr does not match allocated ptr";
-  ASSERT_EQ(pdcch->ctx.bwp_cfg, &cell_cfg.dl_cfg_common.init_dl_bwp.generic_params);
+  ASSERT_EQ(*pdcch->ctx.bwp_cfg, cell_cfg.dl_cfg_common.init_dl_bwp.generic_params);
   ASSERT_NO_FATAL_FAILURE(verify_pdcch_context(pdcch->ctx, *u, params.ss_id));
   ASSERT_EQ(pdcch->ctx.cces.aggr_lvl, aggregation_level::n4);
   ASSERT_EQ(pdcch->ctx.starting_symbol, 0);
@@ -429,7 +449,7 @@ TEST_P(ue_pdcch_resource_allocator_scrambling_tester,
   ASSERT_TRUE(res_grid[0].result.dl.dl_pdcchs.empty());
   ASSERT_EQ(res_grid[0].result.dl.ul_pdcchs.size(), 1);
   ASSERT_EQ(pdcch, &res_grid[0].result.dl.ul_pdcchs[0]) << "Returned PDCCH ptr does not match allocated ptr";
-  ASSERT_EQ(pdcch->ctx.bwp_cfg, &cell_cfg.ul_cfg_common.init_ul_bwp.generic_params);
+  ASSERT_EQ(*pdcch->ctx.bwp_cfg, cell_cfg.ul_cfg_common.init_ul_bwp.generic_params);
   ASSERT_NO_FATAL_FAILURE(verify_pdcch_context(pdcch->ctx, *u, params.ss_id));
   ASSERT_EQ(pdcch->ctx.cces.aggr_lvl, aggregation_level::n4);
   ASSERT_EQ(pdcch->ctx.starting_symbol, 0);
@@ -446,7 +466,8 @@ TEST(pdcch_resource_allocator_test, monitoring_period)
         unsigned randint  = test_rgen::uniform_int<unsigned>(0, 10239);
         unsigned first_sl = (((randint / period) * period) + offset + 10239) % 10240;
 
-        sched_cell_configuration_request_message msg = test_helpers::make_default_sched_cell_configuration_request();
+        sched_cell_configuration_request_message msg =
+            sched_config_helper::make_default_sched_cell_configuration_request();
         msg.dl_cfg_common.init_dl_bwp.pdcch_common.search_spaces[1].set_non_ss0_monitoring_slot_periodicity(period);
         msg.dl_cfg_common.init_dl_bwp.pdcch_common.search_spaces[1].set_non_ss0_monitoring_slot_offset(offset,
                                                                                                        msg.scs_common);
@@ -510,7 +531,7 @@ struct fmt::formatter<multi_alloc_test_params> {
     return ctx.begin();
   }
   template <typename FormatContext>
-  auto format(const multi_alloc_test_params& params, FormatContext& ctx)
+  auto format(const multi_alloc_test_params& params, FormatContext& ctx) const
   {
     fmt::format_to(ctx.out(), "bw={}MHz allocs=[", bs_channel_bandwidth_to_MHz(params.cell_bw));
     for (const auto& a : params.allocs) {
@@ -520,7 +541,7 @@ struct fmt::formatter<multi_alloc_test_params> {
                      to_string(a.type),
                      a.rnti,
                      to_nof_cces(a.aggr_lvl),
-                     a.ss_id,
+                     fmt::underlying(a.ss_id),
                      a.expected_ncce);
     }
     return format_to(ctx.out(), "]");
@@ -544,12 +565,13 @@ protected:
     base_pdcch_resource_allocator_tester(
         to_rnti(0x4601),
         [tparams = GetParam()]() {
-          sched_cell_configuration_request_message msg = test_helpers::make_default_sched_cell_configuration_request(
-              cell_config_builder_params{.channel_bw_mhz = tparams.cell_bw});
+          sched_cell_configuration_request_message msg =
+              sched_config_helper::make_default_sched_cell_configuration_request(
+                  cell_config_builder_params{.channel_bw_mhz = tparams.cell_bw});
           return msg;
         }(),
         [tparams = GetParam()]() {
-          cell_config_dedicated ue_cell = test_helpers::create_test_initial_ue_spcell_cell_config(
+          cell_config_dedicated ue_cell = sched_config_helper::create_test_initial_ue_spcell_cell_config(
               cell_config_builder_params{.channel_bw_mhz = tparams.cell_bw});
           if (tparams.ss2_nof_candidates.has_value()) {
             ue_cell.serv_cell_cfg.init_dl_bwp.pdcch_cfg->search_spaces[0].set_non_ss0_nof_candidates(

@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -24,11 +24,11 @@
 
 #include "../cell/cell_harq_manager.h"
 #include "../logging/scheduler_event_logger.h"
-#include "../policy/scheduler_policy.h"
 #include "../pucch_scheduling/pucch_guardbands_scheduler.h"
-#include "../slicing/slice_scheduler.h"
+#include "../slicing/inter_slice_scheduler.h"
 #include "../srs/srs_scheduler_impl.h"
 #include "../uci_scheduling/uci_scheduler_impl.h"
+#include "intra_slice_scheduler.h"
 #include "ue_cell_grid_allocator.h"
 #include "ue_event_manager.h"
 #include "ue_fallback_scheduler.h"
@@ -46,31 +46,34 @@ class ue_scheduler_impl final : public ue_scheduler
 public:
   explicit ue_scheduler_impl(const scheduler_ue_expert_config& expert_cfg_);
 
-  void add_cell(const ue_scheduler_cell_params& params) override;
-
-  /// Schedule UE DL grants for a given {slot, cell}.
-  void run_slot(slot_point slot_tx) override;
-
-  void handle_error_indication(slot_point                            sl_tx,
-                               du_cell_index_t                       cell_index,
-                               scheduler_slot_handler::error_outcome event) override
-  {
-    event_mng.handle_error_indication(sl_tx, cell_index, event);
-  }
-
   sched_ue_configuration_handler& get_ue_configurator() override { return event_mng; }
 
   scheduler_feedback_handler& get_feedback_handler() override { return event_mng; }
 
   scheduler_dl_buffer_state_indication_handler& get_dl_buffer_state_indication_handler() override { return event_mng; }
 
+  scheduler_positioning_handler& get_positioning_handler() override { return event_mng; }
+
 private:
-  void run_sched_strategy(slot_point sl_tx, du_cell_index_t cell_index);
+  ue_cell_scheduler* do_add_cell(const ue_cell_scheduler_creation_request& params) override;
+
+  void do_rem_cell(du_cell_index_t cell_index) override;
+
+  void run_slot_impl(slot_point sl_tx);
+
+  void handle_error_ind_impl(slot_point sl_tx, du_cell_index_t cell_index, scheduler_slot_handler::error_outcome event)
+  {
+    event_mng.handle_error_indication(sl_tx, cell_index, event);
+  }
+
+  void run_sched_strategy(du_cell_index_t cell_index);
 
   /// Counts the number of PUCCH grants that are allocated for a given user at a specific slot.
   void update_harq_pucch_counter(cell_resource_allocator& cell_alloc);
 
-  struct cell {
+  struct cell_context : public ue_cell_scheduler {
+    ue_scheduler_impl& parent;
+
     cell_resource_allocator* cell_res_alloc;
 
     /// HARQ pool for this cell.
@@ -83,30 +86,34 @@ private:
     ue_fallback_scheduler fallback_sched;
 
     /// Slice scheduler.
-    slice_scheduler slice_sched;
+    inter_slice_scheduler slice_sched;
+
+    /// Intra-slice scheduler.
+    intra_slice_scheduler intra_slice_sched;
 
     /// SRS scheduler
     srs_scheduler_impl srs_sched;
 
-    cell(const scheduler_ue_expert_config& expert_cfg,
-         const ue_scheduler_cell_params&   params,
-         ue_repository&                    ues,
-         cell_metrics_handler&             metrics_handler);
+    cell_context(ue_scheduler_impl& parent, const ue_cell_scheduler_creation_request& params);
+
+    void run_slot(slot_point sl_tx) override { parent.run_slot_impl(sl_tx); }
+
+    void handle_error_indication(slot_point sl_tx, scheduler_slot_handler::error_outcome event) override
+    {
+      parent.handle_error_ind_impl(sl_tx, cell_res_alloc->cfg.cell_index, event);
+    }
+
+    scheduler_feedback_handler& get_feedback_handler() override { return parent.get_feedback_handler(); }
   };
 
   const scheduler_ue_expert_config& expert_cfg;
+  srslog::basic_logger&             logger;
 
   // List of cells of the UE scheduler.
-  slotted_array<cell, MAX_NOF_DU_CELLS> cells;
-
-  /// Scheduling Strategy.
-  ue_resource_grid_view ue_res_grid_view;
+  slotted_array<cell_context, MAX_NOF_DU_CELLS> cells;
 
   /// Repository of created UEs.
   ue_repository ue_db;
-
-  /// Allocator of grants in the resource grid.
-  ue_cell_grid_allocator ue_alloc;
 
   /// Processor of UE input events.
   ue_event_manager event_mng;
@@ -116,8 +123,6 @@ private:
 
   // Last slot run.
   slot_point last_sl_ind;
-
-  srslog::basic_logger& logger;
 };
 
 } // namespace srsran

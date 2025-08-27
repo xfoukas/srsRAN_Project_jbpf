@@ -1,5 +1,5 @@
 #
-# Copyright 2021-2024 Software Radio Systems Limited
+# Copyright 2021-2025 Software Radio Systems Limited
 #
 # This file is part of srsRAN
 #
@@ -26,7 +26,7 @@ if (USE_PHY_TESTVECTORS)
     target_link_libraries(
             transform_precoder_vectortest
             srsran_transform_precoding
-            srsran_generic_funcs
+            srsran_dft
             srslog
             srsvec
             gtest

@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -22,6 +22,8 @@
 
 #pragma once
 
+#include "srsran/ofh/receiver/ofh_receiver_metrics.h"
+#include "srsran/ofh/receiver/ofh_receiver_metrics_collector.h"
 #include "srsran/ofh/receiver/ofh_receiver_timing_parameters.h"
 #include "srsran/ofh/timing/ofh_ota_symbol_boundary_notifier.h"
 #include "srsran/srslog/logger.h"
@@ -41,7 +43,6 @@ class rx_window_checker : public ota_symbol_boundary_notifier
   {
     static constexpr unsigned NOF_BITS_PER_COUNTER = 21U;
 
-    srslog::basic_logger& logger;
     std::atomic<uint64_t> on_time_counter{0};
     std::atomic<uint64_t> early_counter{0};
     std::atomic<uint64_t> late_counter{0};
@@ -50,10 +51,8 @@ class rx_window_checker : public ota_symbol_boundary_notifier
     uint64_t              last_late_value_printed    = 0U;
 
   public:
-    explicit rx_window_checker_statistics(srslog::basic_logger& logger_) : logger(logger_) {}
-
-    /// Prints the statistics.
-    void print_statistics();
+    /// Collect the statistics.
+    void collect_metrics(received_messages_metrics& metrics);
 
     /// Functions to increment the counters.
     void increment_on_time_counter() { on_time_counter.fetch_add(1, std::memory_order_relaxed); }
@@ -67,19 +66,18 @@ class rx_window_checker : public ota_symbol_boundary_notifier
   };
 
   const rx_window_timing_parameters timing_parameters;
-  const unsigned                    nof_symbols_in_one_second;
   const bool                        is_disabled;
-  unsigned                          nof_symbols;
   rx_window_checker_statistics      statistics;
-  std::atomic<uint32_t>             count_val;
+  std::atomic<uint32_t>             slot_raw_value;
 
 public:
-  rx_window_checker(srslog::basic_logger&                    logger_,
-                    const rx_window_timing_parameters&       params,
-                    std::chrono::duration<double, std::nano> symbol_duration);
+  rx_window_checker(bool is_enabled, const rx_window_timing_parameters& params);
 
   // See interface for documentation.
-  void on_new_symbol(slot_symbol_point symbol_point) override;
+  void on_new_symbol(const slot_symbol_point_context& symbol_point_context) override;
+
+  // See interface for documentation.
+  void collect_metrics(received_messages_metrics& metrics);
 
   /// Returns true if the Rx window checker is disabled, otherwise returns false.
   bool disabled() const { return is_disabled; }
@@ -91,13 +89,6 @@ public:
   uint64_t nof_on_time_messages() const { return statistics.nof_on_time_messages(); }
   uint64_t nof_early_messages() const { return statistics.nof_early_messages(); }
   uint64_t nof_late_messages() const { return statistics.nof_late_messages(); }
-
-private:
-  /// Returns true if the given logger is enabled for info level, otherwise false.
-  static bool is_log_enabled(srslog::basic_logger& logger) { return logger.info.enabled(); }
-
-  /// Prints the statistics every second.
-  void print_statistics();
 };
 
 } // namespace ofh

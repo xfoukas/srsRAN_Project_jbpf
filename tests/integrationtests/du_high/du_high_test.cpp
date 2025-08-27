@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -26,12 +26,14 @@
 #include "tests/integrationtests/du_high/test_utils/du_high_env_simulator.h"
 #include "tests/test_doubles/f1ap/f1ap_test_message_validators.h"
 #include "tests/test_doubles/f1ap/f1ap_test_messages.h"
+#include "tests/test_doubles/mac/mac_test_messages.h"
 #include "tests/test_doubles/pdcp/pdcp_pdu_generator.h"
 #include "tests/test_doubles/scheduler/scheduler_result_test.h"
 #include "tests/unittests/f1ap/du/f1ap_du_test_helpers.h"
 #include "srsran/asn1/f1ap/common.h"
 #include "srsran/asn1/f1ap/f1ap_pdu_contents_ue.h"
 #include "srsran/asn1/rrc_nr/cell_group_config.h"
+#include "srsran/support/executors/task_worker.h"
 #include "srsran/support/test_utils.h"
 
 using namespace srsran;
@@ -104,7 +106,7 @@ TEST_F(du_high_tester, when_ue_context_setup_completes_then_drb_is_active)
   })) {
     for (unsigned i = 0; i != phy.cells[0].last_dl_data.value().ue_pdus.size(); ++i) {
       if (phy.cells[0].last_dl_res.value().dl_res->ue_grants[i].pdsch_cfg.codewords[0].new_data) {
-        bytes_sched += phy.cells[0].last_dl_data.value().ue_pdus[i].pdu.size();
+        bytes_sched += phy.cells[0].last_dl_data.value().ue_pdus[i].pdu.get_buffer().size();
       }
     }
     phy.cells[0].last_dl_data.reset();
@@ -122,7 +124,7 @@ TEST_F(du_high_tester, when_ue_context_release_received_then_ue_gets_deleted)
   cu_notifier.last_f1ap_msgs.clear();
   f1ap_message                    msg = generate_ue_context_release_command();
   const ue_context_release_cmd_s& cmd = msg.pdu.init_msg().value.ue_context_release_cmd();
-  this->du_hi->get_f1ap_message_handler().handle_message(msg);
+  this->du_hi->get_f1ap_du().handle_message(msg);
 
   const unsigned MAX_COUNT = 1000;
   for (unsigned i = 0; i != MAX_COUNT; ++i) {
@@ -147,6 +149,11 @@ TEST_F(du_high_tester, when_ue_context_setup_release_starts_then_drb_activity_st
   ASSERT_TRUE(run_rrc_setup(rnti));
   ASSERT_TRUE(run_ue_context_setup(rnti));
 
+  // Run some slots to ensure no SRB1 RLC status PDU is pending.
+  for (unsigned i = 0, slots_guard = 100; i != slots_guard; ++i) {
+    run_slot();
+  }
+
   // CU-UP forwards many DRB PDUs.
   const unsigned nof_pdcp_pdus = 100, pdcp_pdu_size = 128;
 
@@ -159,7 +166,7 @@ TEST_F(du_high_tester, when_ue_context_setup_release_starts_then_drb_activity_st
   // DU receives F1AP UE Context Release Command.
   cu_notifier.last_f1ap_msgs.clear();
   f1ap_message msg = generate_ue_context_release_command();
-  this->du_hi->get_f1ap_message_handler().handle_message(msg);
+  this->du_hi->get_f1ap_du().handle_message(msg);
   this->test_logger.info("STATUS: UEContextReleaseCommand received by DU. Waiting for rrcRelease being transmitted...");
 
   // Ensure that once SRB1 (RRC Release) is scheduled.
@@ -185,6 +192,42 @@ TEST_F(du_high_tester, when_ue_context_setup_release_starts_then_drb_activity_st
       }
     }
   }
+}
+
+TEST_F(du_high_tester, when_f1ap_reset_received_then_ues_are_removed)
+{
+  // Create UE.
+  rnti_t rnti = to_rnti(0x4601);
+  ASSERT_TRUE(add_ue(rnti));
+  ASSERT_TRUE(run_rrc_setup(rnti));
+  ASSERT_TRUE(run_ue_context_setup(rnti));
+
+  // CU-UP forwards many DRB PDUs.
+  const unsigned nof_pdcp_pdus = 100, pdcp_pdu_size = 128;
+  for (unsigned i = 0; i < nof_pdcp_pdus; ++i) {
+    nru_dl_message f1u_pdu{
+        .t_pdu = test_helpers::create_pdcp_pdu(pdcp_sn_size::size12bits, /* is_srb = */ false, i, pdcp_pdu_size, i)};
+    cu_up_sim.bearers.begin()->second.rx_notifier->on_new_pdu(f1u_pdu);
+  }
+
+  // DU receives F1 RESET.
+  cu_notifier.last_f1ap_msgs.clear();
+  f1ap_message msg = test_helpers::generate_f1ap_reset_message();
+  this->du_hi->get_f1ap_du().handle_message(msg);
+  this->test_logger.info("STATUS: RESET received by DU. Waiting for F1AP RESET ACK...");
+
+  // Wait for F1 RESET ACK to be sent to the CU.
+  EXPECT_TRUE(this->run_until([this]() { return not cu_notifier.last_f1ap_msgs.empty(); }));
+  ASSERT_TRUE(test_helpers::is_valid_f1_reset_ack(msg, cu_notifier.last_f1ap_msgs.back()));
+
+  // Confirm that no traffic is being sent for the reset UE.
+  const unsigned NOF_SLOT_CHECKS = 100;
+  ASSERT_FALSE(this->run_until(
+      [this, rnti]() {
+        const dl_msg_alloc* pdsch = find_ue_pdsch(rnti, phy.cells[0].last_dl_res.value().dl_res->ue_grants);
+        return pdsch != nullptr;
+      },
+      NOF_SLOT_CHECKS));
 }
 
 TEST_F(du_high_tester, when_du_high_is_stopped_then_ues_are_removed)
@@ -214,8 +257,9 @@ TEST_F(du_high_tester, when_ue_context_setup_received_for_inexistent_ue_then_ue_
 
   gnb_cu_ue_f1ap_id_t cu_ue_id =
       int_to_gnb_cu_ue_f1ap_id(test_rgen::uniform_int<uint64_t>(0, (uint64_t)gnb_cu_ue_f1ap_id_t::max));
-  f1ap_message cu_cp_msg = test_helpers::create_ue_context_setup_request(cu_ue_id, std::nullopt, 0, {drb_id_t::drb1});
-  this->du_hi->get_f1ap_message_handler().handle_message(cu_cp_msg);
+  f1ap_message cu_cp_msg = test_helpers::generate_ue_context_setup_request(
+      cu_ue_id, std::nullopt, 0, {drb_id_t::drb1}, {plmn_identity::test_value(), nr_cell_identity::create(0).value()});
+  this->du_hi->get_f1ap_du().handle_message(cu_cp_msg);
 
   ASSERT_TRUE(this->run_until([this]() { return not cu_notifier.last_f1ap_msgs.empty(); }));
 
@@ -247,8 +291,10 @@ TEST_F(du_high_tester, when_ue_context_modification_with_rem_drbs_is_received_th
 
   // DU receives F1AP UE Context Modification Command.
   cu_notifier.last_f1ap_msgs.clear();
-  f1ap_message msg = generate_ue_context_modification_request({}, {drb_id_t::drb1});
-  this->du_hi->get_f1ap_message_handler().handle_message(msg);
+  auto&        u   = ues[rnti];
+  f1ap_message msg = test_helpers::generate_ue_context_modification_request(
+      u.du_ue_id.value(), u.cu_ue_id.value(), {}, {}, {drb_id_t::drb1}, {});
+  this->du_hi->get_f1ap_du().handle_message(msg);
 
   // Wait for DU to send F1AP UE Context Modification Response.
   this->run_until([this]() { return not cu_notifier.last_f1ap_msgs.empty(); });
@@ -356,4 +402,49 @@ TEST_F(du_high_tester,
                nullptr;
       },
       100));
+}
+
+TEST_F(du_high_tester, when_reestablishment_takes_place_then_previous_ue_capabilities_are_considered_in_config)
+{
+  // Create UE1.
+  rnti_t rnti1 = to_rnti(0x4601);
+  ASSERT_TRUE(add_ue(rnti1));
+  ASSERT_TRUE(run_rrc_setup(rnti1));
+  ASSERT_TRUE(run_ue_context_setup(rnti1));
+
+  // CU-UP forwards many DRB PDUs.
+  const unsigned nof_pdcp_pdus = 100, pdcp_pdu_size = 32;
+  for (unsigned i = 0; i < nof_pdcp_pdus; ++i) {
+    nru_dl_message f1u_pdu{
+        .t_pdu = test_helpers::create_pdcp_pdu(pdcp_sn_size::size12bits, /* is_srb = */ false, i, pdcp_pdu_size, i)};
+    cu_up_sim.bearers.begin()->second.rx_notifier->on_new_pdu(f1u_pdu);
+  }
+
+  // Check QAM256 MCS table is used.
+  const unsigned nof_slots_test = 1000;
+  ASSERT_TRUE(this->run_until(
+      [this, rnti1]() {
+        auto* pdsch = find_ue_pdsch_with_lcid(rnti1, LCID_MIN_DRB, phy.cells[0].last_dl_res.value().dl_res->ue_grants);
+        return pdsch != nullptr and pdsch->pdsch_cfg.codewords[0].mcs_table == pdsch_mcs_table::qam256;
+      },
+      nof_slots_test));
+
+  // Run Reestablishment
+  rnti_t rnti2 = to_rnti(0x4602);
+  ASSERT_TRUE(add_ue(rnti2));
+  ASSERT_TRUE(run_rrc_reestablishment(rnti2, rnti1));
+
+  for (unsigned i = 0; i < nof_pdcp_pdus; ++i) {
+    nru_dl_message f1u_pdu{
+        .t_pdu = test_helpers::create_pdcp_pdu(pdcp_sn_size::size12bits, /* is_srb = */ false, i, pdcp_pdu_size, i)};
+    cu_up_sim.bearers.at(std::make_pair(1, drb_id_t::drb1)).rx_notifier->on_new_pdu(f1u_pdu);
+  }
+
+  // Check QAM256 MCS table is used after RRC Reestablishment (the UE capabilities were not forgotten).
+  ASSERT_TRUE(this->run_until(
+      [this, rnti2]() {
+        auto* pdsch = find_ue_pdsch_with_lcid(rnti2, LCID_MIN_DRB, phy.cells[0].last_dl_res.value().dl_res->ue_grants);
+        return pdsch != nullptr and pdsch->pdsch_cfg.codewords[0].mcs_table == pdsch_mcs_table::qam256;
+      },
+      nof_slots_test));
 }

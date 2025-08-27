@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -87,6 +87,11 @@ bool puxch_processor_impl::process_symbol(const baseband_gateway_buffer_reader& 
 
 void puxch_processor_impl::handle_request(const shared_resource_grid& grid, const resource_grid_context& context)
 {
+  // Ignore request if the processor has stopped.
+  if (stopped) {
+    return;
+  }
+
   srsran_assert(notifier != nullptr, "Notifier has not been connected.");
 
   // Swap the new request by the current request in the circular array.
@@ -99,4 +104,15 @@ void puxch_processor_impl::handle_request(const shared_resource_grid& grid, cons
     late_context.sector = context.sector;
     notifier->on_puxch_request_late(late_context);
   }
+}
+
+lower_phy_center_freq_controller& puxch_processor_impl::get_center_freq_control()
+{
+  return *this;
+}
+
+bool puxch_processor_impl::set_carrier_center_frequency(double carrier_center_frequency_Hz)
+{
+  demodulator->set_center_frequency(carrier_center_frequency_Hz);
+  return true;
 }

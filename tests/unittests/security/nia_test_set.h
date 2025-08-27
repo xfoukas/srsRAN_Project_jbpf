@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -23,6 +23,7 @@
 #pragma once
 
 #include <cstdint>
+#include <ostream>
 
 struct nia_test_set {
   const char* name;
@@ -34,3 +35,9 @@ struct nia_test_set {
   const char* message_cstr;
   const char* mact_cstr;
 };
+
+//// Dummy operator to avoid Valgrind warnings.
+inline std::ostream& operator<<(std::ostream& os, const nia_test_set& params)
+{
+  return os;
+}

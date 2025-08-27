@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -32,6 +32,8 @@
 
 namespace srsran {
 
+class mac_metrics_notifier;
+
 struct mac_dl_config {
   srs_du::du_high_ue_executor_mapper&   ue_exec_mapper;
   srs_du::du_high_cell_executor_mapper& cell_exec_mapper;
@@ -51,12 +53,18 @@ public:
   bool has_cell(du_cell_index_t cell_index) const;
 
   /// Adds new cell configuration to MAC DL.
-  void add_cell(const mac_cell_creation_request& cell_cfg) override;
+  mac_cell_controller& add_cell(const mac_cell_creation_request& cell_cfg,
+                                mac_cell_config_dependencies     dependencies) override;
 
   /// Removes cell configuration from MAC DL.
   void remove_cell(du_cell_index_t cell_index) override;
 
   mac_cell_controller& get_cell_controller(du_cell_index_t cell_index) override { return *cells[cell_index]; }
+
+  mac_cell_time_mapper& get_time_mapper(du_cell_index_t cell_index) override
+  {
+    return cells[cell_index]->get_time_mapper();
+  }
 
   /// Creates new UE DL context, updates logical channel MUX, adds UE in scheduler.
   async_task<bool> add_ue(const mac_ue_create_request& request) override;
@@ -65,9 +73,9 @@ public:
   async_task<void> remove_ue(const mac_ue_delete_request& request) override;
 
   /// Add/Modify UE bearers in the MUX.
-  async_task<bool> addmod_bearers(du_ue_index_t                                  ue_index,
-                                  du_cell_index_t                                pcell_index,
-                                  const std::vector<mac_logical_channel_config>& logical_channels) override;
+  async_task<bool> addmod_bearers(du_ue_index_t                          ue_index,
+                                  du_cell_index_t                        pcell_index,
+                                  span<const mac_logical_channel_config> logical_channels) override;
 
   /// Add/Modify UE bearers in the DEMUX.
   async_task<bool>

@@ -1,5 +1,5 @@
 #
-# Copyright 2021-2024 Software Radio Systems Limited
+# Copyright 2021-2025 Software Radio Systems Limited
 #
 # This file is part of srsRAN
 #
@@ -25,7 +25,6 @@ target_link_libraries(f1c_gateway_test
         f1ap_test_helpers
         srsran_f1ap_common
         srsran_support
-        srsran_network
         srslog
         f1ap_asn1
         gtest

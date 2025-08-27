@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -37,10 +37,14 @@ struct du_low_cell_config {
 
 /// Parameters used to instantiate the DU-low.
 struct du_low_config {
-  /// Logger used to report state of the DU-low.
-  srslog::basic_logger* logger;
   /// Cell configuration.
   std::vector<du_low_cell_config> cells;
+};
+
+/// Dependencies necessary to instantiate a DU-low.
+struct du_low_dependencies {
+  /// Logger used to report state of the DU-low.
+  srslog::basic_logger* logger;
 };
 
 } // namespace srs_du

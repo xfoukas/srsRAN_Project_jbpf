@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -47,7 +47,7 @@ public:
   void attach_handler(ngap_message_handler* handler_) { handler = handler_; }
 
   std::unique_ptr<ngap_message_notifier>
-  handle_cu_cp_connection_request(std::unique_ptr<ngap_message_notifier> cu_cp_rx_pdu_notifier) override
+  handle_cu_cp_connection_request(std::unique_ptr<ngap_rx_message_notifier> cu_cp_rx_pdu_notifier) override
   {
     class dummy_ngap_message_notifier : public ngap_message_notifier
     {
@@ -55,21 +55,26 @@ public:
       dummy_ngap_message_notifier(dummy_n2_gateway& parent_) : parent(parent_) {}
       ~dummy_ngap_message_notifier() { parent.rx_pdu_notifier.reset(); }
 
-      void on_new_message(const ngap_message& msg) override
+      [[nodiscard]] bool on_new_message(const ngap_message& msg) override
       {
         parent.logger.info("Received message");
 
         // Verify correct packing of outbound PDU.
         byte_buffer   pack_buffer;
         asn1::bit_ref bref(pack_buffer);
-        ASSERT_EQ(msg.pdu.pack(bref), asn1::SRSASN_SUCCESS);
+        if (msg.pdu.pack(bref) != asn1::SRSASN_SUCCESS) {
+          parent.logger.error("Failed to pack message");
+          return false;
+        }
 
         parent.last_ngap_msgs.push_back(msg);
 
-        if (parent.handler != nullptr) {
-          parent.logger.info("Forwarding PDU");
-          parent.handler->handle_message(msg);
+        if (parent.handler == nullptr) {
+          return false;
         }
+        parent.logger.info("Forwarding PDU");
+        parent.handler->handle_message(msg);
+        return true;
       }
 
     private:
@@ -87,7 +92,7 @@ private:
   srslog::basic_logger& logger;
   ngap_message_handler* handler = nullptr;
 
-  std::unique_ptr<ngap_message_notifier> rx_pdu_notifier;
+  std::unique_ptr<ngap_rx_message_notifier> rx_pdu_notifier;
 };
 
 /// Dummy handler storing and printing the received PDU.
@@ -95,10 +100,11 @@ class dummy_ngap_message_notifier : public ngap_message_notifier
 {
 public:
   dummy_ngap_message_notifier() : logger(srslog::fetch_basic_logger("TEST")) {}
-  void on_new_message(const ngap_message& msg) override
+  [[nodiscard]] bool on_new_message(const ngap_message& msg) override
   {
     last_msg = msg;
     logger.info("Transmitted a PDU of type {}", msg.pdu.type().to_string());
+    return true;
   }
   ngap_message last_msg;
 
@@ -110,7 +116,7 @@ private:
 class dummy_ngap_message_handler : public ngap_message_handler
 {
 public:
-  dummy_ngap_message_handler() : logger(srslog::fetch_basic_logger("TEST")){};
+  dummy_ngap_message_handler() : logger(srslog::fetch_basic_logger("TEST")) {}
   void handle_message(const ngap_message& msg) override
   {
     last_msg = msg;
@@ -126,7 +132,7 @@ private:
 class dummy_ngap_rrc_ue_notifier : public ngap_rrc_ue_notifier
 {
 public:
-  dummy_ngap_rrc_ue_notifier() : logger(srslog::fetch_basic_logger("TEST")){};
+  dummy_ngap_rrc_ue_notifier() : logger(srslog::fetch_basic_logger("TEST")) {}
 
   void on_new_pdu(byte_buffer nas_pdu) override
   {
@@ -154,7 +160,7 @@ private:
 class dummy_ngap_cu_cp_notifier : public ngap_cu_cp_notifier
 {
 public:
-  dummy_ngap_cu_cp_notifier(ue_manager& ue_mng_) : ue_mng(ue_mng_), logger(srslog::fetch_basic_logger("TEST")){};
+  dummy_ngap_cu_cp_notifier(ue_manager& ue_mng_) : ue_mng(ue_mng_), logger(srslog::fetch_basic_logger("TEST")) {}
 
   void connect_ngap(ngap_ue_context_removal_handler& ngap_handler_) { ngap_handler = &ngap_handler_; }
 
@@ -249,11 +255,13 @@ public:
 
       if (last_request.pdu_session_res_setup_items.empty()) {
         cu_cp_pdu_session_res_setup_failed_item failed_item;
-        failed_item.pdu_session_id              = uint_to_pdu_session_id(1);
-        failed_item.unsuccessful_transfer.cause = ngap_cause_radio_network_t::unspecified;
-        res.pdu_session_res_failed_to_setup_items.emplace(failed_item.pdu_session_id, failed_item);
+        for (const auto& pdu_session : last_request.pdu_session_res_setup_items) {
+          failed_item.pdu_session_id              = pdu_session.pdu_session_id;
+          failed_item.unsuccessful_transfer.cause = ngap_cause_radio_network_t::unspecified;
+          res.pdu_session_res_failed_to_setup_items.emplace(failed_item.pdu_session_id, failed_item);
+        }
       } else {
-        res = generate_cu_cp_pdu_session_resource_setup_response(uint_to_pdu_session_id(1));
+        res = generate_cu_cp_pdu_session_resource_setup_response(last_request);
       }
 
       CORO_RETURN(res);
@@ -318,6 +326,8 @@ public:
     });
   }
 
+  void on_transmission_of_handover_required() override { logger.info("Received a new Handover Required"); }
+
   async_task<bool> on_new_handover_command(ue_index_t ue_index, byte_buffer command) override
   {
     logger.info("Received a new Handover Command");
@@ -330,7 +340,7 @@ public:
     });
   }
 
-  void on_n2_disconnection() override {}
+  void on_n2_disconnection(amf_index_t amf_index) override {}
 
   cu_cp_ue_context_release_command last_command;
   byte_buffer                      last_handover_command;
@@ -366,6 +376,16 @@ public:
     });
   }
 
+  void on_dl_ue_associated_nrppa_transport_pdu(ue_index_t ue_index, const byte_buffer& nrppa_pdu) override
+  {
+    logger.error("DL UE associated NRPPa transport failed. Cause: NRPPa transport PDUs not supported.");
+  }
+
+  void on_dl_non_ue_associated_nrppa_transport_pdu(amf_index_t amf_index, const byte_buffer& nrppa_pdu) override
+  {
+    logger.error("DL non UE associated NRPPa transport failed. Cause: NRPPa transport PDUs not supported.");
+  }
+
   ue_index_t                                 last_ue = ue_index_t::invalid;
   ngap_init_context_setup_request            last_init_ctxt_setup_request;
   cu_cp_pdu_session_resource_setup_request   last_request;
@@ -386,8 +406,9 @@ private:
 class dummy_rrc_ngap_message_handler : public rrc_ngap_message_handler
 {
 public:
-  dummy_rrc_ngap_message_handler(ue_index_t ue_index_) :
-    ue_index(ue_index_), logger(srslog::fetch_basic_logger("TEST")){};
+  dummy_rrc_ngap_message_handler(ue_index_t ue_index_) : ue_index(ue_index_), logger(srslog::fetch_basic_logger("TEST"))
+  {
+  }
 
   void handle_dl_nas_transport_message(byte_buffer nas_pdu) override
   {
@@ -410,6 +431,39 @@ private:
   ue_index_t            ue_index = ue_index_t::invalid;
   srslog::basic_logger& logger;
   byte_buffer           ho_preparation_message;
+};
+
+class dummy_ngap_cu_cp_ue_notifier : public ngap_cu_cp_ue_notifier
+{
+public:
+  ~dummy_ngap_cu_cp_ue_notifier() = default;
+
+  void set_ue_index(ue_index_t ue_index_) { ue_index = ue_index_; }
+  void set_rrc_ue_notifier(dummy_ngap_rrc_ue_notifier& rrc_ue_notifier_) { rrc_ue_notifier = &rrc_ue_notifier_; }
+
+  /// \brief Get the UE index of the UE.
+  ue_index_t get_ue_index() override { return ue_index.value(); }
+
+  /// \brief Schedule an async task for the UE.
+  bool schedule_async_task(async_task<void> task) override { return true; }
+
+  /// \brief Get the RRC UE notifier of the UE.
+  ngap_rrc_ue_notifier& get_ngap_rrc_ue_notifier() override
+  {
+    srsran_assert(rrc_ue_notifier != nullptr, "RRC UE notifier must not be nullptr");
+    return *rrc_ue_notifier;
+  }
+
+  /// \brief Notify the CU-CP about a security context
+  /// \param[in] sec_ctxt The received security context
+  /// \return True if the security context was successfully initialized, false otherwise
+  bool init_security_context(security::security_context sec_ctxt) override { return true; }
+
+  /// \brief Check if security is enabled
+  [[nodiscard]] bool is_security_enabled() const override { return true; }
+
+  std::optional<ue_index_t>   ue_index;
+  dummy_ngap_rrc_ue_notifier* rrc_ue_notifier = nullptr;
 };
 
 } // namespace srs_cu_cp

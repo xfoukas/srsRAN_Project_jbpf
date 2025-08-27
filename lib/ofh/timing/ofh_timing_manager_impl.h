@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -39,7 +39,7 @@ public:
   }
 
   // See interface for documentation.
-  controller& get_controller() override;
+  operation_controller& get_controller() override;
 
   // See interface for documentation.
   ota_symbol_boundary_notifier_manager& get_ota_symbol_boundary_notifier_manager() override;

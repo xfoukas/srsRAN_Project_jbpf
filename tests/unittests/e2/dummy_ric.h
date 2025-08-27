@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -22,7 +22,7 @@
 
 #pragma once
 
-#include "lib/e2/common/e2ap_asn1_packer.h"
+#include "common/e2ap_asn1_packer.h"
 #include "lib/e2/e2sm/e2sm_kpm/e2sm_kpm_asn1_packer.h"
 #include "srsran/gateways/sctp_network_server_factory.h"
 #include "srsran/pcap/dlt_pcap.h"
@@ -38,6 +38,8 @@ struct ric_sctp_gateway_config {
   sctp_network_gateway_config sctp;
   /// IO broker responsible for handling SCTP Rx data and notifications.
   io_broker& broker;
+  /// Execution context used to process received SCTP packets.
+  task_executor& io_rx_executor;
   /// PCAP writer for the E2AP messages.
   dlt_pcap& pcap;
   /// Sniffer that receives a copy of a received E2 message.

@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -41,7 +41,7 @@ TEST(mac_fapi_pdcch_pdu_conversor_test, mac_to_fapi_conversion_is_valid)
                                                         {{&result.dl_res->dl_pdcchs.front().ctx, &result.dl_pdcch_pdus.front()}}};
 
   fapi::dl_pdcch_pdu fapi_pdu;
-  auto               pm_tools = generate_precoding_matrix_tables(1);
+  auto               pm_tools = generate_precoding_matrix_tables(1, 0);
   convert_pdcch_mac_to_fapi(fapi_pdu, mac_pdu, *std::get<0>(pm_tools), nof_prbs);
 
   // BWP.

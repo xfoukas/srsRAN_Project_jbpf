@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -22,9 +22,10 @@
 
 #pragma once
 
+#include "srsran/phy/support/precoding_formatters.h"
+#include "srsran/phy/support/re_pattern_formatters.h"
 #include "srsran/phy/upper/channel_processors/pdsch/pdsch_processor.h"
 #include "srsran/ran/pdsch/pdsch_context_formatter.h"
-#include "srsran/support/format_utils.h"
 
 namespace fmt {
 
@@ -38,14 +39,13 @@ struct formatter<srsran::pdsch_processor::codeword_description> {
   formatter() = default;
 
   template <typename ParseContext>
-  auto parse(ParseContext& ctx) -> decltype(ctx.begin())
+  auto parse(ParseContext& ctx)
   {
     return helper.parse(ctx);
   }
 
   template <typename FormatContext>
-  auto format(const srsran::pdsch_processor::codeword_description& codeword_descr, FormatContext& ctx)
-      -> decltype(std::declval<FormatContext>().out())
+  auto format(const srsran::pdsch_processor::codeword_description& codeword_descr, FormatContext& ctx) const
   {
     helper.format_always(ctx, "mod={}", to_string(codeword_descr.modulation));
     helper.format_always(ctx, "rv={}", codeword_descr.rv);
@@ -64,18 +64,17 @@ struct formatter<srsran::pdsch_processor::pdu_t> {
   formatter() = default;
 
   template <typename ParseContext>
-  auto parse(ParseContext& ctx) -> decltype(ctx.begin())
+  auto parse(ParseContext& ctx)
   {
     return helper.parse(ctx);
   }
 
   template <typename FormatContext>
-  auto format(const srsran::pdsch_processor::pdu_t& pdu, FormatContext& ctx)
-      -> decltype(std::declval<FormatContext>().out())
+  auto format(const srsran::pdsch_processor::pdu_t& pdu, FormatContext& ctx) const
   {
     helper.format_always(ctx, "rnti=0x{:04x}", pdu.rnti);
     if (pdu.context.has_value()) {
-      helper.format_always(ctx, pdu.context.value());
+      helper.format_always(ctx, *pdu.context);
     }
     helper.format_if_verbose(ctx, "bwp=[{}, {})", pdu.bwp_start_rb, pdu.bwp_start_rb + pdu.bwp_size_rb);
     helper.format_always(ctx, "prb={}", pdu.freq_alloc);

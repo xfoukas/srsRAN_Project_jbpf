@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -22,11 +22,11 @@
 
 #pragma once
 
-#include "s3g.h"
-#include "security.h"
-#include "ssl.h"
-#include "zuc.h"
 #include "srsran/adt/byte_buffer.h"
+#include "srsran/security/s3g.h"
+#include "srsran/security/security.h"
+#include "srsran/security/ssl.h"
+#include "srsran/security/zuc.h"
 
 namespace srsran {
 namespace security {
@@ -133,7 +133,7 @@ inline void security_nea2(const sec_128_key& key,
       nonce_cnt[0] = (count >> 24) & 0xff;
       nonce_cnt[1] = (count >> 16) & 0xff;
       nonce_cnt[2] = (count >> 8) & 0xff;
-      nonce_cnt[3] = (count)&0xff;
+      nonce_cnt[3] = (count) & 0xff;
       nonce_cnt[4] = ((bearer & 0x1f) << 3) | ((to_number(direction) & 0x01) << 2);
 
       // Encryption
@@ -180,7 +180,7 @@ inline void security_nea3(const sec_128_key& key,
     iv[0]  = (count >> 24) & 0xff;
     iv[1]  = (count >> 16) & 0xff;
     iv[2]  = (count >> 8) & 0xff;
-    iv[3]  = (count)&0xff;
+    iv[3]  = (count) & 0xff;
     iv[4]  = ((bearer & 0x1f) << 3) | ((to_number(direction) & 0x01) << 2);
     iv[5]  = 0;
     iv[6]  = 0;

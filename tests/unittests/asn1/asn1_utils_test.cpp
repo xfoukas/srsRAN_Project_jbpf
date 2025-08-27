@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -213,11 +213,16 @@ TEST(asn1_bit_ref, pack_unpack_operators)
 
 TEST(asn1_octet_string_test, pack_unpack_operators)
 {
-  std::string        hexstr = "014477aaff";
+  std::string          hexstr = "014477aaff";
+  std::vector<uint8_t> bytes  = {0x01, 0x44, 0x77, 0xaa, 0xff};
+
   fixed_octstring<5> statstr;
   dyn_octstring      dynstr;
+  dyn_octstring      dynstr_from_bytes;
+
   statstr.from_string(hexstr);
   dynstr.from_string(hexstr);
+  dynstr_from_bytes.from_bytes(bytes);
 
   TESTASSERT(sizeof(statstr) == statstr.size());
   TESTASSERT(statstr.size() == 5);
@@ -227,6 +232,7 @@ TEST(asn1_octet_string_test, pack_unpack_operators)
   TESTASSERT(statstr.to_string() == hexstr);
   TESTASSERT(statstr.to_string() == dynstr.to_string());
   TESTASSERT(statstr.to_number() == dynstr.to_number());
+  TESTASSERT(statstr.to_number() == dynstr_from_bytes.to_number());
 
   // check endianess
   TESTASSERT(statstr.to_number() == 5443660543);
@@ -457,7 +463,7 @@ TEST(asn1_seq_of_test, pack_unpack_and_operators)
   b2 = {buffer};
   unpack_dyn_seq_of(bseq2, b2, 0, 33, integer_packer<uint32_t>(lb, ub, false));
   TESTASSERT(bseq2 == bseq);
-  TESTASSERT(std::equal(&bseq2[0], &bseq2[fixed_list_size], &fixed_list[0]));
+  TESTASSERT(std::equal(bseq2.begin(), bseq2.end(), &fixed_list[0]));
 
   {
     bounded_array<uint32_t, 33> bseq3;
@@ -555,7 +561,7 @@ public:
     value = v;
     return *this;
   }
-              operator uint8_t() { return (uint8_t)value; }
+  operator uint8_t() { return (uint8_t)value; }
   std::string to_string() const
   {
     switch (value) {
@@ -640,7 +646,7 @@ public:
     value = v;
     return *this;
   }
-              operator uint8_t() { return (uint8_t)value; }
+  operator uint8_t() { return (uint8_t)value; }
   std::string to_string() const
   {
     switch (value) {
@@ -663,7 +669,7 @@ TEST(asn1_enumerated, bool_to_enum_test)
   TESTASSERT(enum_to_bool(e2));
   e2 = EnumBoolTest::options::nulltype;
   TESTASSERT(!enum_to_bool(e2));
-};
+}
 
 void test_json_writer()
 {
@@ -704,6 +710,112 @@ TEST(asn1_integer_test, large_integer_pack_unpack)
   cbit_ref                                      cbref(buffer);
   TESTASSERT(big_integer2.unpack(cbref) == 0);
   TESTASSERT(big_integer == big_integer2);
+}
+
+TEST(asn1_real_test, real_special_number_pack_unpack)
+{
+  std::vector<float>                input_numbers = {0.0, NAN, INFINITY, -INFINITY};
+  std::vector<std::vector<uint8_t>> output_bytes  = {{0x00}, {0x01, 0x42}, {0x01, 0x40}, {0x01, 0x41}};
+
+  for (unsigned i = 0; i < input_numbers.size(); i++) {
+    std::vector<uint8_t> out_bytes = output_bytes[i];
+    real_s               real_number;
+    real_number.value = input_numbers[i];
+
+    srsran::byte_buffer buffer;
+    bit_ref             bref(buffer);
+    TESTASSERT(real_number.pack(bref) == 0);
+    TESTASSERT(std::equal(buffer.begin(), buffer.end(), out_bytes.begin(), out_bytes.end()));
+
+    real_s   real_number2;
+    cbit_ref cbref(buffer);
+    TESTASSERT(real_number2.unpack(cbref) == 0);
+    if (std::isnan(real_number.value)) {
+      TESTASSERT(std::isnan(real_number2.value));
+    }
+    if (std::isinf(real_number.value) && real_number.value < 0) {
+      TESTASSERT(std::isinf(real_number2.value) && (real_number2.value < 0));
+    }
+    if (std::isinf(real_number.value) && real_number.value > 0) {
+      TESTASSERT(std::isinf(real_number2.value) && (real_number2.value > 0));
+    }
+  }
+}
+
+TEST(asn1_real_test, real_positive_number_pack_unpack)
+{
+  std::vector<float>                input_numbers = {0.15625, 1.0, 2.0, 4.0, 4.00001, 5.0, 5.0001, 1234.1234};
+  std::vector<std::vector<uint8_t>> output_bytes  = {{0x03, 0x80, 0xfb, 0x05},
+                                                     {0x03, 0x80, 0x00, 0x01},
+                                                     {0x03, 0x80, 0x01, 0x01},
+                                                     {0x03, 0x80, 0x02, 0x01},
+                                                     {0x05, 0x80, 0xeb, 0x80, 0x00, 0x15},
+                                                     {0x03, 0x80, 0x00, 0x05},
+                                                     {0x05, 0x80, 0xec, 0x50, 0x00, 0x69},
+                                                     {0x05, 0x80, 0xf3, 0x9a, 0x43, 0xf3}};
+
+  for (unsigned i = 0; i < input_numbers.size(); i++) {
+    std::vector<uint8_t> out_bytes = output_bytes[i];
+    real_s               real_number;
+    real_number.value = input_numbers[i];
+
+    srsran::byte_buffer buffer;
+    bit_ref             bref(buffer);
+    TESTASSERT(real_number.pack(bref) == 0);
+    TESTASSERT(std::equal(buffer.begin(), buffer.end(), out_bytes.begin(), out_bytes.end()));
+
+    int8_t   S = ((out_bytes[1] >> 6) & 0x1) ? -1 : 1;
+    int8_t   E = static_cast<int8_t>(out_bytes[2]);
+    uint32_t N = 0;
+    for (size_t j = 3; j < out_bytes.size(); ++j) {
+      N = (N << 8) | out_bytes[j];
+    }
+    float val = static_cast<float>(1.0 * S * N * pow(2, E));
+    TESTASSERT(real_number.value == val);
+
+    real_s   real_number2;
+    cbit_ref cbref(buffer);
+    TESTASSERT(real_number2.unpack(cbref) == 0);
+    TESTASSERT(real_number.value == real_number2.value);
+  }
+}
+
+TEST(asn1_real_test, real_negative_number_pack_unpack)
+{
+  std::vector<float>                input_numbers = {-0.15625, -1.0, -2.0, -4.0, -4.00001, -5.0, -5.0001, -1234.1234};
+  std::vector<std::vector<uint8_t>> output_bytes  = {{0x03, 0xc0, 0xfb, 0x05},
+                                                     {0x03, 0xc0, 0x00, 0x01},
+                                                     {0x03, 0xc0, 0x01, 0x01},
+                                                     {0x03, 0xc0, 0x02, 0x01},
+                                                     {0x05, 0xc0, 0xeb, 0x80, 0x00, 0x15},
+                                                     {0x03, 0xc0, 0x00, 0x05},
+                                                     {0x05, 0xc0, 0xec, 0x50, 0x00, 0x69},
+                                                     {0x05, 0xc0, 0xf3, 0x9a, 0x43, 0xf3}};
+
+  for (unsigned i = 0; i < input_numbers.size(); i++) {
+    std::vector<uint8_t> out_bytes = output_bytes[i];
+    real_s               real_number;
+    real_number.value = input_numbers[i];
+
+    srsran::byte_buffer buffer;
+    bit_ref             bref(buffer);
+    TESTASSERT(real_number.pack(bref) == 0);
+    TESTASSERT(std::equal(buffer.begin(), buffer.end(), out_bytes.begin(), out_bytes.end()));
+
+    int8_t   S = ((out_bytes[1] >> 6) & 0x1) ? -1 : 1;
+    int8_t   E = static_cast<int8_t>(out_bytes[2]);
+    uint32_t N = 0;
+    for (size_t j = 3; j < out_bytes.size(); ++j) {
+      N = (N << 8) | out_bytes[j];
+    }
+    float val = static_cast<float>(1.0 * S * N * pow(2, E));
+    TESTASSERT(real_number.value == val);
+
+    real_s   real_number2;
+    cbit_ref cbref(buffer);
+    TESTASSERT(real_number2.unpack(cbref) == 0);
+    TESTASSERT(real_number.value == real_number2.value);
+  }
 }
 
 TEST(asn1_varlength_field_test, pack)

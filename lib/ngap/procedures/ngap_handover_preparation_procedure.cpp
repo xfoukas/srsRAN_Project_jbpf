@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -19,11 +19,14 @@
  * and at http://www.gnu.org/licenses/.
  *
  */
+
 #include "ngap_handover_preparation_procedure.h"
 
 using namespace srsran;
 using namespace srsran::srs_cu_cp;
 using namespace asn1::ngap;
+
+#ifndef SRSRAN_HAS_ENTERPRISE
 
 async_task<ngap_handover_preparation_response>
 srsran::srs_cu_cp::start_ngap_handover_preparation(const ngap_handover_preparation_request& req,
@@ -36,10 +39,12 @@ srsran::srs_cu_cp::start_ngap_handover_preparation(const ngap_handover_preparati
                                                    timer_factory                            timers,
                                                    ngap_ue_logger&                          logger)
 {
-  logger.log_error("NG Handover failed. Cause: NG handover not supported.");
+  logger.log_info("NG Handover failed. Cause: NG handover not supported.");
   auto err_function = [](coro_context<async_task<ngap_handover_preparation_response>>& ctx) {
     CORO_BEGIN(ctx);
     CORO_RETURN(ngap_handover_preparation_response{false});
   };
   return launch_async(std::move(err_function));
 }
+
+#endif // SRSRAN_HAS_ENTERPRISE

@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -22,14 +22,15 @@
 
 #pragma once
 
-#include "procedures/e2_ric_control_procedure.h"
-#include "procedures/e2_setup_procedure.h"
-#include "procedures/e2_subscription_delete_procedure.h"
-#include "procedures/e2_subscription_setup_procedure.h"
+#include "../procedures/e2_ric_control_procedure.h"
+#include "../procedures/e2_setup_procedure.h"
+#include "../procedures/e2_subscription_delete_procedure.h"
+#include "../procedures/e2_subscription_setup_procedure.h"
+#include "e2_connection_handler.h"
 #include "srsran/asn1/e2ap/e2ap.h"
 #include "srsran/e2/e2.h"
 #include "srsran/e2/e2ap_configuration.h"
-#include "srsran/e2/e2sm/e2sm_factory.h"
+#include "srsran/e2/e2sm/e2sm.h"
 #include "srsran/e2/e2sm/e2sm_manager.h"
 #include "srsran/ran/nr_cgi.h"
 #include "srsran/support/async/fifo_async_task_scheduler.h"
@@ -43,19 +44,23 @@ class e2_event_manager;
 class e2_impl final : public e2_interface
 {
 public:
-  e2_impl(e2ap_configuration&      cfg_,
-          timer_factory            timers_,
-          e2_message_notifier&     e2_pdu_notifier_,
-          e2_subscription_manager& subscription_mngr_,
-          e2sm_manager&            e2sm_mngr_);
+  e2_impl(srslog::basic_logger&     logger_,
+          const e2ap_configuration& cfg_,
+          e2ap_e2agent_notifier&    agent_notifier_,
+          timer_factory             timers_,
+          e2_connection_client&     e2_client_,
+          e2_subscription_manager&  subscription_mngr_,
+          e2sm_manager&             e2sm_mngr_,
+          task_executor&            task_exec_);
 
-  void start() override{};
-  void stop() override{};
+  void start() override {}
+  void stop() override {}
 
   /// E2 connection manager functions.
+  bool                                  handle_e2_tnl_connection_request() override;
+  async_task<void>                      handle_e2_disconnection_request() override;
   async_task<e2_setup_response_message> handle_e2_setup_request(e2_setup_request_message& request) override;
   async_task<e2_setup_response_message> start_initial_e2_setup_routine() override;
-  async_task<void>                      handle_e2_disconnection_request() override;
 
   /// E2_event_ handler functions.
   void handle_connection_loss() override {}
@@ -92,6 +97,10 @@ private:
   /// \param[in] msg The received ric subscription delete request message.
   void handle_ric_subscription_delete_request(const asn1::e2ap::ric_sub_delete_request_s& msg);
 
+  /// \brief Notify about the reception of a E2 Connection Update message.
+  /// \param[in] msg The received E2 Connection Update message.
+  void handle_e2_connection_update(const asn1::e2ap::e2conn_upd_s& msg);
+
   /// \brief handle e2 setup response message from the ric interface.
   /// @param[in] msg  The received e2 setup response message.
   void handle_e2_setup_response(const e2_setup_response_message& msg);
@@ -104,20 +113,18 @@ private:
   /// \param[in] msg The received ran_function_id from the e2 setup response message.
   void set_allowed_ran_functions(const uint16_t ran_function_id);
 
-  srslog::basic_logger&                                logger;
-  e2ap_configuration&                                  cfg;
-  timer_factory                                        timers;
-  e2_message_notifier&                                 pdu_notifier;
-  std::map<uint16_t, asn1::e2ap::ran_function_item_s>  candidate_ran_functions;
-  std::map<uint16_t, asn1::e2ap::ran_function_item_s>  allowed_ran_functions;
-  std::map<std::string, std::unique_ptr<e2sm_handler>> e2sm_handlers;
-  e2_subscriber_mgmt&                                  subscription_mngr;
-  e2sm_manager&                                        e2sm_mngr;
-  e2_subscription_setup_procedure                      subscribe_proc;
-  e2_subscription_delete_procedure                     subscribe_delete_proc;
-  std::unique_ptr<e2_event_manager>                    events;
-  fifo_async_task_scheduler                            async_tasks;
-  unsigned                                             current_transaction_id = 0; // store current E2AP transaction id
+  srslog::basic_logger&                               logger;
+  const e2ap_configuration&                           cfg;
+  timer_factory                                       timers;
+  std::map<uint16_t, asn1::e2ap::ran_function_item_s> candidate_ran_functions;
+  std::map<uint16_t, asn1::e2ap::ran_function_item_s> allowed_ran_functions;
+  e2_subscription_proc&                               subscription_proc;
+  e2sm_manager&                                       e2sm_mngr;
+  std::unique_ptr<e2_event_manager>                   events;
+  fifo_async_task_scheduler                           async_tasks;
+
+  e2_connection_handler                connection_handler;
+  std::unique_ptr<e2_message_notifier> tx_pdu_notifier;
 };
 
 } // namespace srsran

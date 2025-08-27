@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -26,6 +26,7 @@
 #include "prach/prach_processor_test_doubles.h"
 #include "puxch/puxch_processor_test_doubles.h"
 #include "srsran/phy/lower/lower_phy_timing_context.h"
+#include "srsran/phy/lower/processors/lower_phy_cfo_controller.h"
 #include "srsran/phy/lower/processors/uplink/uplink_processor.h"
 #include "srsran/phy/lower/processors/uplink/uplink_processor_baseband.h"
 #include "srsran/phy/lower/processors/uplink/uplink_processor_factories.h"
@@ -81,7 +82,13 @@ private:
   std::vector<entry_t> entries;
 };
 
-class lower_phy_uplink_processor_spy : public lower_phy_uplink_processor
+class lower_phy_cfo_controller_spy : public lower_phy_cfo_controller
+{
+public:
+  bool schedule_cfo_command(time_point time, float cfo_Hz, float cfo_drift_Hz_s) override { return false; }
+};
+
+class lower_phy_uplink_processor_spy : public lower_phy_uplink_processor, private lower_phy_center_freq_controller
 {
 public:
   lower_phy_uplink_processor_spy(const uplink_processor_configuration& config_) : config(config_) {}
@@ -95,6 +102,10 @@ public:
     puxch_notifier = &puxch_notifier_;
   }
 
+  void stop() override {}
+
+  lower_phy_cfo_controller& get_cfo_control() override { return cfo_processor_spy; }
+
   const uplink_processor_configuration& get_config() const { return config; }
 
   prach_processor_request_handler& get_prach_request_handler() override { return prach_req_handler_spy; }
@@ -102,6 +113,8 @@ public:
   puxch_processor_request_handler& get_puxch_request_handler() override { return puxch_req_handler_spy; }
 
   uplink_processor_baseband& get_baseband() override { return uplink_proc_baseband_spy; }
+
+  lower_phy_center_freq_controller& get_carrier_center_frequency_control() override { return *this; }
 
   uplink_processor_notifier* get_notifier() { return notifier; }
 
@@ -125,10 +138,14 @@ public:
   }
 
 private:
+  // See interface for documentation.
+  bool set_carrier_center_frequency(double carrier_center_frequency_Hz) override { return false; }
+
   uplink_processor_configuration      config;
   uplink_processor_notifier*          notifier       = nullptr;
   prach_processor_notifier*           prach_notifier = nullptr;
   puxch_processor_notifier*           puxch_notifier = nullptr;
+  lower_phy_cfo_controller_spy        cfo_processor_spy;
   prach_processor_request_handler_spy prach_req_handler_spy;
   puxch_processor_request_handler_spy puxch_req_handler_spy;
   uplink_processor_baseband_spy       uplink_proc_baseband_spy;

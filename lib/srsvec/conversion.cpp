@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -172,21 +172,6 @@ static void convert_bf16_to_f_simd(float* out, const bf16_t* in, unsigned len)
 
   for (; i != len; ++i) {
     out[i] = to_float(in[i]);
-  }
-}
-
-static void convert_cf_to_cbf16_simd(cbf16_t* out, const cf_t* in, unsigned len)
-{
-  unsigned i = 0;
-
-#if SRSRAN_SIMD_CF_SIZE
-  for (unsigned end = (len / SRSRAN_SIMD_CF_SIZE) * SRSRAN_SIMD_CF_SIZE; i != end; i += SRSRAN_SIMD_CF_SIZE) {
-    srsran_simd_cbf16_storeu(out + i, srsran_simd_cfi_loadu(in + i));
-  }
-#endif // SRSRAN_SIMD_CF_SIZE
-
-  for (; i != len; ++i) {
-    out[i] = to_cf(in[i]);
   }
 }
 
@@ -363,8 +348,8 @@ static void convert_scaled_int16_to_bf16_simd(bf16_t* out, const int16_t* in, co
     __m256i input_vec_2 = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(in + i + 16));
 
     // Load the scale factor into a vector register.
-    __m512 scale_vec_1 = _mm512_load_ps(in_gain + i);
-    __m512 scale_vec_2 = _mm512_load_ps(in_gain + i + 16);
+    __m512 scale_vec_1 = _mm512_loadu_ps(in_gain + i);
+    __m512 scale_vec_2 = _mm512_loadu_ps(in_gain + i + 16);
 
     // Convert the int16_t elements to float and scale them.
     __m512 float_vec_1 = _mm512_cvtepi32_ps(_mm512_cvtepi16_epi32(input_vec_1));
@@ -382,7 +367,7 @@ static void convert_scaled_int16_to_bf16_simd(bf16_t* out, const int16_t* in, co
     __m256i input_vec = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(in + i));
 
     // Load the scale factor into a vector register.
-    __m512 scale_vec = _mm512_load_ps(in_gain + i);
+    __m512 scale_vec = _mm512_loadu_ps(in_gain + i);
 
     // Convert the int16_t elements to float and scale them.
     __m512 float_vec = _mm512_cvtepi32_ps(_mm512_cvtepi16_epi32(input_vec));
@@ -429,8 +414,8 @@ static void convert_scaled_int16_to_bf16_simd(bf16_t* out, const int16_t* in, co
     __m128i input_vec_2 = _mm_loadu_si128(reinterpret_cast<const __m128i*>(in + i + 8));
 
     // Load the scale factor into a vector register.
-    __m256 scale_vec_1 = _mm256_load_ps(in_gain + i);
-    __m256 scale_vec_2 = _mm256_load_ps(in_gain + i + 8);
+    __m256 scale_vec_1 = _mm256_loadu_ps(in_gain + i);
+    __m256 scale_vec_2 = _mm256_loadu_ps(in_gain + i + 8);
 
     // Convert the int16_t elements to float and scale them
     __m256 float_vec_1 = _mm256_cvtepi32_ps(_mm256_cvtepi16_epi32(input_vec_1));
@@ -512,7 +497,8 @@ void srsran::srsvec::convert(span<float> out, span<const bf16_t> in)
 void srsran::srsvec::convert(span<cbf16_t> out, span<const cf_t> in)
 {
   srsran_assert(in.size() == out.size(), "Invalid input or output span sizes");
-  convert_cf_to_cbf16_simd(out.data(), in.data(), in.size());
+  convert_f_to_bf16_simd(
+      reinterpret_cast<bf16_t*>(out.data()), reinterpret_cast<const float*>(in.data()), 2 * in.size());
 }
 
 void srsran::srsvec::convert(span<bf16_t> out, span<const float> in)

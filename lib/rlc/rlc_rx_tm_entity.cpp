@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -33,13 +33,13 @@ rlc_rx_tm_entity::rlc_rx_tm_entity(gnb_du_id_t                       gnb_du_id_,
                                    rb_id_t                           rb_id_,
                                    const rlc_rx_tm_config&           config,
                                    rlc_rx_upper_layer_data_notifier& upper_dn_,
-                                   rlc_metrics_aggregator&           metrics_agg_,
+                                   rlc_bearer_metrics_collector&     metrics_coll_,
                                    rlc_pcap&                         pcap_,
                                    task_executor&                    ue_executor,
                                    timer_manager&                    timers) :
-  rlc_rx_entity(gnb_du_id_, ue_index_, rb_id_, upper_dn_, metrics_agg_, pcap_, ue_executor, timers),
+  rlc_rx_entity(gnb_du_id_, ue_index_, rb_id_, upper_dn_, metrics_coll_, pcap_, ue_executor, timers),
   cfg(config),
-  pcap_context(ue_index, rb_id_, /* is_uplink */ true)
+  pcap_context(ue_index, rb_id, /* is_uplink */ true)
 {
   metrics.metrics_set_mode(rlc_mode::tm);
   logger.log_info("RLC TM created. {}", cfg);
@@ -57,7 +57,7 @@ rlc_rx_tm_entity::rlc_rx_tm_entity(gnb_du_id_t                       gnb_du_id_,
     jbpf_ctx.rlc_mode = JBPF_RLC_MODE_TM; 
     hook_rlc_ul_creation(&jbpf_ctx);
   }
-#endif  
+#endif    
 }
 
 void rlc_rx_tm_entity::handle_pdu(byte_buffer_slice buf)

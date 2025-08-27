@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -24,9 +24,9 @@
 #include "srsran/gateways/baseband/baseband_gateway_transmitter.h"
 #include "srsran/gateways/baseband/buffer/baseband_gateway_buffer_dynamic.h"
 #include "srsran/radio/radio_factory.h"
-#include "srsran/support/complex_normal_random.h"
 #include "srsran/support/executors/task_worker.h"
-#include "srsran/support/math_utils.h"
+#include "srsran/support/math/complex_normal_random.h"
+#include "srsran/support/math/math_utils.h"
 #include "srsran/support/srsran_assert.h"
 #include <algorithm>
 #include <cstdlib>
@@ -51,7 +51,7 @@ public:
   {
     if ((description.source == event_source::TRANSMIT) &&
         ((description.type == event_type::UNDERFLOW) || (description.type == event_type::LATE))) {
-      fmt::print("Underflow!\n");
+      fmt::println("Underflow!");
       ++tx_underflow_count;
       return;
     }
@@ -226,12 +226,12 @@ static void trx_srsran_write2(TRXState*         s1,
   }
 
   if (harq_ack_present) {
-    fmt::print("HARQ ACK is not implemented.\n");
+    fmt::println("HARQ ACK is not implemented.");
     return;
   }
 
   if (ta_present) {
-    fmt::print("TA is not implemented.\n");
+    fmt::println("TA is not implemented.");
     return;
   }
 
@@ -313,7 +313,7 @@ static int trx_srsran_read2(TRXState*        s1,
   baseband_gateway_receiver& receiver = context.session->get_baseband_gateway(rf_port_index).get_receiver();
 
   // if (md != nullptr && md->flags) {
-  //   fmt::print("Read2 flags {} not implemented.", md->flags);
+  //   fmt::println("Read2 flags {} not implemented.", md->flags);
   // }
 
   // Prepare buffer.
@@ -370,7 +370,7 @@ static int trx_srsran_start(TRXState* s1, const TRXDriverParams* p)
   // Create factory.
   context.factory = create_radio_factory(context.factory_str);
   if (!context.factory) {
-    fmt::print("Failed to create Radio factory {}.", context.factory_str);
+    fmt::println("Failed to create Radio factory {}.", context.factory_str);
     return -1;
   }
 
@@ -383,25 +383,29 @@ static int trx_srsran_start(TRXState* s1, const TRXDriverParams* p)
                 "Invalid sampling rate num={}, den={}.",
                 p->sample_rate[0].num,
                 p->sample_rate[0].den);
-  double sample_rate_Hz = static_cast<double>(p->sample_rate->num) / static_cast<double>(p->sample_rate[0].den);
+  double sampling_rate_Hz = static_cast<double>(p->sample_rate->num) / static_cast<double>(p->sample_rate[0].den);
 
   // Prepare noise generator.
   if (context.noise_spd.has_value()) {
     // Convert to standard deviation and initialize noise generator.
-    float noise_std = std::sqrt(convert_dB_to_power(context.noise_spd.value()) * sample_rate_Hz);
+    float noise_std = std::sqrt(convert_dB_to_power(context.noise_spd.value()) * sampling_rate_Hz);
     context.dist    = complex_normal_distribution<>(0.0, noise_std);
   }
 
   // Check that all sampling rates for all channels are the same.
   span<const TRXFraction> sampling_rates_frac =
       span<const TRXFraction>(p->sample_rate, context.rf_port_count).last(context.rf_port_count - 1);
-  std::all_of(sampling_rates_frac.begin(), sampling_rates_frac.end(), [&](const TRXFraction& x) {
-    return x.num == p->sample_rate[0].num && x.den == p->sample_rate[0].den;
-  });
+  srsran_assert(std::all_of(sampling_rates_frac.begin(),
+                            sampling_rates_frac.end(),
+                            [&](const TRXFraction& x) {
+                              return x.num == sampling_rates_frac.front().num &&
+                                     x.den == sampling_rates_frac.front().den;
+                            }),
+                "Not all sampling rates are equal.");
 
   // Prepare configuration.
   radio_configuration::radio configuration = {};
-  configuration.sampling_rate_hz           = sample_rate_Hz;
+  configuration.sampling_rate_Hz           = sampling_rate_Hz;
   configuration.log_level                  = context.log_level;
   configuration.otw_format                 = context.otw_format;
 
@@ -420,7 +424,7 @@ static int trx_srsran_start(TRXState* s1, const TRXDriverParams* p)
       tx_stream_config.channels.emplace_back();
       radio_configuration::channel& tx_channel_config = tx_stream_config.channels.back();
 
-      tx_channel_config.freq.center_frequency_hz  = static_cast<double>(p->tx_freq[tx_port_count]);
+      tx_channel_config.freq.center_frequency_Hz  = static_cast<double>(p->tx_freq[tx_port_count]);
       tx_channel_config.gain_dB                   = static_cast<double>(p->tx_gain[tx_port_count]);
       tx_channel_config.args                      = context.tx_port_args[tx_port_count];
       context.tx_port_channel_gain[rx_port_count] = p->tx_gain[tx_port_count];
@@ -437,7 +441,7 @@ static int trx_srsran_start(TRXState* s1, const TRXDriverParams* p)
       rx_stream_config.channels.emplace_back();
       radio_configuration::channel& rx_channel_config = rx_stream_config.channels.back();
 
-      rx_channel_config.freq.center_frequency_hz  = static_cast<double>(p->rx_freq[rx_port_count]);
+      rx_channel_config.freq.center_frequency_Hz  = static_cast<double>(p->rx_freq[rx_port_count]);
       rx_channel_config.gain_dB                   = static_cast<double>(p->rx_gain[rx_port_count]);
       rx_channel_config.args                      = context.rx_port_args[rx_port_count];
       context.rx_port_channel_gain[rx_port_count] = p->rx_gain[rx_port_count];
@@ -589,7 +593,7 @@ int trx_driver_init(TRXState* s1)
   for (unsigned port = 0; port < RADIO_MAX_NOF_PORTS; ++port) {
     // Create port field name.
     fmt::memory_buffer fmt_format_buf;
-    fmt::format_to(fmt_format_buf, "tx_port{}", port);
+    fmt::format_to(std::back_inserter(fmt_format_buf), "tx_port{}", port);
 
     // Get parameter from configuration.
     char* tx_port_char = trx_get_param_string(s1, to_string(fmt_format_buf).c_str());
@@ -605,7 +609,7 @@ int trx_driver_init(TRXState* s1)
   for (unsigned port = 0; port < RADIO_MAX_NOF_PORTS; ++port) {
     // Create port field name.
     fmt::memory_buffer fmt_format_buf;
-    fmt::format_to(fmt_format_buf, "rx_port{}", port);
+    fmt::format_to(std::back_inserter(fmt_format_buf), "rx_port{}", port);
 
     // Get parameter from configuration.
     char* rx_port_char = trx_get_param_string(s1, to_string(fmt_format_buf).c_str());

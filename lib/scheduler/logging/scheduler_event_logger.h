@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -22,9 +22,9 @@
 
 #pragma once
 
+#include "srsran/ran/pusch/pusch_tpmi_select.h"
 #include "srsran/scheduler/mac_scheduler.h"
 #include "srsran/srslog/srslog.h"
-#include "srsran/support/format_utils.h"
 
 namespace srsran {
 
@@ -97,6 +97,11 @@ public:
     slot_point                            sl_tx;
     scheduler_slot_handler::error_outcome outcome;
   };
+  struct srs_indication_event {
+    du_ue_index_t                         ue_index;
+    rnti_t                                rnti;
+    std::optional<pusch_tpmi_select_info> tpmi_info;
+  };
 
   scheduler_event_logger(du_cell_index_t cell_index_, pci_t pci_);
 
@@ -144,14 +149,12 @@ private:
   void enqueue_impl(const dl_mac_ce_indication& mac_ce);
   void enqueue_impl(const dl_buffer_state_indication_message& bs);
   void enqueue_impl(const phr_event& phr_ev);
+  void enqueue_impl(const srs_indication_event& srs_ev);
 
-  du_cell_index_t       cell_index;
-  pci_t                 pci;
+  const du_cell_index_t cell_index;
+  const pci_t           pci;
   srslog::basic_logger& logger;
   mode_t                mode = none;
-
-  // Mapping of cell indexes to pcis.
-  std::array<pci_t, MAX_NOF_DU_CELLS> cell_pcis{INVALID_PCI};
 
   fmt::memory_buffer fmtbuf;
 };

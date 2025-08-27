@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -29,9 +29,9 @@
 #include "srsran/phy/lower/processors/uplink/puxch/puxch_processor_baseband.h"
 #include "srsran/phy/lower/processors/uplink/uplink_processor_notifier.h"
 #include "srsran/srsvec/compare.h"
+#include "srsran/srsvec/copy.h"
 #include "srsran/srsvec/dot_prod.h"
-#include "srsran/srsvec/zero.h"
-#include "srsran/support/stats.h"
+#include "srsran/support/math/stats.h"
 
 using namespace srsran;
 
@@ -49,7 +49,8 @@ lower_phy_uplink_processor_impl::lower_phy_uplink_processor_impl(std::unique_ptr
   current_symbol_index(0),
   temp_buffer(config.nof_rx_ports, 2 * config.rate.get_dft_size(config.scs)),
   prach_proc(std::move(prach_proc_)),
-  puxch_proc(std::move(puxch_proc_))
+  puxch_proc(std::move(puxch_proc_)),
+  cfo_processor(config.rate)
 {
   srsran_assert(prach_proc, "Invalid PRACH processor.");
   srsran_assert(puxch_proc, "Invalid PUxCH processor.");
@@ -170,6 +171,10 @@ void lower_phy_uplink_processor_impl::process_symbol_boundary(const baseband_gat
   current_symbol_timestamp = timestamp;
   temp_buffer.resize(current_symbol_size);
 
+  if (i_symbol == 0) {
+    cfo_processor.next_cfo_command();
+  }
+
   // Process baseband.
   process_collecting(samples, timestamp);
 }
@@ -214,6 +219,15 @@ void lower_phy_uplink_processor_impl::process_collecting(const baseband_gateway_
     return;
   }
 
+  // Perform carrier frequency offset compensation.
+  for (unsigned i_channel = 0; i_channel != temp_buffer.get_nof_channels(); ++i_channel) {
+    span<cf_t> channel_buffer = temp_buffer.get_writer().get_channel_buffer(i_channel);
+    cfo_processor.process(channel_buffer);
+  }
+
+  // Advance CFO processor number of samples.
+  cfo_processor.advance(temp_buffer.get_nof_samples());
+
   // Process symbol by PRACH processor.
   prach_processor_baseband::symbol_context prach_context;
   prach_context.slot   = current_slot;
@@ -237,8 +251,10 @@ void lower_phy_uplink_processor_impl::process_collecting(const baseband_gateway_
     uint64_t total_processed_samples = 0;
     uint64_t nof_clipped_samples     = 0;
 
+    // Process received signal before demodulation.
     for (unsigned i_channel = 0; i_channel != nof_channels; ++i_channel) {
-      span<const cf_t> channel_buffer = temp_buffer.get_reader().get_channel_buffer(i_channel);
+      // Perform signal measurements.
+      span<cf_t> channel_buffer = temp_buffer.get_writer().get_channel_buffer(i_channel);
       avg_power.update(srsvec::average_power(channel_buffer));
       peak_power.update(srsvec::max_abs_element(channel_buffer).second);
       nof_clipped_samples += srsvec::count_if_part_abs_greater_than(channel_buffer, 0.95);
@@ -271,4 +287,14 @@ void lower_phy_uplink_processor_impl::process_collecting(const baseband_gateway_
   // Process next symbol with the remainder samples.
   baseband_gateway_buffer_reader_view samples2(samples, nof_samples, nof_input_samples - nof_samples);
   process_symbol_boundary(samples2, timestamp + nof_samples);
+}
+
+baseband_cfo_processor& lower_phy_uplink_processor_impl::get_cfo_control()
+{
+  return cfo_processor;
+}
+
+lower_phy_center_freq_controller& lower_phy_uplink_processor_impl::get_carrier_center_frequency_control()
+{
+  return puxch_proc->get_center_freq_control();
 }

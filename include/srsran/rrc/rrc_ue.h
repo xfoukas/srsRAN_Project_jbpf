@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -22,7 +22,6 @@
 
 #pragma once
 
-#include "rrc_types.h"
 #include "srsran/adt/byte_buffer.h"
 #include "srsran/adt/static_vector.h"
 #include "srsran/asn1/rrc_nr/ue_cap.h"
@@ -30,6 +29,7 @@
 #include "srsran/cu_cp/cu_cp_types.h"
 #include "srsran/cu_cp/cu_cp_ue_messages.h"
 #include "srsran/ran/rnti.h"
+#include "srsran/rrc/rrc_types.h"
 #include "srsran/rrc/rrc_ue_config.h"
 #include "srsran/security/security.h"
 #include "srsran/support/async/async_task.h"
@@ -46,6 +46,9 @@ struct dl_dcch_msg_s;
 
 namespace srsran {
 namespace srs_cu_cp {
+
+/// RRC states (3GPP 38.331 v15.5.1 Sec 4.2.1)
+enum class rrc_state { idle = 0, connected, connected_inactive };
 
 class rrc_ue_controller
 {
@@ -195,7 +198,7 @@ public:
   /// \brief Notify about the reception of an inter CU handove related RRC Reconfiguration Complete.
   virtual void on_inter_cu_ho_rrc_recfg_complete_received(const ue_index_t           ue_index,
                                                           const nr_cell_global_id_t& cgi,
-                                                          const unsigned             tac) = 0;
+                                                          const tac_t                tac) = 0;
 };
 
 struct rrc_reconfiguration_response_message {
@@ -252,8 +255,10 @@ public:
 
   /// \brief Await a RRC Reconfiguration Complete for a handover.
   /// \param[in] transaction_id The transaction ID of the RRC Reconfiguration Complete.
+  /// \param[in] timeout_ms The timeout for the RRC Reconfiguration Complete.
   /// \returns True if the RRC Reconfiguration Complete was received, false otherwise.
-  virtual async_task<bool> handle_handover_reconfiguration_complete_expected(uint8_t transaction_id) = 0;
+  virtual async_task<bool> handle_handover_reconfiguration_complete_expected(uint8_t                   transaction_id,
+                                                                             std::chrono::milliseconds timeout_ms) = 0;
 
   /// \brief Store UE capabilities received from the NGAP.
   /// \param[in] ue_capabilities The UE capabilities.
@@ -267,21 +272,32 @@ public:
   /// \returns The release context of the UE. If SRB1 is not created yet, a RrcReject message is contained in the
   /// release context, see section 5.3.15 in TS 38.331. Otherwise, a RrcRelease message is contained in the release
   /// context.
-  virtual rrc_ue_release_context get_rrc_ue_release_context(bool requires_rrc_msg) = 0;
+  virtual rrc_ue_release_context
+  get_rrc_ue_release_context(bool                                requires_rrc_msg,
+                             std::optional<std::chrono::seconds> release_wait_time = std::nullopt) = 0;
 
   /// \brief Retrieve RRC context of a UE to perform mobility (handover, reestablishment).
   /// \return Transfer context including UP context, security, SRBs, HO preparation, etc.
   virtual rrc_ue_transfer_context get_transfer_context() = 0;
 
   /// \brief Get the RRC measurement config for the current serving cell of the UE.
-  /// \params[in] current_meas_config The current meas config of the UE (if applicable).
+  /// \param[in] current_meas_config The current meas config of the UE (if applicable).
   /// \return The measurement config, if present.
-  virtual std::optional<rrc_meas_cfg> generate_meas_config(std::optional<rrc_meas_cfg> current_meas_config = {}) = 0;
+  virtual std::optional<rrc_meas_cfg>
+  generate_meas_config(std::optional<rrc_meas_cfg> current_meas_config = std::nullopt) = 0;
+
+  /// \brief Get the packed RRC measurement config for the current serving cell of the UE.
+  virtual byte_buffer get_packed_meas_config() = 0;
 
   /// \brief Handle the handover command RRC PDU.
   /// \param[in] cmd The handover command RRC PDU.
   /// \returns The handover RRC Reconfiguration PDU. If the handover command is invalid, the PDU is empty.
   virtual byte_buffer handle_rrc_handover_command(byte_buffer cmd) = 0;
+
+  /// \brief Handle the handover preparation info RRC PDU.
+  /// \param[in] pdu The handover preparation info RRC PDU.
+  /// \returns True if the handover preparation info was successfully handled, false otherwise.
+  virtual bool handle_rrc_handover_preparation_info(byte_buffer pdu) = 0;
 
   /// \brief Get the packed RRC Handover Command.
   /// \param[in] msg The new RRC Reconfiguration Request.
@@ -299,6 +315,13 @@ public:
 
   /// \brief Get all SRBs of the UE.
   virtual static_vector<srb_id_t, MAX_NOF_SRBS> get_srbs() = 0;
+
+  /// \brief Get the RRC connection state of the UE.
+  virtual rrc_state get_rrc_state() const = 0;
+
+  /// \brief Cancel an ongoing handover reconfiguration transaction.
+  /// \param[in] transaction_id The transaction ID of the handover reconfiguration transaction.
+  virtual void cancel_handover_reconfiguration_transaction(uint8_t transaction_id) = 0;
 };
 
 class rrc_ue_cu_cp_ue_notifier
@@ -407,7 +430,8 @@ public:
   /// \param[in] nci The cell id of the serving cell to update.
   /// \param[in] current_meas_config The current meas config of the UE (if applicable).
   virtual std::optional<rrc_meas_cfg>
-  on_measurement_config_request(nr_cell_identity nci, std::optional<rrc_meas_cfg> current_meas_config = {}) = 0;
+  on_measurement_config_request(nr_cell_identity            nci,
+                                std::optional<rrc_meas_cfg> current_meas_config = std::nullopt) = 0;
 
   /// \brief Submit measurement report for given UE to cell manager.
   virtual void on_measurement_report(const rrc_meas_results& meas_results) = 0;
@@ -421,6 +445,35 @@ public:
   /// \brief Get the RRC Reestablishment UE context to transfer it to new UE.
   /// \returns The RRC Reestablishment UE Context.
   virtual rrc_ue_reestablishment_context_response get_context() = 0;
+};
+
+class rrc_ue_event_notifier
+{
+public:
+  virtual ~rrc_ue_event_notifier() = default;
+
+  /// \brief Notify the RRC DU about a new RRC connection.
+  virtual void on_new_rrc_connection() = 0;
+
+  /// \brief Notify the RRC DU about a successful RRC release.
+  virtual void on_successful_rrc_release() = 0;
+
+  /// \brief Notify the RRC DU about a new RRC connection establishment attempt.
+  /// \param[in] cause The establishment cause of the RRC connection.
+  virtual void on_attempted_rrc_connection_establishment(establishment_cause_t cause) = 0;
+
+  /// \brief Notify the RRC DU about a successful RRC connection establishment.
+  /// \param[in] cause The establishment cause of the RRC connection.
+  virtual void on_successful_rrc_connection_establishment(establishment_cause_t cause) = 0;
+
+  /// \brief Notify the RRC DU about the attempted RRC connection re-establishment.
+  virtual void on_attempted_rrc_connection_reestablishment() = 0;
+
+  /// \brief Notify the RRC DU about the successful RRC connection re-establishment.
+  virtual void on_successful_rrc_connection_reestablishment() = 0;
+
+  /// \brief Notify the RRC DU about the successful RRC connection re-establishment fallback.
+  virtual void on_successful_rrc_connection_reestablishment_fallback() = 0;
 };
 
 /// Combined entry point for the RRC UE handling.

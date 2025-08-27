@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -29,15 +29,18 @@
 #ifdef __x86_64__
 #include "modulation_mapper_avx512_impl.h"
 #endif // __x86_64__
+#ifdef __aarch64__
+#include "modulation_mapper_neon_impl.h"
+#endif // __aarch64__
 
 using namespace srsran;
 
 namespace {
 
-class channel_modulation_sw_factory : public channel_modulation_factory
+class modulation_mapper_factory_impl : public modulation_mapper_factory
 {
 public:
-  std::unique_ptr<modulation_mapper> create_modulation_mapper() override
+  std::unique_ptr<modulation_mapper> create() override
   {
 #ifdef __x86_64__
     if (cpu_supports_feature(cpu_feature::avx512f) && cpu_supports_feature(cpu_feature::avx512bw) &&
@@ -45,22 +48,53 @@ public:
       return std::make_unique<modulation_mapper_avx512_impl>();
     }
 #endif // __x86_64__
+#ifdef __ARM_NEON
+    if (cpu_supports_feature(cpu_feature::neon)) {
+      return std::make_unique<modulation_mapper_neon_impl>();
+    }
+#endif // __ARM_NEON
 
     return std::make_unique<modulation_mapper_lut_impl>();
   }
-  std::unique_ptr<demodulation_mapper> create_demodulation_mapper() override
+};
+
+class demodulation_mapper_factory_impl : public demodulation_mapper_factory
+{
+public:
+  std::unique_ptr<demodulation_mapper> create() override { return std::make_unique<demodulation_mapper_impl>(); }
+};
+
+class evm_calculator_factory_impl : public evm_calculator_factory
+{
+public:
+  evm_calculator_factory_impl(std::shared_ptr<modulation_mapper_factory> modulator_factory_) :
+    modulator_factory(std::move(modulator_factory_))
   {
-    return std::make_unique<demodulation_mapper_impl>();
+    srsran_assert(modulator_factory, "Invalid modulator mapper factory.");
   }
-  std::unique_ptr<evm_calculator> create_evm_calculator() override
+
+  std::unique_ptr<evm_calculator> create() override
   {
-    return std::make_unique<evm_calculator_generic_impl>(create_modulation_mapper());
+    return std::make_unique<evm_calculator_generic_impl>(modulator_factory->create());
   }
+
+private:
+  std::shared_ptr<modulation_mapper_factory> modulator_factory;
 };
 
 } // namespace
 
-std::shared_ptr<channel_modulation_factory> srsran::create_channel_modulation_sw_factory()
+std::shared_ptr<modulation_mapper_factory> srsran::create_modulation_mapper_factory()
 {
-  return std::make_shared<channel_modulation_sw_factory>();
+  return std::make_shared<modulation_mapper_factory_impl>();
+}
+
+std::shared_ptr<demodulation_mapper_factory> srsran::create_demodulation_mapper_factory()
+{
+  return std::make_shared<demodulation_mapper_factory_impl>();
+}
+
+std::shared_ptr<evm_calculator_factory> srsran::create_evm_calculator_factory()
+{
+  return std::make_shared<evm_calculator_factory_impl>(create_modulation_mapper_factory());
 }

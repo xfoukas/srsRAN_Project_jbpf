@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -21,7 +21,6 @@
  */
 
 #include "srsran/scheduler/config/serving_cell_config_factory.h"
-#include "srsran/adt/optional.h"
 #include "srsran/ran/duplex_mode.h"
 #include "srsran/ran/pdcch/pdcch_candidates.h"
 #include "srsran/ran/pdcch/pdcch_type0_css_coreset_config.h"
@@ -304,12 +303,12 @@ srsran::config_helpers::generate_k2_candidates(cyclic_prefix cp, const tdd_ul_dl
 {
   static const unsigned SYMBOLS_PER_SLOT = get_nsymb_per_slot(cp);
 
-  const unsigned tdd_period_slots = nof_slots_per_tdd_period(tdd_cfg);
-  const unsigned nof_dl_slots     = nof_full_dl_slots_per_tdd_period(tdd_cfg);
-  const unsigned nof_ul_slots     = nof_full_ul_slots_per_tdd_period(tdd_cfg);
+  const unsigned tdd_period_slots  = nof_slots_per_tdd_period(tdd_cfg);
+  const unsigned nof_dl_slots      = nof_dl_slots_per_tdd_period(tdd_cfg);
+  const unsigned nof_full_ul_slots = nof_full_ul_slots_per_tdd_period(tdd_cfg);
 
-  // TODO: This algorithm may need to be revisited for partial UL slots to avoid that the partial slot is always picked.
   std::vector<pusch_time_domain_resource_allocation> result;
+  result.reserve(pusch_constants::MAX_NOF_PUSCH_TD_RES_ALLOCS);
   for (unsigned idx = 0; idx < tdd_period_slots and result.size() < pusch_constants::MAX_NOF_PUSCH_TD_RES_ALLOCS;
        ++idx) {
     // For every slot containing DL symbols check for corresponding k2 value.
@@ -327,7 +326,7 @@ srsran::config_helpers::generate_k2_candidates(cyclic_prefix cp, const tdd_ul_dl
           // k2 values are generated based on nof. DL slots i.e. one k2 value per DL slot. But in the case of UL
           // heavy TDD configuration we generate all applicable k2 value(s) for each DL slot to allow multiple UL PDCCH
           // allocations in the same slot for same UE.
-          if (nof_dl_slots > nof_ul_slots) {
+          if (nof_dl_slots > nof_full_ul_slots) {
             break;
           }
         }
@@ -360,7 +359,7 @@ srsran::config_helpers::make_default_ul_config_common(const cell_config_builder_
   cfg.freq_info_ul.freq_band_list.back().band = *params.band;
   cfg.init_ul_bwp.generic_params              = make_default_init_bwp(params);
   cfg.init_ul_bwp.rach_cfg_common.emplace();
-  cfg.init_ul_bwp.rach_cfg_common->rach_cfg_generic.zero_correlation_zone_config = 15;
+  cfg.init_ul_bwp.rach_cfg_common->rach_cfg_generic.zero_correlation_zone_config = 0;
   cfg.init_ul_bwp.rach_cfg_common->rach_cfg_generic.prach_config_index           = 16;
   if (band_helper::get_duplex_mode(params.band.value()) == duplex_mode::TDD) {
     std::optional<uint8_t> idx_found = prach_helper::find_valid_prach_config_index(
@@ -442,7 +441,7 @@ ssb_configuration srsran::config_helpers::make_default_ssb_config(const cell_con
 pusch_config srsran::config_helpers::make_default_pusch_config(const cell_config_builder_params_extended& params)
 {
   // Default PUSCH transmission scheme is codebook with at maximum one layer. It assumes the UE Capability parameter
-  // pusch-TransCoherence is fullCoherent.
+  // pusch-TransCoherence is nonCoherent.
   static constexpr unsigned                  max_rank        = 1;
   static constexpr tx_scheme_codebook_subset codebook_subset = tx_scheme_codebook_subset::non_coherent;
 
@@ -644,6 +643,10 @@ uplink_config srsran::config_helpers::make_default_ue_uplink_config(const cell_c
   pucch_cfg.format_1_common_param.emplace();
   pucch_cfg.format_2_common_param.emplace(
       pucch_common_all_formats{.max_c_rate = max_pucch_code_rate::dot_25, .simultaneous_harq_ack_csi = true});
+  pucch_cfg.format_3_common_param.emplace(
+      pucch_common_all_formats{.max_c_rate = max_pucch_code_rate::dot_25, .simultaneous_harq_ack_csi = true});
+  pucch_cfg.format_4_common_param.emplace(
+      pucch_common_all_formats{.max_c_rate = max_pucch_code_rate::dot_25, .simultaneous_harq_ack_csi = true});
 
   // >>> dl-DataToUl-Ack
   // TS38.213, 9.1.2.1 - "If a UE is provided dl-DataToUL-ACK, the UE does not expect to be indicated by DCI format 1_0
@@ -667,6 +670,18 @@ uplink_config srsran::config_helpers::make_default_ue_uplink_config(const cell_c
   const auto& res_f2 = std::get<pucch_format_2_3_cfg>(res_basic_f2.format_params);
   pucch_cfg.format_max_payload[pucch_format_to_uint(pucch_format::FORMAT_2)] = get_pucch_format2_max_payload(
       res_f2.nof_prbs, res_f2.nof_symbols, to_max_code_rate_float(pucch_cfg.format_2_common_param.value().max_c_rate));
+  pucch_cfg.set_1_format = pucch_format::FORMAT_2;
+
+  // Add the PUCCH power configuration.
+  auto& pucch_pw_ctrl          = pucch_cfg.pucch_pw_control.emplace();
+  pucch_pw_ctrl.delta_pucch_f0 = 0;
+  pucch_pw_ctrl.delta_pucch_f1 = 0;
+  pucch_pw_ctrl.delta_pucch_f2 = 0;
+  pucch_pw_ctrl.delta_pucch_f3 = 0;
+  pucch_pw_ctrl.delta_pucch_f4 = 0;
+  auto& pucch_pw_set           = pucch_pw_ctrl.p0_set.emplace_back();
+  pucch_pw_set.id              = 0U;
+  pucch_pw_set.value           = 0;
 
   // > PUSCH config.
   ul_config.init_ul_bwp.pusch_cfg.emplace(make_default_pusch_config());
@@ -690,17 +705,23 @@ static csi_helper::csi_builder_params make_default_csi_builder_params(const cell
 {
   // Parameters used to generate list of CSI resources.
   csi_helper::csi_builder_params csi_params{};
-  csi_params.pci           = params.pci;
-  csi_params.nof_rbs       = params.cell_nof_crbs;
-  csi_params.nof_ports     = params.nof_dl_ports;
-  csi_params.csi_rs_period = csi_helper::get_max_csi_rs_period(params.scs_common);
+  csi_params.pci            = params.pci;
+  csi_params.nof_rbs        = params.cell_nof_crbs;
+  csi_params.nof_ports      = params.nof_dl_ports;
+  csi_params.max_nof_layers = params.max_nof_layers.value_or(params.nof_dl_ports);
+  csi_params.csi_rs_period  = csi_helper::get_max_csi_rs_period(params.scs_common);
 
   if (band_helper::get_duplex_mode(params.band.value()) == duplex_mode::TDD) {
     // Set a default CSI report slot offset that falls in an UL slot.
     const auto& tdd_pattern = *params.tdd_ul_dl_cfg_common;
 
+    constexpr unsigned default_ssb_period_ms = 10U;
+
+    const unsigned max_csi_symbol = *std::max_element(csi_params.tracking_csi_ofdm_symbol_indices.begin(),
+                                                      csi_params.tracking_csi_ofdm_symbol_indices.end());
+
     if (not csi_helper::derive_valid_csi_rs_slot_offsets(
-            csi_params, std::nullopt, std::nullopt, std::nullopt, tdd_pattern)) {
+            csi_params, std::nullopt, std::nullopt, std::nullopt, tdd_pattern, max_csi_symbol, default_ssb_period_ms)) {
       report_fatal_error("Failed to find valid csi-MeasConfig");
     }
 
@@ -731,6 +752,8 @@ pdsch_config srsran::config_helpers::make_default_pdsch_config(const cell_config
   pdsch_cfg.rbg_sz    = rbg_size::config1;
   pdsch_cfg.prb_bndlg.bundling.emplace<prb_bundling::static_bundling>(
       prb_bundling::static_bundling({.sz = prb_bundling::static_bundling::bundling_size::wideband}));
+
+  pdsch_cfg.vrb_to_prb_interleaving = vrb_to_prb::mapping_type::non_interleaved;
 
   if (params.csi_rs_enabled) {
     const csi_helper::csi_builder_params csi_params = make_default_csi_builder_params(params);
@@ -795,9 +818,6 @@ srsran::config_helpers::create_default_initial_ue_serving_cell_config(const cell
     // Generate CSI resources.
     serv_cell.csi_meas_cfg = make_csi_meas_config(params);
   }
-
-  // > TAG-ID.
-  serv_cell.tag_id = static_cast<tag_id_t>(0);
 
   return serv_cell;
 }

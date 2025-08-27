@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -44,12 +44,14 @@ using namespace srs_cu_cp;
 
 // ------ e1ap_cu_cp_impl ------
 
-e1ap_cu_cp_impl::e1ap_cu_cp_impl(e1ap_message_notifier&         e1ap_pdu_notifier_,
+e1ap_cu_cp_impl::e1ap_cu_cp_impl(const e1ap_configuration&      e1ap_cfg_,
+                                 e1ap_message_notifier&         e1ap_pdu_notifier_,
                                  e1ap_cu_up_processor_notifier& e1ap_cu_up_processor_notifier_,
                                  e1ap_cu_cp_notifier&           cu_cp_notifier_,
                                  timer_manager&                 timers_,
                                  task_executor&                 ctrl_exec_,
                                  unsigned                       max_nof_supported_ues_) :
+  e1ap_cfg(e1ap_cfg_),
   logger(srslog::fetch_basic_logger("CU-CP-E1")),
   pdu_notifier(e1ap_message_notifier_with_logging(*this, e1ap_pdu_notifier_)),
   cu_up_processor_notifier(e1ap_cu_up_processor_notifier_),
@@ -140,7 +142,7 @@ e1ap_cu_cp_impl::handle_bearer_context_setup_request(const e1ap_bearer_context_s
 #endif
 
   return launch_async<bearer_context_setup_procedure>(
-      e1ap_msg, ue_ctxt.bearer_ev_mng, ue_ctxt_list, pdu_notifier, ue_ctxt.logger);
+      e1ap_cfg, e1ap_msg, ue_ctxt.bearer_ev_mng, ue_ctxt_list, pdu_notifier, ue_ctxt.logger);
 }
 
 async_task<e1ap_bearer_context_modification_response>
@@ -177,7 +179,7 @@ e1ap_cu_cp_impl::handle_bearer_context_modification_request(const e1ap_bearer_co
 #endif
 
   return launch_async<bearer_context_modification_procedure>(
-      e1ap_msg, ue_ctxt.bearer_ev_mng, pdu_notifier, ue_ctxt.logger);
+      e1ap_cfg, e1ap_msg, ue_ctxt.bearer_ev_mng, pdu_notifier, ue_ctxt.logger);
 }
 
 async_task<void>
@@ -209,7 +211,8 @@ e1ap_cu_cp_impl::handle_bearer_context_release_command(const e1ap_bearer_context
     hook_e1_cucp_bearer_context_release(&bearer_info);
 #endif
 
-  return launch_async<bearer_context_release_procedure>(e1ap_msg, command.ue_index, ue_ctxt_list, pdu_notifier);
+  return launch_async<bearer_context_release_procedure>(
+      e1ap_cfg, e1ap_msg, command.ue_index, ue_ctxt_list, pdu_notifier);
 }
 
 void e1ap_cu_cp_impl::handle_message(const e1ap_message& msg)
@@ -339,7 +342,7 @@ void e1ap_cu_cp_impl::handle_bearer_context_inactivity_notification(
           }))) {
     logger.warning("ue={}: Dropping InactivityNotification. UE does not exist", ue_ctxt.ue_ids.ue_index);
   }
-};
+}
 
 void e1ap_cu_cp_impl::handle_successful_outcome(const asn1::e1ap::successful_outcome_s& outcome)
 {
@@ -349,7 +352,7 @@ void e1ap_cu_cp_impl::handle_successful_outcome(const asn1::e1ap::successful_out
   if (cu_ue_id.has_value()) {
     if (not ue_ctxt_list.contains(*cu_ue_id)) {
       logger.warning("cu_ue={}: Discarding received \"{}\". Cause: UE was not found.",
-                     *cu_ue_id,
+                     fmt::underlying(*cu_ue_id),
                      outcome.value.type().to_string());
       return;
     }
@@ -389,7 +392,7 @@ void e1ap_cu_cp_impl::handle_unsuccessful_outcome(const asn1::e1ap::unsuccessful
   if (cu_ue_id.has_value()) {
     if (not ue_ctxt_list.contains(*cu_ue_id)) {
       logger.warning("cu_ue={}: Discarding received \"{}\". Cause: UE was not found.",
-                     *cu_ue_id,
+                     fmt::underlying(*cu_ue_id),
                      outcome.value.type().to_string());
       return;
     }
@@ -468,7 +471,7 @@ void e1ap_cu_cp_impl::log_pdu(bool is_rx, const e1ap_message& e1ap_pdu)
     }
   }
 
-  log_e1ap_pdu(logger, is_rx, ue_idx, e1ap_pdu, logger.debug.enabled());
+  log_e1ap_pdu(logger, is_rx, ue_idx, e1ap_pdu, e1ap_cfg.json_log_enabled);
 }
 
 // ---- e1ap_message_notifier_with_logging

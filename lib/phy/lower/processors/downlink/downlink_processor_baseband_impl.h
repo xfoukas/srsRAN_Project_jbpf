@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -21,6 +21,8 @@
  */
 
 #pragma once
+
+#include "../baseband_cfo_processor.h"
 #include "srsran/adt/blocking_queue.h"
 #include "srsran/gateways/baseband/buffer/baseband_gateway_buffer_dynamic.h"
 #include "srsran/phy/lower/amplitude_controller/amplitude_controller.h"
@@ -29,9 +31,11 @@
 #include "srsran/phy/lower/processors/downlink/downlink_processor_notifier.h"
 #include "srsran/phy/lower/processors/downlink/pdxch/pdxch_processor.h"
 #include "srsran/phy/lower/processors/downlink/pdxch/pdxch_processor_baseband.h"
+#include "srsran/phy/lower/processors/lower_phy_tx_time_offset_controller.h"
 #include "srsran/phy/lower/sampling_rate.h"
 #include "srsran/ran/cyclic_prefix.h"
-#include "srsran/support/stats.h"
+#include "srsran/srsvec/copy.h"
+#include "srsran/support/math/stats.h"
 
 namespace srsran {
 
@@ -179,7 +183,7 @@ private:
 } // namespace detail
 
 /// Implements a software generic lower PHY downlink baseband processor.
-class downlink_processor_baseband_impl : public downlink_processor_baseband
+class downlink_processor_baseband_impl : public downlink_processor_baseband, public lower_phy_tx_time_offset_controller
 {
 public:
   /// \brief Constructs a software generic lower PHY downlink processor that can process downlink resource grids.
@@ -190,12 +194,18 @@ public:
                                    amplitude_controller&                            amplitude_control_,
                                    const downlink_processor_baseband_configuration& config);
 
-  // See interface for documentation.
+  /// Connect the processor to a notifier.
   void connect(downlink_processor_notifier& notifier_) { notifier = &notifier_; }
+
+  /// Gets the CFO processor control interface.
+  baseband_cfo_processor& get_cfo_control() { return cfo_processor; }
 
   // See interface for documentation.
   baseband_gateway_transmitter_metadata process(baseband_gateway_buffer_writer& buffer,
                                                 baseband_gateway_timestamp      timestamp) override;
+
+  // See the lower_phy_tx_time_offset_controller interface for documentation.
+  void set_tx_time_offset(phy_time_unit tx_time_offset) override;
 
 private:
   /// \brief Processes a new symbol.
@@ -206,14 +216,20 @@ private:
   /// \return \c true if the symbol has been processed, \c false otherwise.
   bool process_new_symbol(baseband_gateway_buffer_writer& buffer, slot_point slot, unsigned i_symbol);
 
+  /// Transmit time offset in samples.
+  std::atomic<int> tx_time_offset = 0;
   /// PDxCH baseband processor.
   pdxch_processor_baseband& pdxch_proc_baseband;
   /// Amplitude control.
   amplitude_controller& amplitude_control;
   /// Number of slots notified in advanced in the TTI boundary.
   unsigned nof_slot_tti_in_advance;
+  /// Number of slots notified in advanced in the TTI boundary in nanoseconds.
+  std::chrono::nanoseconds nof_slot_tti_in_advance_ns;
   /// Sector identifier.
   unsigned sector_id;
+  /// Baseband sampling rate.
+  sampling_rate rate;
   /// Subcarrier spacing.
   subcarrier_spacing scs;
   /// Number of receive ports.
@@ -232,6 +248,8 @@ private:
   detail::baseband_symbol_buffer temp_buffer;
   /// Last notified slot boundary.
   std::optional<slot_point> last_notified_slot;
+  /// Carrier Frequency Offset processor.
+  baseband_cfo_processor cfo_processor;
 };
 
 } // namespace srsran

@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -22,15 +22,12 @@
 
 #pragma once
 
-#include "ofh_data_flow_cplane_scheduling_commands_impl.h"
-#include "ofh_data_flow_uplane_downlink_data_impl.h"
 #include "ofh_downlink_handler_impl.h"
-#include "ofh_downlink_manager.h"
 #include "ofh_message_transmitter_impl.h"
+#include "ofh_transmitter_metrics_collector_impl.h"
 #include "ofh_transmitter_ota_symbol_task_dispatcher.h"
 #include "ofh_uplink_request_handler_impl.h"
-#include "sequence_identifier_generator.h"
-#include "srsran/ofh/compression/iq_compressor.h"
+#include "ofh_uplink_request_handler_task_dispatcher.h"
 #include "srsran/ofh/transmitter/ofh_transmitter.h"
 #include "srsran/ofh/transmitter/ofh_transmitter_configuration.h"
 
@@ -41,16 +38,32 @@ namespace ofh {
 struct transmitter_impl_dependencies {
   /// Log.
   srslog::basic_logger* logger = nullptr;
+  /// Error notifier.
+  error_notifier* err_notifier = nullptr;
   /// Transmitter task executor.
   task_executor* executor = nullptr;
-  /// Downlink manager.
-  std::unique_ptr<downlink_manager> dl_manager;
-  /// Uplink request handler.
-  std::unique_ptr<uplink_request_handler> ul_request_handler;
-  /// Ethernet gateway.
-  std::unique_ptr<ether::gateway> eth_gateway;
-  /// Ethernet frame pool.
-  std::shared_ptr<ether::eth_frame_pool> frame_pool;
+  /// Downlink task executor.
+  task_executor* dl_executor = nullptr;
+  /// Data flow for downlink Control-Plane.
+  std::unique_ptr<data_flow_cplane_scheduling_commands> dl_df_cplane;
+  /// Data flow for downlink User-Plane.
+  std::unique_ptr<data_flow_uplane_downlink_data> dl_df_uplane;
+  /// Data flow for uplink Control-Plane scheduling commands.
+  std::unique_ptr<data_flow_cplane_scheduling_commands> ul_df_cplane;
+  /// Uplink slot context repository.
+  std::shared_ptr<uplink_context_repository> ul_slot_repo;
+  /// Uplink PRACH context repository.
+  std::shared_ptr<prach_context_repository> ul_prach_repo;
+  /// Notified uplink grid symbol repository.
+  std::shared_ptr<uplink_notified_grid_symbol_repository> notifier_symbol_repo;
+  /// Ethernet transmitter.
+  std::unique_ptr<ether::transmitter> eth_transmitter;
+  /// Ethernet frame pool downlink Control-Plane.
+  std::shared_ptr<ether::eth_frame_pool> frame_pool_dl_cp;
+  /// Ethernet frame pool uplink Control-Plane.
+  std::shared_ptr<ether::eth_frame_pool> frame_pool_ul_cp;
+  /// Ethernet frame pool downlink User-Plane.
+  std::shared_ptr<ether::eth_frame_pool> frame_pool_dl_up;
 };
 
 class transmitter_impl : public transmitter
@@ -67,14 +80,15 @@ public:
   // See interface for documentation.
   ota_symbol_boundary_notifier& get_ota_symbol_boundary_notifier() override;
 
-  // See interface for documentation.
-  void set_error_notifier(error_notifier& notifier) override;
+  transmitter_metrics_collector* get_metrics_collector() override;
 
 private:
-  std::unique_ptr<downlink_manager>       dl_manager;
-  std::unique_ptr<uplink_request_handler> ul_request_handler;
-  message_transmitter_impl                msg_transmitter;
-  transmitter_ota_symbol_task_dispatcher  ota_dispatcher;
+  downlink_handler_impl                  dl_handler;
+  uplink_request_handler_impl            ul_request_handler;
+  uplink_request_handler_task_dispatcher ul_task_dispatcher;
+  message_transmitter_impl               msg_transmitter;
+  transmitter_ota_symbol_task_dispatcher ota_dispatcher;
+  transmitter_metrics_collector_impl     metrics_collector;
 };
 
 } // namespace ofh

@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -101,8 +101,8 @@ void pusch_decoder_empty_impl::decoder_buffer_impl::on_end_softbits()
     }
   }
 
-  // Release buffer.
-  rm_buffer.release();
+  // Unlock buffer for a retransmissions.
+  rm_buffer.unlock();
 
   // Notify completion.
   notifier->on_sch_data(result);

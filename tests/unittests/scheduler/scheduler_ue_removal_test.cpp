@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -23,9 +23,9 @@
 /// \file
 /// \brief In this file, we test the correct behaviour of the scheduler when removing UEs.
 
-#include "test_utils/config_generators.h"
 #include "test_utils/result_test_helpers.h"
-#include "test_utils/scheduler_test_bench.h"
+#include "test_utils/scheduler_test_simulator.h"
+#include "tests/test_doubles/scheduler/scheduler_config_helper.h"
 #include "srsran/scheduler/resource_grid_util.h"
 #include <gtest/gtest.h>
 
@@ -49,18 +49,18 @@ srsran::log_sink_spy& test_spy = []() -> srsran::log_sink_spy& {
   return *spy;
 }();
 
-class sched_ue_removal_test : public scheduler_test_bench, public ::testing::Test
+class sched_ue_removal_test : public scheduler_test_simulator, public ::testing::Test
 {
 protected:
-  sched_ue_removal_test() { add_cell(test_helpers::make_default_sched_cell_configuration_request()); }
+  sched_ue_removal_test() { add_cell(sched_config_helper::make_default_sched_cell_configuration_request()); }
 
   void add_ue(du_ue_index_t ue_index, rnti_t rnti)
   {
     // Create a UE with a DRB active.
-    auto ue_cfg     = test_helpers::create_default_sched_ue_creation_request({}, {test_lcid_drb});
+    auto ue_cfg     = sched_config_helper::create_default_sched_ue_creation_request({}, {test_lcid_drb});
     ue_cfg.ue_index = ue_index;
     ue_cfg.crnti    = rnti;
-    scheduler_test_bench::add_ue(ue_cfg, true);
+    scheduler_test_simulator::add_ue(ue_cfg, true);
   }
 
   bool is_rnti_scheduled(rnti_t rnti) const
@@ -153,9 +153,7 @@ TEST_F(sched_ue_removal_test, when_ue_has_pending_harqs_then_scheduler_waits_for
         << "UE allocated despite having no SRB pending bytes and being marked for removal";
 
     pucch = find_ue_pucch(rnti, *last_sched_res_list[to_du_cell_index(0)]);
-    if (pucch != nullptr and
-        ((pucch->format == srsran::pucch_format::FORMAT_1 and pucch->format_1.harq_ack_nof_bits > 0) or
-         (pucch->format == srsran::pucch_format::FORMAT_2 and pucch->format_2.harq_ack_nof_bits > 0))) {
+    if (pucch != nullptr and pucch->uci_bits.harq_ack_nof_bits > 0) {
       break;
     }
   }
@@ -267,7 +265,7 @@ TEST_F(sched_ue_removal_test,
 
     const pucch_info* pucch = find_ue_pucch(rnti, *last_sched_res_list[to_du_cell_index(0)]);
     if (pucch != nullptr and
-        (pucch->format == pucch_format::FORMAT_1 and pucch->format_1.sr_bits != sr_nof_bits::no_sr)) {
+        (pucch->format() == pucch_format::FORMAT_1 and pucch->uci_bits.sr_bits != sr_nof_bits::no_sr)) {
       // UCI indication sets SR indication.
       uci_indication uci;
       uci.cell_index = to_du_cell_index(0);

@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -23,7 +23,7 @@
 #include "ssb_scheduler.h"
 #include "srsran/ran/frame_types.h"
 #include "srsran/ran/pdcch/pdcch_type0_css_coreset_config.h"
-#include "srsran/ran/ssb_mapping.h"
+#include "srsran/ran/ssb/ssb_mapping.h"
 #include "srsran/srslog/srslog.h"
 
 using namespace srsran;
@@ -36,11 +36,6 @@ ssb_scheduler::ssb_scheduler(const cell_configuration& cfg_) :
 
 void ssb_scheduler::run_slot(cell_resource_allocator& res_alloc, const slot_point& sl_point)
 {
-  // Only FR1 are supported in this implementation.
-  const uint32_t freq_arfcn = cell_cfg.dl_carrier.arfcn_f_ref;
-  srsran_assert(freq_arfcn < static_cast<uint32_t>(FR1_MAX_FREQUENCY_ARFCN),
-                "Frenquencies in the range FR2 not supported");
-
   if (first_run_slot) {
     const unsigned ssb_period_slots = ssb_period * sl_point.nof_slots_per_subframe();
     // First call to run_slot. Schedule SSBs when relevant across cell resource grid.

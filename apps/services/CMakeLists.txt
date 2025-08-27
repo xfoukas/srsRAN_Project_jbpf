@@ -1,5 +1,5 @@
 #
-# Copyright 2021-2024 Software Radio Systems Limited
+# Copyright 2021-2025 Software Radio Systems Limited
 #
 # This file is part of srsRAN
 #
@@ -18,13 +18,21 @@
 # and at http://www.gnu.org/licenses/.
 #
 
+# Do not build by default.
+set_directory_properties(PROPERTIES EXCLUDE_FROM_ALL TRUE)
+
+add_subdirectory(app_resource_usage)
 add_subdirectory(buffer_pool)
-add_subdirectory(logger)
+add_subdirectory(cmdline)
+add_subdirectory(metrics)
+add_subdirectory(remote_control)
+add_subdirectory(worker_manager)
 
-set(SOURCES
-        stdin_command_dispatcher.cpp
-        worker_manager.cpp)
-
-add_library(srsran_app_services STATIC ${SOURCES})
-target_include_directories(srsran_app_services PRIVATE ${CMAKE_SOURCE_DIR})
-target_link_libraries(srsran_app_services srsran_logger_app_service srsran_buffer_pool_app_service)
+add_library(srsran_app_services INTERFACE)
+target_link_libraries(srsran_app_services INTERFACE
+        srsran_buffer_pool_app_service
+        srsran_cmdline_app_service
+        srsran_metrics_app_service
+        srsran_remote_control_app_service
+        srsran_resource_usage_app_service
+        srsran_worker_manager_app_service)

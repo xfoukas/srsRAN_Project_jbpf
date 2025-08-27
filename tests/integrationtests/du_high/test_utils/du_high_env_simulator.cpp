@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -31,6 +31,8 @@
 #include "srsran/du/du_cell_config_helpers.h"
 #include "srsran/du/du_high/du_high_factory.h"
 #include "srsran/du/du_high/du_qos_config_helpers.h"
+#include "srsran/mac/mac_cell_timing_context.h"
+#include "srsran/scheduler/config/scheduler_expert_config_factory.h"
 #include "srsran/support/error_handling.h"
 #include "srsran/support/test_utils.h"
 
@@ -45,8 +47,12 @@ class dummy_du_f1ap_tx_pdu_notifier : public f1ap_message_notifier
 public:
   dummy_du_f1ap_tx_pdu_notifier(task_executor&                         test_exec_,
                                 std::vector<f1ap_message>&             last_f1ap_msgs_,
-                                std::unique_ptr<f1ap_message_notifier> du_rx_notifier_) :
-    test_exec(test_exec_), last_f1ap_msgs(last_f1ap_msgs_), du_rx_notifier(std::move(du_rx_notifier_))
+                                std::unique_ptr<f1ap_message_notifier> du_rx_notifier_,
+                                bool                                   cell_start_on_f1_setup_) :
+    test_exec(test_exec_),
+    last_f1ap_msgs(last_f1ap_msgs_),
+    du_rx_notifier(std::move(du_rx_notifier_)),
+    cell_start_on_f1_setup(cell_start_on_f1_setup_)
   {
   }
 
@@ -55,7 +61,7 @@ public:
     if (msg.pdu.type().value == asn1::f1ap::f1ap_pdu_c::types_opts::init_msg) {
       if (msg.pdu.init_msg().proc_code == ASN1_F1AP_ID_F1_SETUP) {
         // Auto-schedule CU response.
-        du_rx_notifier->on_new_message(test_helpers::generate_f1_setup_response(msg));
+        du_rx_notifier->on_new_message(test_helpers::generate_f1_setup_response(msg, cell_start_on_f1_setup));
       } else if (msg.pdu.init_msg().proc_code == ASN1_F1AP_ID_F1_REMOVAL) {
         // Auto-schedule CU response.
         du_rx_notifier->on_new_message(test_helpers::generate_f1_removal_response(msg));
@@ -76,6 +82,7 @@ public:
   task_executor&                         test_exec;
   std::vector<f1ap_message>&             last_f1ap_msgs;
   std::unique_ptr<f1ap_message_notifier> du_rx_notifier;
+  const bool                             cell_start_on_f1_setup;
 };
 
 } // namespace
@@ -140,12 +147,16 @@ void phy_cell_test_dummy::on_cell_results_completion(slot_point slot)
   cached_ul_res  = {};
 }
 
-dummy_f1c_test_client::dummy_f1c_test_client(task_executor& test_exec_) : test_exec(test_exec_) {}
+dummy_f1c_test_client::dummy_f1c_test_client(task_executor& test_exec_, bool cell_start_on_f1_setup_) :
+  cell_start_on_f1_setup(cell_start_on_f1_setup_), test_exec(test_exec_)
+{
+}
 
 std::unique_ptr<f1ap_message_notifier>
 dummy_f1c_test_client::handle_du_connection_request(std::unique_ptr<f1ap_message_notifier> du_rx_pdu_notifier)
 {
-  return std::make_unique<dummy_du_f1ap_tx_pdu_notifier>(test_exec, last_f1ap_msgs, std::move(du_rx_pdu_notifier));
+  return std::make_unique<dummy_du_f1ap_tx_pdu_notifier>(
+      test_exec, last_f1ap_msgs, std::move(du_rx_pdu_notifier), cell_start_on_f1_setup);
 }
 
 static void init_loggers()
@@ -161,41 +172,67 @@ static void init_loggers()
   srslog::init();
 }
 
-du_high_env_simulator::du_high_env_simulator(du_high_env_sim_params params) :
-  cu_notifier(workers.test_worker),
-  phy(params.nof_cells, workers.test_worker),
-  du_high_cfg([this, params]() {
-    init_loggers();
-
-    du_high_configuration cfg{};
-    cfg.exec_mapper                          = &workers.exec_mapper;
-    cfg.f1c_client                           = &cu_notifier;
-    cfg.f1u_gw                               = &cu_up_sim;
-    cfg.phy_adapter                          = &phy;
-    cfg.timers                               = &timers;
-    cfg.ran.sched_cfg.log_broadcast_messages = false;
-
-    cfg.ran.cells.reserve(params.nof_cells);
-    auto builder_params =
-        params.builder_params.has_value() ? params.builder_params.value() : cell_config_builder_params{};
-    for (unsigned i = 0; i < params.nof_cells; ++i) {
-      builder_params.pci = (pci_t)i;
-      cfg.ran.cells.push_back(config_helpers::make_default_du_cell_config(builder_params));
-      cfg.ran.cells.back().nr_cgi.nci = nr_cell_identity::create(i).value();
-      if (params.pucch_cfg.has_value()) {
-        cfg.ran.cells.back().pucch_cfg = params.pucch_cfg.value();
-      }
+du_high_configuration srs_du::create_du_high_configuration(const du_high_env_sim_params& params)
+{
+  du_high_configuration cfg{};
+  cfg.ran.sched_cfg.log_broadcast_messages = false;
+  cfg.ran.cells.reserve(params.nof_cells);
+  auto builder_params =
+      params.builder_params.has_value() ? params.builder_params.value() : cell_config_builder_params{};
+  for (unsigned i = 0; i < params.nof_cells; ++i) {
+    builder_params.pci = (pci_t)i;
+    auto du_cell_cfg   = config_helpers::make_default_du_cell_config(builder_params);
+    if (params.prach_frequency_start.has_value()) {
+      du_cell_cfg.ul_cfg_common.init_ul_bwp.rach_cfg_common.value().rach_cfg_generic.msg1_frequency_start =
+          params.prach_frequency_start.value();
     }
+    du_cell_cfg.ue_ded_serv_cell_cfg.init_dl_bwp.pdsch_cfg->mcs_table = pdsch_mcs_table::qam256;
+    cfg.ran.cells.push_back(du_cell_cfg);
+    cfg.ran.cells.back().nr_cgi.nci = nr_cell_identity::create(i).value();
+    if (params.pucch_cfg.has_value()) {
+      cfg.ran.cells.back().pucch_cfg = params.pucch_cfg.value();
+    }
+    cfg.ran.mac_cfg.configs.push_back({10000, 10000, 10000});
+    if (params.srs_period.has_value()) {
+      cfg.ran.cells.back().srs_cfg.srs_period = params.srs_period;
+    }
+  }
 
-    cfg.ran.qos       = config_helpers::make_default_du_qos_config_list(/* warn_on_drop */ true, 0);
-    cfg.ran.sched_cfg = config_helpers::make_default_scheduler_expert_config();
-    cfg.ran.mac_cfg   = mac_expert_config{.configs = {{10000, 10000, 10000}}};
-    cfg.mac_p         = &mac_pcap;
-    cfg.rlc_p         = &rlc_pcap;
+  cfg.ran.qos       = config_helpers::make_default_du_qos_config_list(/* warn_on_drop */ true, 0);
+  cfg.ran.sched_cfg = config_helpers::make_default_scheduler_expert_config();
 
-    return cfg;
+  cfg.metrics.enable_f1ap  = true;
+  cfg.metrics.enable_mac   = true;
+  cfg.metrics.enable_rlc   = true;
+  cfg.metrics.enable_sched = true;
+
+  return cfg;
+}
+
+du_high_env_simulator::du_high_env_simulator(du_high_env_sim_params params) :
+  du_high_env_simulator(create_du_high_configuration(params), params.active_cells_on_start)
+{
+}
+
+du_high_env_simulator::du_high_env_simulator(const du_high_configuration& du_hi_cfg_, bool active_cells_on_start) :
+  cu_notifier(workers.test_worker, active_cells_on_start),
+  du_metrics(workers.test_worker),
+  du_high_cfg(du_hi_cfg_),
+  du_hi_dependencies([this]() {
+    init_loggers();
+    du_high_dependencies dependencies;
+    dependencies.exec_mapper = workers.exec_mapper.get();
+    dependencies.f1c_client  = &cu_notifier;
+    dependencies.f1u_gw      = &cu_up_sim;
+    dependencies.du_notifier = &du_metrics;
+    dependencies.phy_adapter = &phy;
+    dependencies.timers      = &timers;
+    dependencies.mac_p       = &mac_pcap;
+    dependencies.rlc_p       = &rlc_pcap;
+    return dependencies;
   }()),
-  du_hi(make_du_high(du_high_cfg)),
+  du_hi(make_du_high(du_high_cfg, du_hi_dependencies)),
+  phy(du_high_cfg.ran.cells.size(), workers.test_worker),
   next_slot(to_numerology_value(du_high_cfg.ran.cells[0].scs_common),
             test_rgen::uniform_int<unsigned>(0, 10239) *
                 get_nof_slots_per_subframe(du_high_cfg.ran.cells[0].scs_common))
@@ -341,7 +378,7 @@ bool du_high_env_simulator::run_rrc_reestablishment(rnti_t rnti, rnti_t old_rnti
   // Run F1AP UE Context Modification procedure.
   msg = test_helpers::generate_ue_context_modification_request(*u.du_ue_id, *u.cu_ue_id, {}, {drb_id_t::drb1}, {});
   cu_notifier.last_f1ap_msgs.clear();
-  du_hi->get_f1ap_message_handler().handle_message(msg);
+  du_hi->get_f1ap_du().handle_message(msg);
   bool ret = run_until([this]() { return not cu_notifier.last_f1ap_msgs.empty(); });
   if (not ret) {
     test_logger.error("rnti={}: F1AP UE Context Modification Request not sent back to the CU-CP", u.rnti);
@@ -395,7 +432,7 @@ bool du_high_env_simulator::send_dl_rrc_msg_and_await_ul_rrc_msg(const ue_sim_co
   lcid_t dl_lcid = uint_to_lcid(dl_msg.pdu.init_msg().value.dl_rrc_msg_transfer()->srb_id);
   lcid_t ul_lcid = dl_lcid == LCID_SRB0 ? LCID_SRB1 : dl_lcid;
 
-  du_hi->get_f1ap_message_handler().handle_message(dl_msg);
+  du_hi->get_f1ap_du().handle_message(dl_msg);
 
   // Wait for DL message to be sent to the PHY.
   if (not await_dl_msg_sched(u, dl_lcid)) {
@@ -432,8 +469,12 @@ bool du_high_env_simulator::run_ue_context_setup(rnti_t rnti)
 
   // DU receives UE Context Setup Request.
   cu_notifier.last_f1ap_msgs.clear();
-  f1ap_message msg = test_helpers::create_ue_context_setup_request(
-      *u.cu_ue_id, u.du_ue_id, u.srbs[LCID_SRB1].next_pdcp_sn++, {drb_id_t::drb1});
+  f1ap_message msg = test_helpers::generate_ue_context_setup_request(
+      *u.cu_ue_id,
+      u.du_ue_id,
+      u.srbs[LCID_SRB1].next_pdcp_sn++,
+      {drb_id_t::drb1},
+      {plmn_identity::test_value(), nr_cell_identity::create(0).value()});
   asn1::f1ap::ue_context_setup_request_s& cmd = msg.pdu.init_msg().value.ue_context_setup_request();
   cmd->drbs_to_be_setup_list[0]
       .value()
@@ -445,7 +486,17 @@ bool du_high_env_simulator::run_ue_context_setup(rnti_t rnti)
       .five_qi = 7U;
   cmd->drbs_to_be_setup_list[0].value().drbs_to_be_setup_item().rlc_mode.value =
       asn1::f1ap::rlc_mode_opts::rlc_um_bidirectional;
-  this->du_hi->get_f1ap_message_handler().handle_message(msg);
+  // UE supports 256QAM.
+  cmd->cu_to_du_rrc_info.ue_cap_rat_container_list =
+      byte_buffer::create({0x10, 0xc9, 0x83, 0x40, 0x67, 0x40, 0x8e, 0x8c, 0xb4, 0x04, 0xbf, 0x1b, 0x07, 0x0a, 0x40,
+                           0x00, 0x2c, 0x12, 0x62, 0xe0, 0x00, 0x30, 0x7e, 0x16, 0x00, 0x31, 0xbf, 0xf0, 0x01, 0x70,
+                           0x00, 0x98, 0xa0, 0x51, 0x00, 0x00, 0x00, 0x04, 0x40, 0x02, 0xc6, 0x80, 0x30, 0x03, 0xd0,
+                           0x38, 0xf2, 0x1c, 0xf8, 0x00, 0x01, 0x20, 0x20, 0x07, 0x0a, 0x00, 0x00, 0x00, 0x00, 0x08,
+                           0x05, 0x03, 0x60, 0x00, 0x03, 0x80, 0x40, 0x4a, 0xf8, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                           0x39, 0x51, 0x40, 0x00, 0x40, 0x00, 0x02, 0x59, 0x65, 0x40, 0x0d, 0x2a, 0xaa, 0x1e, 0x00,
+                           0x0e, 0x00, 0x1e, 0x00, 0x00, 0x00, 0x08, 0x01, 0x00, 0x20, 0x48, 0x14})
+          .value();
+  this->du_hi->get_f1ap_du().handle_message(msg);
 
   // Wait until DU sends UE Context Setup Response and the whole RRC container is scheduled.
   const unsigned MAX_SLOT_COUNT   = 1000;
@@ -486,6 +537,18 @@ bool du_high_env_simulator::run_ue_context_setup(rnti_t rnti)
     return false;
   }
 
+  // Await for Reconfiguration Complete that signals the UE config update completion.
+  if (srb1_pdu_size > 0) {
+    cu_notifier.last_f1ap_msgs.clear();
+    du_hi->get_pdu_handler().handle_rx_data_indication(
+        test_helpers::create_pdu_with_sdu(next_slot, u.rnti, LCID_SRB1, 1));
+    bool ret = run_until([this]() { return not cu_notifier.last_f1ap_msgs.empty(); });
+    if (not ret or not test_helpers::is_ul_rrc_msg_transfer_valid(cu_notifier.last_f1ap_msgs.back(), srb_id_t::srb1)) {
+      test_logger.error("rnti={}: F1AP UL RRC Message not sent or is invalid", u.rnti);
+      return false;
+    }
+  }
+
   return true;
 }
 
@@ -500,7 +563,7 @@ bool du_high_env_simulator::run_ue_context_release(rnti_t rnti, srb_id_t srb_id)
   // Send UE Context Release Command which contains dummy RRC Release.
   cu_notifier.last_f1ap_msgs.clear();
   f1ap_message msg = test_helpers::generate_ue_context_release_command(*u.cu_ue_id, *u.du_ue_id, srb_id);
-  du_hi->get_f1ap_message_handler().handle_message(msg);
+  du_hi->get_f1ap_du().handle_message(msg);
 
   // Await for RRC container to be scheduled in the MAC.
   lcid_t lcid = srb_id_to_lcid(srb_id);
@@ -528,7 +591,7 @@ void du_high_env_simulator::run_slot()
 {
   // Dispatch a slot indication to all cells in the L2 (fork work across cells).
   for (unsigned i = 0; i != du_high_cfg.ran.cells.size(); ++i) {
-    du_hi->get_slot_handler(to_du_cell_index(i)).handle_slot_indication(next_slot);
+    du_hi->get_slot_handler(to_du_cell_index(i)).handle_slot_indication({next_slot, std::chrono::system_clock::now()});
   }
 
   // Wait for slot indication to be processed and the l2 results to be sent back to the l1 (join cell results, in this
@@ -581,6 +644,11 @@ void du_high_env_simulator::handle_slot_results(du_cell_index_t cell_index)
       if (uci_ind.has_value()) {
         this->du_hi->get_control_info_handler(cell_index).handle_uci(uci_ind.value());
       }
+    }
+
+    if (not ul_res.srss.empty()) {
+      mac_srs_indication_message srs_ind = test_helpers::create_srs_indication(sl_rx, ul_res.srss);
+      this->du_hi->get_control_info_handler(cell_index).handle_srs(srs_ind);
     }
   }
 }

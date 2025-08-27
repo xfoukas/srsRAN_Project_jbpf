@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -22,7 +22,7 @@
 
 #include "cu_up_connection_manager.h"
 #include "../cu_up_processor/cu_up_processor_repository.h"
-#include "common_task_scheduler.h"
+#include "srsran/cu_cp/common_task_scheduler.h"
 #include "srsran/e1ap/common/e1ap_message.h"
 #include "srsran/support/executors/sync_task_executor.h"
 #include <thread>

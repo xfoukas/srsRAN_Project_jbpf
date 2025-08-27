@@ -1,5 +1,5 @@
 #
-# Copyright 2013-2024 Software Radio Systems Limited
+# Copyright 2013-2025 Software Radio Systems Limited
 #
 # By using this file, you agree to the terms and conditions set
 # forth in the LICENSE file which can be found at the top level of
@@ -8,16 +8,23 @@
 
 include:
   - project: softwareradiosystems/ci/tools
-    ref: "20"
+    ref: "22"
     file: .gitlab/ci-shared/setup/all.yml
   - project: softwareradiosystems/ci/tools
-    ref: "20"
+    ref: "22"
     file: .gitlab/ci-shared/features/all.yml
+  - project: softwareradiosystems/ci/tools
+    ref: "22"
+    file: .gitlab/ci-shared/tools/docker.yml
 
 stages:
+  - pre private
   - private
+  - post private
   - public
+  - post public
   - release
+  - post release
 
 .my-rules:
   script:
@@ -29,14 +36,14 @@ stages:
 # Load variables
 ################################################################################
 load release variables:
-  stage: .pre
+  stage: ci
   image: ubuntu:24.04
   rules:
     - if: *on_public_push
     - if: *on_public_release
     - if: *on_custom_push
   variables:
-    GIT_STRATEGY: none
+    GIT_LFS_SKIP_SMUDGE: 1
   script:
     - |
       if [[ $CI_COMMIT_TAG =~ ^([a-zA-Z0-9_]+)_([0-9]{4})\.([0-9]{2})\.([0-9]{2})$ ]]; then
@@ -48,6 +55,7 @@ load release variables:
         echo "PUBLIC_BRANCH=main" >> repo.env
         TOKEN_VAR_NAME="PUBLIC_${KEY}_TOKEN"
         echo "PUBLIC_PUSH_TOKEN=${!TOKEN_VAR_NAME}" >> repo.env
+        echo "CI_PLUGIN_COMMIT_SHA=$(cat .gitlab/ci/plugin_version.txt)" >> repo.env
       else
         echo "PRIVATE_BRANCH=agpl_main" >> repo.env
         echo "PUBLIC_NAME=srsRAN Project" >> repo.env
@@ -60,9 +68,106 @@ load release variables:
     reports:
       dotenv: repo.env
 
+generate plugin pipeline:
+  stage: ci
+  image: ubuntu:24.04
+  rules:
+    - if: *on_custom_push
+  variables:
+    GIT_STRATEGY: none
+  script:
+    - |
+        echo """
+        include:
+          - project: softwareradiosystems/ci/tools
+            ref: \"21\"
+            file: .gitlab/ci-shared/setup/all.yml
+
+        stages:
+          - private
+        """ >> update_plugin.yml
+
+        while IFS='|' read -r PLUGIN_PATH PLUGIN_REPO PLUGIN_REF; do
+            echo """
+        update ${PLUGIN_PATH}:
+          stage: private
+          interruptible: false
+          variables:
+            ON_SCHEDULE: "true"
+            CI_DESCRIPTION: Release
+          inherit:
+            variables: false
+          trigger:
+            project: ${PLUGIN_REPO}
+            branch: main
+            strategy: depend
+        """ >> update_plugin.yml
+        done < <(grep -v '^#' "$PLUGINS_DATA_FILE")
+    - cat update_plugin.yml
+  artifacts:
+    paths:
+      - update_plugin.yml
+    expire_in: 1 day
+
+################################################################################
+# Release checks and extras
+################################################################################
+check version updated:
+  stage: pre private
+  interruptible: false
+  rules:
+    - if: *on_public_release
+  image: ubuntu:24.04
+  script:
+    - |
+      CHANGELOG=$CI_PROJECT_DIR/CHANGELOG
+      if ! grep -q "## $CI_COMMIT_TAG" "$CHANGELOG"; then
+        echo "Please add an entry in $CHANGELOG file for $CI_COMMIT_TAG release."
+        exit 1
+      fi
+    - |
+      CMAKE_FILE=$CI_PROJECT_DIR/cmake/modules/version.cmake
+      IFS='.' read -r VERSION_MAJOR VERSION_MINOR VERSION_PATCH <<< "$CI_COMMIT_TAG"
+      VERSION_PATCH=${VERSION_PATCH:-0}
+
+      if ! grep -q "set(SRSRAN_VERSION_MAJOR $VERSION_MAJOR)" "$CMAKE_FILE" || 
+        ! grep -q "set(SRSRAN_VERSION_MINOR $VERSION_MINOR)" "$CMAKE_FILE" || 
+        ! grep -q "set(SRSRAN_VERSION_PATCH $VERSION_PATCH)" "$CMAKE_FILE"; then
+        echo "Please update the version $CI_COMMIT_TAG in $CMAKE_FILE."
+        exit 1
+      fi
+
+generate testvector tar:
+  stage: pre private
+  rules:
+    - if: *on_public_release
+  interruptible: false
+  image: ubuntu:24.04
+  script:
+    - find . -name "*.tar.gz" -exec tar -rvf phy_testvectors.tar {} \;
+  artifacts:
+    paths:
+      - phy_testvectors.tar
+    expire_in: "30 days"
+
 ################################################################################
 # Update private branches
 ################################################################################
+update plugin:
+  stage: private
+  interruptible: false
+  rules:
+    - if: *on_custom_push
+  inherit:
+    variables: false
+  trigger:
+    include:
+      - artifact: update_plugin.yml
+        job: generate plugin pipeline
+    strategy: depend
+  needs:
+    - job: generate plugin pipeline
+      artifacts: true
 
 update private branch:
   stage: private
@@ -77,7 +182,7 @@ update private branch:
     - if: *on_public_push
     - if: *on_public_release
     - if: *on_custom_push
-  before_script:
+  before_script: &git_setup
     - DEBIAN_FRONTEND=noninteractive apt-get update && apt-get install -y --no-install-recommends git git-lfs apt-transport-https ca-certificates
     - git lfs install
     - git lfs uninstall || true
@@ -86,11 +191,27 @@ update private branch:
     - git config --global filter.lfs.process "git-lfs filter-process --skip"
     - git config --global user.name "${CODEBOT_USERNAME}"
     - git config --global user.email "${CODEBOT_LONG_USERNAME}@noreply.gitlab.com"
+    - git config --global url."https://${PUBLIC_PUSH_TOKEN}@github.com/".insteadOf "git@github.com:"
   script:
-    - git clone https://${CODEBOT_USERNAME}:${CODEBOT_TOKEN}@gitlab.com/${CI_PROJECT_NAMESPACE}/${CI_PROJECT_NAME}.git /${CI_PROJECT_NAME}
-    - cd /${CI_PROJECT_NAME}
+    - git clone https://${CODEBOT_USERNAME}:${CODEBOT_TOKEN}@gitlab.com/${CI_PROJECT_NAMESPACE}/${CI_PROJECT_NAME}.git ${CI_PROJECT_DIR}
+    - cd ${CI_PROJECT_DIR}
     - git fetch -q origin ${CI_COMMIT_SHA} && git checkout ${CI_COMMIT_SHA}
     - .gitlab/ci/release/auto_merge.sh ${CI_COMMIT_SHA} ${PRIVATE_BRANCH}
+    - |
+      git submodule init
+      git submodule update
+      git submodule foreach "git fetch origin && git checkout main"
+    - |
+      while IFS='|' read -r PLUGIN_PATH PLUGIN_REPO PLUGIN_REF; do
+          PLUGIN_REF=$(eval echo $PLUGIN_REF)
+          if [ -d "plugins/${PLUGIN_PATH}" ]; then
+            cd plugins/${PLUGIN_PATH}
+            git checkout ${PLUGIN_REF}
+            cd ${CI_PROJECT_DIR}
+          fi
+      done < <(grep -v '^#' "$PLUGINS_DATA_FILE")
+    - |
+      git commit -a --amend --no-edit
     - |
       if [ "$HEADERS" = "true" ]; then
         .gitlab/ci/release/update_headers.sh
@@ -100,46 +221,82 @@ update private branch:
       if [ "$MODE" = "push" ]; then
         git push origin "${PRIVATE_BRANCH}"
       fi
-  needs: &release-var-needs
-    - job: "load release variables"
+  needs:
+    - job: load release variables
       artifacts: true
+    - job: check version updated
+      optional: true
+    - job: update plugin
+      optional: true
 
-generate testvector tar gz:
-  stage: private
-  rules:
-    - if: *on_public_release
+################################################################################
+# Basic build using updated private branch
+################################################################################
+download final branch:
+  stage: post private
   interruptible: false
+  variables:
+    GIT_STRATEGY: none
+  rules:
+    - if: *on_public_push
+    - if: *on_public_release
+    - if: *on_custom_push
   image: ubuntu:24.04
+  before_script:
+    - *git_setup
   script:
-    - find . -name "*.tar.gz" -exec tar -rvf phy_testvectors.tar {} \;
+    - git clone --recurse-submodules --branch ${PRIVATE_BRANCH} https://${CODEBOT_USERNAME}:${CODEBOT_TOKEN}@gitlab.com/${CI_PROJECT_NAMESPACE}/${CI_PROJECT_NAME}.git ${CI_PROJECT_DIR}
+    - cd ${CI_PROJECT_DIR}
+    - git config --global --add safe.directory ${CI_PROJECT_DIR}
   artifacts:
     paths:
-      - phy_testvectors.tar
-    expire_in: "30 days"
+      - ${CI_PROJECT_DIR}
+  needs:
+    - job: load release variables
+      artifacts: true
+    - job: update private branch
+      artifacts: false
 
-# coverity-agpl:
-#   extends: .coverity_base
-#   stage: private
-#   rules:
-#     - if: *on_public_push
-#     - if: *on_public_release
-#   variables:
-#     GIT_STRATEGY: none
-#     PRIVATE_BRANCH: ""
-#   before_script:
-#     - export PROJECT_NAME="srsRAN_5G_agpl"
-#     - export DESCRIPTION="srsRAN Project AGPL build"
-#     - export COV_TOKEN="${COVERITY_TOKEN_AGPL}"
-#     # Download agpl branch
-#     - git config --global user.name "${CODEBOT_USERNAME}"
-#     - git config --global user.email "${CODEBOT_LONG_USERNAME}@noreply.gitlab.com"
-#     - git clone --depth 1 --branch $PRIVATE_BRANCH https://${CODEBOT_USERNAME}:${CODEBOT_TOKEN}@gitlab.com/${CI_PROJECT_NAMESPACE}/${CI_PROJECT_NAME}.git /${CI_PROJECT_NAME}
-#     - cd /${CI_PROJECT_NAME}
-#   needs:
-#     - *release-var-needs
-#     - job: update private branch
-#       optional: false
-#       artifacts: false
+download final build env:
+  stage: post private
+  image: ubuntu:24.04
+  rules:
+    - if: *on_public_push
+    - if: *on_public_release
+    - if: *on_custom_push
+  variables:
+    GIT_STRATEGY: none
+  script:
+    - cat .gitlab/ci/release_build.env
+  artifacts:
+    reports:
+      dotenv: .gitlab/ci/release_build.env
+  needs:
+    - job: download final branch
+      optional: false
+      artifacts: true
+
+basic build final branch:
+  extends: .build_and_unit
+  stage: post private
+  interruptible: false
+  rules:
+    - if: *on_public_push
+    - if: *on_public_release
+    - if: *on_custom_push
+  variables:
+    GIT_STRATEGY: none
+    ENABLE_MKL: # default
+    ENABLE_ARMPL: # default
+    PLUGIN_INDEX_ARRAY: ""
+  tags: ["amd64-avx2"]
+  needs:
+    - job: download final build env
+      artifacts: true  
+    - job: download final branch
+      optional: false
+      artifacts: true
+    - job: builder version
 
 ################################################################################
 # Publish
@@ -178,8 +335,9 @@ publish test:
   variables:
     PUBLIC_BRANCH: test
   needs:
-    - *release-var-needs
-    - job: update private branch
+    - job: load release variables
+      artifacts: true
+    - job: basic build final branch
       optional: false
       artifacts: false
 
@@ -193,56 +351,101 @@ publish main:
   variables:
     PUBLIC_BRANCH: main
   needs:
-    - *release-var-needs
+    - job: load release variables
+      artifacts: true
     - job: publish test
       optional: false
       artifacts: false
 
-publish public:
-  extends: .publish
-  rules:
-    - if: *on_custom_push
-  needs:
-    - *release-var-needs
-    - job: update private branch
-      optional: false
-      artifacts: true
-
-notify branch published:
-  extends: .notifier
-  stage: public
-  rules:
-    - if: *on_public_push
-    - if: *on_public_release
-    - if: *on_custom_push
-  needs:
-    - *release-var-needs
-    - job: publish main
-      optional: true
-      artifacts: true
-    - job: publish public
-      optional: true
-      artifacts: true
-  variables:
-    CI_DESCRIPTION: "$PUBLIC_REPO GitHub Updated"
-    MSG: "$PUBLIC_BRANCH branch has been updated."
-    SLACK_CHANNEL: $SLACK_CHANNEL_OK
-    LEVEL: "ok"
-
-publish maltab:
+publish matlab:
   stage: public
   interruptible: false
-  variables:
-    CI_DESCRIPTION: Release
-    NOTIFY_SLACK: "false"
   rules:
     - if: *on_public_push
+      variables: &matlab_release_var
+        ON_SCHEDULE: "true"
+        CI_DESCRIPTION: Release
+        NOTIFY_SLACK: "false"
+        SRSRAN_REPO_URL: https://github.com/srsran/srsRAN_Project.git
+        SRSRAN_COMMIT: main
+        DOCKER_BUILDER_VERSION: latest
+        CI_DISABLE_PLUGINS: "True"
     - if: *on_public_release
+      variables:
+        <<: *matlab_release_var
   needs:
     - job: publish main
   trigger:
     project: softwareradiosystems/srsgnb_matlab
     branch: master
+
+publish custom:
+  extends: .publish
+  rules:
+    - if: *on_custom_push
+  needs:
+    - job: load release variables
+      artifacts: true
+    - job: basic build final branch
+      optional: false
+      artifacts: true
+
+################################################################################
+# Post publish steps
+################################################################################
+notify branch published:
+  extends: .notifier
+  stage: post public
+  rules:
+    - if: *on_public_push
+    - if: *on_public_release
+    - if: *on_custom_push
+  needs:
+    - job: load release variables
+      artifacts: true
+    - job: publish main
+      optional: true
+      artifacts: true
+    - job: publish custom
+      optional: true
+      artifacts: true
+  variables:
+    CI_DESCRIPTION: "$PUBLIC_REPO GitHub Updated"
+    SLACK_CHANNEL: $SLACK_CHANNEL_OK
+    LEVEL: "ok"
+
+create tags after published:
+  extends: .create-tag
+  stage: post public
+  interruptible: false
+  rules:
+    - if: *on_public_push
+    - if: *on_public_release
+  script:
+    - |
+      for name in $TAG_GH_PUSH_NAME_ARRAY; do
+        create_tag "${name}_$(date -u +"%Y.%m.%d")"
+      done
+  needs:
+    - job: publish main
+      optional: true
+      artifacts: true
+  retry: 2
+
+update doc:
+  stage: post public
+  rules:
+    - if: *on_public_push
+    - if: *on_public_release
+  when: manual
+  allow_failure: false
+  image: ubuntu:24.04
+  script:
+    - echo "Doc updated"
+  needs:
+    - job: publish main
+      optional: false
+      artifacts: false
 
 ################################################################################
 # Release
@@ -257,11 +460,12 @@ release public:
   interruptible: false
   image: alpine:3.16.0 # sh entrypoint
   needs:
-    - *release-var-needs
+    - job: load release variables
+      artifacts: true
     - job: publish main
       optional: false
       artifacts: false
-    - job: generate testvector tar gz
+    - job: generate testvector tar
       optional: false
       artifacts: true
   variables:
@@ -269,7 +473,7 @@ release public:
     ARTIFACT: phy_testvectors.tar
     PUBLIC_NAME: ""
     PUBLIC_REPO: ""
-    PUBLIC_BRANCH: ""
+    PUBLIC_BRANCH: main
   before_script:
     - apk add git curl jq
   script:
@@ -282,7 +486,7 @@ release public:
     - export PUBLIC_RELEASE_NOTES=${CI_COMMIT_TAG_MESSAGE}
 
     # Download public repo
-    - git clone --branch $PUBLIC_BRANCH https://${PUBLIC_PUSH_TOKEN}@github.com/${PUBLIC_REPO}.git srsran
+    - git clone --branch $PUBLIC_BRANCH https://${PUBLIC_PUSH_TOKEN}@github.com/${PUBLIC_REPO}.git ${CI_PROJECT_DIR}/srsran
     - cd srsran
 
     # Push tag
@@ -312,11 +516,12 @@ release public:
 
 notify release published:
   extends: .notifier
-  stage: release
+  stage: post release
   rules:
     - if: *on_public_release
   needs:
-    - *release-var-needs
+    - job: load release variables
+      artifacts: true
     - job: release public
       optional: false
       artifacts: false
@@ -326,3 +531,119 @@ notify release published:
     LEVEL: "ok"
   before_script:
     - MSG="release_${CI_COMMIT_TAG//./_} created"
+
+update ppa packages:
+  stage: post release
+  rules:
+    - if: *on_public_release
+  when: manual
+  allow_failure: false
+  image: ubuntu:24.04
+  script:
+    - echo "Packages updated"
+  needs:
+    - job: release public
+      optional: false
+      artifacts: false
+
+srsran image:
+  extends: .docker-builder
+  stage: post release
+  rules:
+    - if: *on_custom_push
+  retry: 2
+  variables:
+    # CI & Infrastructure
+    GIT_LFS_SKIP_SMUDGE: 1
+    KUBERNETES_CPU_REQUEST: ${SRS_CPU_LIMIT}
+    KUBERNETES_CPU_LIMIT: ${SRS_CPU_LIMIT}
+    KUBERNETES_MEMORY_REQUEST: ${SRS_MEMORY_LIMIT}
+    KUBERNETES_MEMORY_LIMIT: ${SRS_MEMORY_LIMIT}
+    KUBERNETES_EPHEMERAL_STORAGE_REQUEST: "175G"
+    KUBERNETES_EPHEMERAL_STORAGE_LIMIT: "175G"
+    # Docker
+    REGISTRY_URI: ${GITLAB_REGISTRY_URI}
+    REGISTRY_ORG: /${SRSRAN_IMAGE_PREFIX}
+    CONTEXT: ${CI_PROJECT_DIR}
+    DOCKERFILE: docker
+    MODE: publish
+    # Arguments
+    DOCKER_UHD_VERSION: "4.7.0.0"
+    DOCKER_DPDK_VERSION: "23.11.1"
+  timeout: 2 hours
+  tags:
+    - ${TAG}-docker
+  before_script:
+    # Include only plugin with array 0
+    - |
+      while IFS='|' read -r PLUGIN_PATH PLUGIN_REPO PLUGIN_REF; do
+        PLUGIN_REF=$(eval echo $PLUGIN_REF)
+        echo "#########################"
+        echo "#### $PLUGIN_PATH checkout ####"
+        echo "#########################"
+        git submodule add https://gitlab-ci-token:${CI_JOB_TOKEN}@${CI_SERVER_SHELL_SSH_HOST}/${PLUGIN_REPO}.git plugins/${PLUGIN_PATH}
+        cd plugins/${PLUGIN_PATH}
+        git fetch --depth=1 origin ${PLUGIN_REF} > /dev/null
+        git config advice.detachedHead false
+        git checkout ${PLUGIN_REF}
+        cd ${CI_PROJECT_DIR}
+        break
+      done < <(grep -v '^#' "$PLUGINS_DATA_FILE")
+      PLUGIN_COMMIT=$(echo $PLUGIN_REF | head -c8)
+    # Set variables
+    - |
+      export NAME="srsran_${SUFFIX}"
+      export VERSION="${CI_COMMIT_SHORT_SHA}_${PLUGIN_COMMIT}"
+      export BUILD_ARGS="UHD_VERSION=${DOCKER_UHD_VERSION};DPDK_VERSION=${DOCKER_DPDK_VERSION};MARCH=${MARCH};NUM_JOBS=${KUBERNETES_CPU_LIMIT};EXTRA_CMAKE_ARGS=\"${EXTRA_CMAKE_ARGS}\""
+  parallel:
+    matrix:
+      # AMD AVX2
+      - SUFFIX: release_avx2
+        MARCH: x86-64-v3
+        TAG: amd64-avx2
+        PLATFORM: amd64
+      - SUFFIX: release_with_debug_avx2
+        EXTRA_CMAKE_ARGS: -DFORCE_DEBUG_INFO=On
+        MARCH: x86-64-v3
+        TAG: amd64-avx2
+        PLATFORM: amd64
+      # AMD AVX512
+      - SUFFIX: release_avx512
+        MARCH: x86-64-v4
+        TAG: amd64-avx2-avx512
+        PLATFORM: amd64
+      - SUFFIX: release_with_debug_avx512
+        EXTRA_CMAKE_ARGS: -DFORCE_DEBUG_INFO=On
+        MARCH: x86-64-v4
+        TAG: amd64-avx2-avx512
+        PLATFORM: amd64
+      # ARM
+      - SUFFIX: release_arm
+        MARCH: armv8.2-a+crypto+fp16+dotprod
+        TAG: arm64
+        PLATFORM: arm64
+      - SUFFIX: release_with_debug_arm
+        EXTRA_CMAKE_ARGS: -DFORCE_DEBUG_INFO=On
+        MARCH: armv8.2-a+crypto+fp16+dotprod
+        TAG: arm64
+        PLATFORM: arm64
+  needs:
+    - job: load release variables
+      artifacts: true
+    - job: basic build final branch
+      optional: false
+      artifacts: true
+
+notify release failed:
+  extends: .notifier
+  rules:
+    - if: *on_public_push
+      when: on_failure
+    - if: *on_public_release
+      when: on_failure
+    - if: *on_custom_push
+      when: on_failure
+  variables:
+    CI_DESCRIPTION: "GitHub Update Process Failed"
+    SLACK_CHANNEL: $SLACK_CHANNEL_FAIL
+    LEVEL: "fail"

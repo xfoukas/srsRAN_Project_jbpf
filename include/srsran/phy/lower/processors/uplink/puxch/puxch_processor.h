@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -27,7 +27,7 @@ namespace srsran {
 class puxch_processor_notifier;
 class puxch_processor_request_handler;
 class puxch_processor_baseband;
-class slot_point;
+class lower_phy_center_freq_controller;
 
 /// \brief PUCCH and PUSCH processor main interface.
 ///
@@ -45,6 +45,9 @@ public:
   /// Connects the PUxCH processor with a notifier.
   virtual void connect(puxch_processor_notifier& notifier) = 0;
 
+  /// Stops the processor.
+  virtual void stop() = 0;
+
   /// \brief Gets the PUxCH processor request handler.
   /// \return A reference to the internal PUxCH processor request handler.
   virtual puxch_processor_request_handler& get_request_handler() = 0;
@@ -52,6 +55,9 @@ public:
   /// \brief Gets the PUxCH processor baseband interface.
   /// \return A reference to the internal PUxCH processor baseband interface.
   virtual puxch_processor_baseband& get_baseband() = 0;
+
+  /// Gets the carrier center frequency control interface.
+  virtual lower_phy_center_freq_controller& get_center_freq_control() = 0;
 };
 
 } // namespace srsran

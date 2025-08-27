@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -32,14 +32,13 @@
 
 using namespace srsran;
 
-si_message_scheduler::si_message_scheduler(const scheduler_si_expert_config&               expert_cfg_,
-                                           const cell_configuration&                       cfg_,
-                                           pdcch_resource_allocator&                       pdcch_sch_,
-                                           const sched_cell_configuration_request_message& msg) :
-  expert_cfg(expert_cfg_),
+si_message_scheduler::si_message_scheduler(const cell_configuration&                  cfg_,
+                                           pdcch_resource_allocator&                  pdcch_sch_,
+                                           const std::optional<si_scheduling_config>& si_sched_cfg_) :
+  expert_cfg(cfg_.expert_cfg.si),
   cell_cfg(cfg_),
   pdcch_sch(pdcch_sch_),
-  si_sched_cfg(msg.si_scheduling),
+  si_sched_cfg(si_sched_cfg_),
   logger(srslog::fetch_basic_logger("SCHED"))
 {
   if (si_sched_cfg.has_value()) {
@@ -60,6 +59,25 @@ void si_message_scheduler::run_slot(cell_slot_resource_allocator& res_grid)
   schedule_pending_si_messages(res_grid);
 }
 
+void si_message_scheduler::handle_si_message_update_indication(
+    unsigned                                   new_version,
+    const std::optional<si_scheduling_config>& new_si_sched_cfg)
+{
+  // Update SI messages.
+  version      = new_version;
+  si_sched_cfg = new_si_sched_cfg;
+  if (si_sched_cfg.has_value()) {
+    pending_messages.resize(si_sched_cfg->si_messages.size());
+
+    // Reset window and transmission counters.
+    std::fill(pending_messages.begin(),
+              pending_messages.end(),
+              message_window_context{.window = {}, .nof_tx_in_current_window = 0, .total_nof_tx = 0});
+  } else {
+    pending_messages.clear();
+  }
+}
+
 void si_message_scheduler::update_si_message_windows(slot_point sl_tx)
 {
   const unsigned sfn = sl_tx.sfn();
@@ -69,12 +87,12 @@ void si_message_scheduler::update_si_message_windows(slot_point sl_tx)
 
     if (not pending_messages[i].window.empty()) {
       // SI message is already in the window. Check for window end.
-      if (pending_messages[i].window.stop() < sl_tx) {
-        if (pending_messages[i].nof_tx == 0) {
+      if (pending_messages[i].window.stop() <= sl_tx) {
+        if (pending_messages[i].nof_tx_in_current_window == 0) {
           logger.warning("SI message {} window ended, but no transmissions were made.", i);
         }
-        pending_messages[i].window = {};
-        pending_messages[i].nof_tx = 0;
+        pending_messages[i].window                   = {};
+        pending_messages[i].nof_tx_in_current_window = 0;
       }
       continue;
     }
@@ -109,6 +127,9 @@ void si_message_scheduler::update_si_message_windows(slot_point sl_tx)
 
     // SI window start detected.
     pending_messages[i].window = {sl_tx, sl_tx + si_sched_cfg->si_window_len_slots};
+
+    // Reset the trasnmission counter for the new window.
+    pending_messages[i].nof_tx_in_current_window = 0;
   }
 }
 
@@ -117,21 +138,23 @@ void si_message_scheduler::schedule_pending_si_messages(cell_slot_resource_alloc
   for (unsigned i = 0; i != pending_messages.size(); ++i) {
     message_window_context& si_ctxt = pending_messages[i];
 
-    if (si_ctxt.window.empty()) {
-      // SI window is inactive.
+    if (si_ctxt.window.empty() or si_ctxt.nof_tx_in_current_window > 0) {
+      // SI window is inactive or SI message was already transmitted.
       continue;
     }
 
     // Check if the searchSpaceOtherSystemInformation has monitored PDCCH candidates.
-    const search_space_id ss_id = cell_cfg.dl_cfg_common.init_dl_bwp.pdcch_common.other_si_search_space_id.value();
+    const search_space_id ss_id = cell_cfg.dl_cfg_common.init_dl_bwp.pdcch_common.other_si_search_space_id.value_or(
+        cell_cfg.dl_cfg_common.init_dl_bwp.pdcch_common.sib1_search_space_id);
     const search_space_configuration& ss = cell_cfg.dl_cfg_common.init_dl_bwp.pdcch_common.search_spaces[ss_id];
     if (not pdcch_helper::is_pdcch_monitoring_active(res_grid.slot, ss)) {
       continue;
     }
 
     if (allocate_si_message(i, res_grid)) {
-      si_ctxt.nof_tx++;
-      pending_messages[i].window = {};
+      // Increment the transmission counters.
+      ++si_ctxt.nof_tx_in_current_window;
+      ++si_ctxt.total_nof_tx;
     }
   }
 }
@@ -167,16 +190,15 @@ bool si_message_scheduler::allocate_si_message(unsigned si_message, cell_slot_re
                                                                            nof_layers});
 
   // > Find available RBs in PDSCH for SI message BCCH grant.
-  const search_space_id other_si_ss_id =
-      cell_cfg.dl_cfg_common.init_dl_bwp.pdcch_common.other_si_search_space_id.value();
+  const search_space_id ss_id = cell_cfg.dl_cfg_common.init_dl_bwp.pdcch_common.other_si_search_space_id.value_or(
+      cell_cfg.dl_cfg_common.init_dl_bwp.pdcch_common.sib1_search_space_id);
   crb_interval si_crbs;
   {
-    const crb_interval crb_lims =
-        pdsch_helper::get_ra_crb_limits_common(cell_cfg.dl_cfg_common.init_dl_bwp, other_si_ss_id);
-    const unsigned    nof_si_rbs = si_prbs_tbs.nof_prbs;
-    const prb_bitmap& used_crbs  = res_grid.dl_res_grid.used_crbs(
+    const crb_interval crb_lims   = pdsch_helper::get_ra_crb_limits_common(cell_cfg.dl_cfg_common.init_dl_bwp, ss_id);
+    const unsigned     nof_si_rbs = si_prbs_tbs.nof_prbs;
+    const crb_bitmap&  used_crbs  = res_grid.dl_res_grid.used_crbs(
         cell_cfg.dl_cfg_common.init_dl_bwp.generic_params.scs, crb_lims, si_ofdm_symbols);
-    si_crbs = rb_helper::find_empty_interval_of_length(used_crbs, nof_si_rbs, 0);
+    si_crbs = rb_helper::find_empty_interval_of_length(used_crbs, nof_si_rbs);
     if (si_crbs.length() < nof_si_rbs) {
       // early exit
       logger.info("Skipping SI message scheduling. Cause: Not enough PDSCH space for SI Message {}", si_message);
@@ -186,7 +208,7 @@ bool si_message_scheduler::allocate_si_message(unsigned si_message, cell_slot_re
 
   // > Allocate DCI_1_0 for SI message on PDCCH.
   pdcch_dl_information* pdcch =
-      pdcch_sch.alloc_dl_pdcch_common(res_grid, rnti_t::SI_RNTI, other_si_ss_id, expert_cfg.si_message_dci_aggr_lev);
+      pdcch_sch.alloc_dl_pdcch_common(res_grid, rnti_t::SI_RNTI, ss_id, expert_cfg.si_message_dci_aggr_lev);
   if (pdcch == nullptr) {
     logger.info("Skipping SI message scheduling. Cause: Not enough PDCCH space for SI Message {}", si_message);
     return false;
@@ -197,7 +219,8 @@ bool si_message_scheduler::allocate_si_message(unsigned si_message, cell_slot_re
       grant_info{cell_cfg.dl_cfg_common.init_dl_bwp.generic_params.scs, si_ofdm_symbols, si_crbs});
 
   // > Delegate filling SI message grants to helper function.
-  fill_si_grant(res_grid, si_message, si_crbs, time_resource, dmrs_info, si_prbs_tbs.tbs_bytes);
+  fill_si_grant(
+      res_grid, si_message, si_crbs, time_resource, dmrs_info, si_prbs_tbs.tbs_bytes, pending_messages[si_message]);
   return true;
 }
 
@@ -206,7 +229,8 @@ void si_message_scheduler::fill_si_grant(cell_slot_resource_allocator& res_grid,
                                          crb_interval                  si_crbs_grant,
                                          uint8_t                       time_resource,
                                          const dmrs_information&       dmrs_info,
-                                         unsigned                      tbs)
+                                         unsigned                      tbs,
+                                         const message_window_context& message_context)
 {
   // System information indicator for SI message as per TS 38.212, Section 7.3.1.2.1 and Table 7.3.1.2.1-2.
 
@@ -227,7 +251,11 @@ void si_message_scheduler::fill_si_grant(cell_slot_resource_allocator& res_grid,
   sib_information& si = res_grid.result.dl.bc.sibs.emplace_back();
   si.si_indicator     = sib_information::si_indicator_type::other_si;
   si.si_msg_index     = si_message;
-  si.nof_txs          = 0;
+  si.version          = version;
+  si.nof_txs          = message_context.total_nof_tx;
+
+  // Determine if the SI message has already been transmitted within this window or not.
+  si.is_repetition = (message_context.nof_tx_in_current_window != 0);
 
   // Fill PDSCH configuration.
   pdsch_information& pdsch = si.pdsch_cfg;

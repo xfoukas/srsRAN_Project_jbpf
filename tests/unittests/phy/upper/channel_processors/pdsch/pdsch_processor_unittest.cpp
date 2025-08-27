@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -22,6 +22,7 @@
 
 #include "../../../support/resource_grid_test_doubles.h"
 #include "../../signal_processors/dmrs_pdsch_processor_test_doubles.h"
+#include "../../signal_processors/ptrs/ptrs_pdsch_generator_test_doubles.h"
 #include "pdsch_encoder_test_doubles.h"
 #include "pdsch_modulator_test_doubles.h"
 #include "pdsch_processor_test_doubles.h"
@@ -119,11 +120,14 @@ TEST_P(PdschProcessorFixture, UnitTest)
   std::shared_ptr<pdsch_modulator_factory_spy> modulator_factory_spy = std::make_shared<pdsch_modulator_factory_spy>();
   std::shared_ptr<dmrs_pdsch_processor_factory_spy> dmrs_factory_spy =
       std::make_shared<dmrs_pdsch_processor_factory_spy>();
+  std::shared_ptr<ptrs_pdsch_generator_factory_spy> ptrs_factory_spy =
+      std::make_shared<ptrs_pdsch_generator_factory_spy>();
 
   std::shared_ptr<pdsch_processor_factory> pdsch_proc_factory =
       create_pdsch_processor_factory_sw(std::shared_ptr<pdsch_encoder_factory>(encoder_factory_spy),
                                         std::shared_ptr<pdsch_modulator_factory>(modulator_factory_spy),
-                                        std::shared_ptr<dmrs_pdsch_processor_factory>(dmrs_factory_spy));
+                                        std::shared_ptr<dmrs_pdsch_processor_factory>(dmrs_factory_spy),
+                                        std::shared_ptr<ptrs_pdsch_generator_factory>(ptrs_factory_spy));
   ASSERT_NE(pdsch_proc_factory, nullptr);
 
   std::unique_ptr<pdsch_processor> pdsch = pdsch_proc_factory->create();
@@ -132,6 +136,7 @@ TEST_P(PdschProcessorFixture, UnitTest)
   pdsch_encoder_spy*           encoder_spy   = encoder_factory_spy->get_entries().front();
   pdsch_modulator_spy*         modulator_spy = modulator_factory_spy->get_entries().front();
   dmrs_pdsch_processor_spy*    dmrs_spy      = dmrs_factory_spy->get_entries().front();
+  ptrs_pdsch_generator_spy*    ptrs_spy      = ptrs_factory_spy->get_entries().front();
   pdsch_processor_notifier_spy notifier;
 
   unsigned nof_codewords    = (nof_layers > 4) ? 2 : 1;
@@ -162,14 +167,14 @@ TEST_P(PdschProcessorFixture, UnitTest)
   pdu.scrambling_id               = dist_u16(rgen);
   pdu.n_scid                      = static_cast<bool>(dist_bool(rgen));
   pdu.nof_cdm_groups_without_data = 1;
-  pdu.freq_alloc                  = rb_allocation::make_custom({1, 2, 3, 4});
-  pdu.start_symbol_index          = dist_start_symb(rgen);
-  pdu.nof_symbols                 = get_nsymb_per_slot(cp) - pdu.start_symbol_index;
-  pdu.ldpc_base_graph             = static_cast<ldpc_base_graph_type>(dist_bool(rgen));
-  pdu.tbs_lbrm                    = units::bytes(50);
-  pdu.reserved                    = {};
-  pdu.ratio_pdsch_dmrs_to_sss_dB  = get_power();
-  pdu.ratio_pdsch_data_to_sss_dB  = get_power();
+  pdu.freq_alloc                 = rb_allocation::make_custom({1, 2, 3, 4}, vrb_to_prb::create_non_interleaved_other());
+  pdu.start_symbol_index         = dist_start_symb(rgen);
+  pdu.nof_symbols                = get_nsymb_per_slot(cp) - pdu.start_symbol_index;
+  pdu.ldpc_base_graph            = static_cast<ldpc_base_graph_type>(dist_bool(rgen));
+  pdu.tbs_lbrm                   = units::bytes(50);
+  pdu.reserved                   = {};
+  pdu.ratio_pdsch_dmrs_to_sss_dB = get_power();
+  pdu.ratio_pdsch_data_to_sss_dB = get_power();
 
   // Generate reserved element pattern for DM-RS.
   re_pattern dmrs_reserved_pattern = pdu.dmrs.get_dmrs_pattern(
@@ -179,14 +184,14 @@ TEST_P(PdschProcessorFixture, UnitTest)
   re_pattern_list reserved = pdu.reserved;
   reserved.merge(dmrs_reserved_pattern);
 
-  // Get physical RB allocation mask.
-  bounded_bitset<MAX_RB> rb_mask = pdu.freq_alloc.get_prb_mask(pdu.bwp_start_rb, pdu.bwp_size_rb);
+  // Get RB allocation mask.
+  crb_bitmap rb_mask = pdu.freq_alloc.get_crb_mask(pdu.bwp_start_rb, pdu.bwp_size_rb);
 
   // Count number of resource elements.
   unsigned Nre = pdu.freq_alloc.get_nof_rb() * NRE * pdu.nof_symbols -
                  reserved.get_inclusion_count(pdu.start_symbol_index, pdu.nof_symbols, rb_mask);
 
-  static_vector<span<const uint8_t>, pdsch_processor::MAX_NOF_TRANSPORT_BLOCKS> data;
+  static_vector<shared_transport_block, pdsch_processor::MAX_NOF_TRANSPORT_BLOCKS> data;
 
   // Generate random data and prepare TB.
   std::vector<uint8_t> data0(16);
@@ -204,17 +209,17 @@ TEST_P(PdschProcessorFixture, UnitTest)
   }
 
   // Use resource grid dummy, the PDSCH processor must not call any method.
-  resource_grid_dummy   rg_dummy;
-  resource_grid_mapper& mapper_dummy = rg_dummy.get_mapper();
+  resource_grid_dummy rg_dummy;
 
   // Reset spies.
   encoder_spy->reset();
   modulator_spy->reset();
   dmrs_spy->reset();
+  ptrs_spy->reset();
   notifier.reset();
 
   // Process PDU.
-  pdsch->process(mapper_dummy, notifier, data, pdu);
+  pdsch->process(rg_dummy.get_writer(), notifier, data, pdu);
 
   // Wait for the processor to finish.
   notifier.wait_for_finished();
@@ -238,7 +243,7 @@ TEST_P(PdschProcessorFixture, UnitTest)
       ASSERT_EQ(entry.config.Nref, Nref.value());
       ASSERT_EQ(entry.config.nof_layers, codeword == 0 ? nof_layers_cw0 : nof_layers_cw1);
       ASSERT_EQ(entry.config.nof_ch_symbols, Nre * entry.config.nof_layers);
-      ASSERT_EQ(span<const uint8_t>(entry.transport_block), span<const uint8_t>(data[codeword]));
+      ASSERT_EQ(span<const uint8_t>(entry.transport_block), data[codeword].get_buffer());
     }
   }
 
@@ -248,20 +253,20 @@ TEST_P(PdschProcessorFixture, UnitTest)
     const auto& entries = modulator_spy->get_entries();
     const auto& entry   = entries.front();
     ASSERT_EQ(entry.config.rnti, pdu.rnti);
-    ASSERT_EQ(entry.config.bwp_size_rb, pdu.bwp_size_rb);
-    ASSERT_EQ(entry.config.bwp_start_rb, pdu.bwp_start_rb);
+    ASSERT_EQ(entry.config.bwp.length(), pdu.bwp_size_rb);
+    ASSERT_EQ(entry.config.bwp.start(), pdu.bwp_start_rb);
     ASSERT_EQ(entry.config.modulation1, pdu.codewords[0].modulation);
     if (nof_codewords > 1) {
       ASSERT_EQ(entry.config.modulation2, pdu.codewords[1].modulation);
     }
     ASSERT_EQ(entry.config.freq_allocation, pdu.freq_alloc);
-    ASSERT_EQ(entry.config.start_symbol_index, pdu.start_symbol_index);
-    ASSERT_EQ(entry.config.nof_symbols, pdu.nof_symbols);
+    ASSERT_EQ(entry.config.time_alloc.start(), pdu.start_symbol_index);
+    ASSERT_EQ(entry.config.time_alloc.length(), pdu.nof_symbols);
     ASSERT_EQ(entry.config.n_id, pdu.n_id);
     ASSERT_NEAR(entry.config.scaling, convert_dB_to_amplitude(-pdu.ratio_pdsch_data_to_sss_dB), amplitude_max_error);
     ASSERT_EQ(entry.config.reserved, pdu.reserved);
     ASSERT_EQ(entry.config.precoding, pdu.precoding);
-    ASSERT_EQ(entry.mapper, &mapper_dummy);
+    ASSERT_EQ(entry.grid, &rg_dummy.get_writer());
     for (unsigned codeword = 0; codeword != nof_codewords; ++codeword) {
       span<const uint8_t> codeword_encoder   = encoder_spy->get_entries()[codeword].codeword;
       const bit_buffer    codeword_modulator = entry.codewords[codeword];
@@ -286,7 +291,12 @@ TEST_P(PdschProcessorFixture, UnitTest)
     ASSERT_EQ(entry.config.symbols_mask, pdu.dmrs_symbol_mask);
     ASSERT_EQ(entry.config.rb_mask, rb_mask);
     ASSERT_EQ(entry.config.precoding, pdu.precoding);
-    ASSERT_EQ(entry.mapper, &mapper_dummy);
+    ASSERT_EQ(entry.grid, &rg_dummy.get_writer());
+  }
+
+  // Validate PT-RS generator.
+  {
+    ASSERT_EQ(ptrs_spy->get_nof_entries(), 0);
   }
 }
 

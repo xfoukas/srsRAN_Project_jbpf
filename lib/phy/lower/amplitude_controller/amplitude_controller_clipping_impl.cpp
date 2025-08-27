@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -37,7 +37,7 @@ amplitude_controller_metrics amplitude_controller_clipping_impl::process(span<cf
 
   // Apply the gain factor.
   metrics.gain_dB = convert_amplitude_to_dB(amplitude_gain);
-  srsvec::sc_prod(input, amplitude_gain, output);
+  srsvec::sc_prod(output, input, amplitude_gain);
 
   // Compute Mean and Peak signal power.
   float avg_power  = srsvec::average_power(output);

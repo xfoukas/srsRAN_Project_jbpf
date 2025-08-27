@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -21,6 +21,7 @@
  */
 
 #pragma once
+
 #include "srsran/phy/upper/channel_processors/pusch/pusch_demodulator_notifier.h"
 
 namespace srsran {
@@ -28,7 +29,10 @@ namespace srsran {
 class pusch_demodulator_notifier_spy : public pusch_demodulator_notifier
 {
 public:
-  void on_provisional_stats(const demodulation_stats& stats) override { provisional_stats_entries.emplace_back(stats); }
+  void on_provisional_stats(unsigned i_symbol, const demodulation_stats& stats) override
+  {
+    provisional_stats_entries.emplace_back(stats);
+  }
 
   void on_end_stats(const demodulation_stats& stats) override { end_stats_entries.emplace_back(stats); }
 

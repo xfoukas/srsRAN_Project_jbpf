@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -52,40 +52,43 @@ class dummy_frame_notifier : public frame_notifier
 /// actual frame notifier, which will be later set up through the \ref start() method.
 static dummy_frame_notifier dummy_notifier;
 
-receiver_impl::receiver_impl(const std::string&    interface,
-                             bool                  is_promiscuous_mode_enabled,
-                             task_executor&        executor_,
-                             srslog::basic_logger& logger_) :
-  logger(logger_), executor(executor_), notifier(dummy_notifier), buffer_pool(BUFFER_SIZE)
+receiver_impl::receiver_impl(const receiver_config& config, task_executor& executor_, srslog::basic_logger& logger_) :
+  logger(logger_),
+  executor(executor_),
+  notifier(&dummy_notifier),
+  buffer_pool(BUFFER_SIZE),
+  metrics_collector(config.are_metrics_enabled)
 {
   socket_fd = ::socket(AF_PACKET, SOCK_RAW, htons(ECPRI_ETH_TYPE));
   if (socket_fd < 0) {
     report_error("Unable to open raw socket for Ethernet receiver: {}", strerror(errno));
   }
 
-  if (interface.size() > (IFNAMSIZ - 1)) {
-    report_error("The Ethernet receiver interface name '{}' exceeds the maximum allowed length", interface);
+  if (config.interface.size() > (IFNAMSIZ - 1)) {
+    report_error("The Ethernet receiver interface name '{}' exceeds the maximum allowed length", config.interface);
   }
 
-  if (is_promiscuous_mode_enabled) {
+  if (config.is_promiscuous_mode_enabled) {
     // Set interface to promiscuous mode.
     ::ifreq if_opts;
-    ::strncpy(if_opts.ifr_name, interface.c_str(), IFNAMSIZ - 1);
+    ::strncpy(if_opts.ifr_name, config.interface.c_str(), IFNAMSIZ - 1);
     if (::ioctl(socket_fd, SIOCGIFFLAGS, &if_opts) < 0) {
-      report_error("Unable to get flags for NIC interface in the Ethernet receiver");
+      report_error("Unable to get flags for NIC interface '{}' in the Ethernet receiver", config.interface);
     }
     if_opts.ifr_flags |= IFF_PROMISC;
     if (::ioctl(socket_fd, SIOCSIFFLAGS, &if_opts) < 0) {
-      report_error("Unable to set flags for NIC interface in the Ethernet receiver");
+      report_error("Unable to set flags for NIC interface '{}' in the Ethernet receiver", config.interface);
     }
   }
 
   // Bind to device.
-  if (::setsockopt(socket_fd, SOL_SOCKET, SO_BINDTODEVICE, interface.c_str(), interface.size()) == -1) {
-    report_error("Unable to bind socket in Ethernet receiver");
+  if (::setsockopt(socket_fd, SOL_SOCKET, SO_BINDTODEVICE, config.interface.c_str(), config.interface.size()) == -1) {
+    report_error("Unable to bind socket to the NIC interface '{}' in Ethernet receiver", config.interface);
   }
 
-  logger.info("Opened successfully the NIC interface '{}' used by the Ethernet receiver", interface);
+  logger.info("Opened successfully the NIC interface '{}' (fd = '{}') used by the Ethernet receiver",
+              config.interface,
+              socket_fd);
 }
 
 receiver_impl::~receiver_impl()
@@ -97,29 +100,28 @@ void receiver_impl::start(frame_notifier& notifier_)
 {
   logger.info("Starting the ethernet frame receiver");
 
-  notifier = std::ref(notifier_);
+  notifier = &notifier_;
 
   std::promise<void> p;
   std::future<void>  fut = p.get_future();
 
   if (!executor.defer([this, &p]() {
-        rx_status.store(receiver_status::running, std::memory_order_relaxed);
-        // Signal start() caller thread that the operation is complete.
+        // Signal to the start() caller thread that the operation is complete.
         p.set_value();
         receive_loop();
       })) {
-    report_error("Unable to start the ethernet frame receiver");
+    report_error("Unable to start the ethernet frame receiver, fd = '{}'", socket_fd);
   }
 
   // Block waiting for timing executor to start.
   fut.wait();
 
-  logger.info("Started the ethernet frame receiver");
+  logger.info("Started the ethernet frame receiver with fd = '{}'", socket_fd);
 }
 
 void receiver_impl::stop()
 {
-  logger.info("Requesting stop of the ethernet frame receiver");
+  logger.info("Requesting stop of the ethernet frame receiver with fd = '{}'", socket_fd);
   rx_status.store(receiver_status::stop_requested, std::memory_order_relaxed);
 
   // Wait for the receiver thread to stop.
@@ -127,7 +129,7 @@ void receiver_impl::stop()
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
   }
 
-  logger.info("Stopped the ethernet frame receiver");
+  logger.info("Stopped the ethernet frame receiver with fd = '{}'", socket_fd);
 }
 
 void receiver_impl::receive_loop()
@@ -162,23 +164,32 @@ void receiver_impl::receive()
     return;
   }
 
-  trace_point tp = ofh_tracer.now();
+  auto        meas = metrics_collector.create_time_execution_measurer();
+  trace_point tp   = ofh_tracer.now();
 
   auto exp_buffer = buffer_pool.reserve();
-  if (!exp_buffer.has_value()) {
-    logger.warning("No buffer is available for receiving an Ethernet packet");
+  if (!exp_buffer) {
+    logger.warning("No buffer is available for receiving an Ethernet packet on the port bound to fd = '{}'", socket_fd);
     return;
   }
-  ethernet_rx_buffer_impl buffer    = std::move(exp_buffer.value());
+  ethernet_rx_buffer_impl buffer    = std::move(*exp_buffer);
   span<uint8_t>           data_span = buffer.storage();
   auto                    nof_bytes = ::recvfrom(socket_fd, data_span.data(), BUFFER_SIZE, 0, nullptr, nullptr);
 
   if (nof_bytes < 0) {
-    logger.warning("Ethernet receiver call to recvfrom failed");
+    logger.warning("Ethernet receiver call to recvfrom failed, fd = '{}'", socket_fd);
+    metrics_collector.update_stats(meas.stop());
     return;
   }
   buffer.resize(nof_bytes);
 
-  notifier.get().on_new_frame(unique_rx_buffer(std::move(buffer)));
+  metrics_collector.update_stats(meas.stop(), nof_bytes);
+
+  notifier->on_new_frame(unique_rx_buffer(std::move(buffer)));
   ofh_tracer << trace_event("ofh_receiver", tp);
+}
+
+receiver_metrics_collector* receiver_impl::get_metrics_collector()
+{
+  return metrics_collector.disabled() ? nullptr : &metrics_collector;
 }

@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -46,7 +46,7 @@ public:
       unsigned M_sc     = M_rb * NRE;
       unsigned dft_size = entry.second->get_size();
       srsran_assert(
-          is_transform_precoding_nof_prb_valid(M_rb), "Invalid number of resource elements (i.e., {}).", M_rb);
+          transform_precoding::is_nof_prbs_valid(M_rb), "Invalid number of resource elements (i.e., {}).", M_rb);
       srsran_assert(M_sc == dft_size,
                     "The DFT size (i.e., {}) is not consistent with the number of subcarriers (i.e., {}).",
                     dft_size,
@@ -60,6 +60,9 @@ public:
 
   // See interface for documentation.
   void deprecode_ofdm_symbol(span<cf_t> out, span<const cf_t> in) override;
+
+  // See interface for documentation.
+  void deprecode_ofdm_symbol_noise(span<float> out, span<const float> in) override;
 
 private:
   /// Collection of valid DFT processors.

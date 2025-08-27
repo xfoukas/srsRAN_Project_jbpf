@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -49,6 +49,9 @@ private:
   /// Pseudo-random sequence generator instance.
   std::unique_ptr<pseudo_random_generator> prg;
 
+  /// Resource grid mapper instance.
+  std::unique_ptr<resource_grid_mapper> mapper;
+
   /// Temporary sequence storage.
   std::array<cf_t, MAX_NOF_DMRS_PER_SYMBOL> temp_sequence;
 
@@ -58,33 +61,36 @@ private:
   /// \return The initial pseudo-random state.
   static unsigned c_init(unsigned symbol, const config_t& config);
 
-  /// \brief Sequence generation as per TS 38.211 Section 7.4.1.3.1.
+  /// \brief Sequence generation as per TS38.211 Section 7.4.1.3.1.
   ///
-  /// This method generates the sequence described in TS 38.211 Section 7.4.1.3.1, considering the only values required
-  /// to fill the resource blocks according to TS 38.211 Section 7.3.2.
+  /// This method generates the sequence described in TS38.211 Section 7.4.1.3.1, considering the only values required
+  /// to fill the resource blocks according to TS38.211 Section 7.3.2.
   ///
   /// \param[out] sequence Sequence destination.
   /// \param[in] symbol    Symbol index within the slot.
   /// \param[in] config    Required parameters to calculate the sequences.
   void sequence_generation(span<cf_t> sequence, unsigned symbol, const config_t& config) const;
 
-  /// \brief Mapping to physical resources as per TS 38.211 Section 7.4.1.3.2.
+  /// \brief Mapping to physical resources as per TS38.211 Section 7.4.1.3.2.
   ///
-  /// This method implements the signal mapping as described in TS 38.211 Section 7.4.1.3.2.
+  /// This method implements the signal mapping as described in TS38.211 Section 7.4.1.3.2.
   ///
-  /// \param[out] mapper          Resource grid mapper interface.
-  /// \param[in] d_pdcch          PDCCH resource elements to map in the resource grid.
-  /// \param[in] config           PDCCH modulator parameters.
-  void mapping(resource_grid_mapper& mapper, const re_buffer_reader<>& d_pdcch, const config_t& config);
+  /// \param[out] grid   Resource grid writer interface.
+  /// \param[in] d_pdcch PDCCH resource elements to map in the resource grid.
+  /// \param[in] config  PDCCH modulator parameters.
+  void mapping(resource_grid_writer& grid, const re_buffer_reader<>& d_pdcch, const config_t& config);
 
 public:
-  explicit dmrs_pdcch_processor_impl(std::unique_ptr<pseudo_random_generator> prg_) : prg(std::move(prg_))
+  explicit dmrs_pdcch_processor_impl(std::unique_ptr<pseudo_random_generator> prg_,
+                                     std::unique_ptr<resource_grid_mapper>    mapper_) :
+    prg(std::move(prg_)), mapper(std::move(mapper_))
   {
     srsran_assert(prg, "Invalid PRG.");
+    srsran_assert(mapper, "Invalid resource grid mapper.");
   }
 
   // See interface for documentation.
-  void map(resource_grid_mapper& grid, const config_t& config) override;
+  void map(resource_grid_writer& grid, const config_t& config) override;
 };
 
 } // namespace srsran

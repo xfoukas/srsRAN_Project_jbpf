@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -21,7 +21,6 @@
  */
 
 #include "srsran/support/io/sctp_socket.h"
-#include "srsran/adt/optional.h"
 #include "srsran/srslog/srslog.h"
 #include "srsran/support/error_handling.h"
 #include "srsran/support/io/sockets.h"
@@ -49,12 +48,12 @@ bool sctp_subscribe_to_events(const unique_fd& fd)
 
 /// \brief Modify SCTP default parameters for quicker detection of broken links.
 /// Changes to the maximum re-transmission timeout (rto_max).
-bool sctp_set_rto_opts(const unique_fd&      fd,
-                       std::optional<int>    rto_initial,
-                       std::optional<int>    rto_min,
-                       std::optional<int>    rto_max,
-                       const std::string&    if_name,
-                       srslog::basic_logger& logger)
+bool sctp_set_rto_opts(const unique_fd&                         fd,
+                       std::optional<std::chrono::milliseconds> rto_initial,
+                       std::optional<std::chrono::milliseconds> rto_min,
+                       std::optional<std::chrono::milliseconds> rto_max,
+                       const std::string&                       if_name,
+                       srslog::basic_logger&                    logger)
 {
   srsran_sanity_check(fd.is_open(), "Invalid FD");
 
@@ -66,20 +65,20 @@ bool sctp_set_rto_opts(const unique_fd&      fd,
   // Set RTO_MAX to quickly detect broken links.
   sctp_rtoinfo rto_opts  = {};
   socklen_t    rto_sz    = sizeof(sctp_rtoinfo);
-  rto_opts.srto_assoc_id = 0;
+  rto_opts.srto_assoc_id = SCTP_FUTURE_ASSOC;
   if (getsockopt(fd.value(), SOL_SCTP, SCTP_RTOINFO, &rto_opts, &rto_sz) < 0) {
     logger.error("{}: Error getting RTO_INFO sockopts. errno={}", if_name, strerror(errno));
     return false; // Responsibility of closing the socket is on the caller
   }
 
   if (rto_initial.has_value()) {
-    rto_opts.srto_initial = rto_initial.value();
+    rto_opts.srto_initial = rto_initial.value().count();
   }
   if (rto_min.has_value()) {
-    rto_opts.srto_min = rto_min.value();
+    rto_opts.srto_min = rto_min.value().count();
   }
   if (rto_max.has_value()) {
-    rto_opts.srto_max = rto_max.value();
+    rto_opts.srto_max = rto_max.value().count();
   }
 
   logger.debug(
@@ -99,11 +98,11 @@ bool sctp_set_rto_opts(const unique_fd&      fd,
 
 /// \brief Modify SCTP default parameters for quicker detection of broken links.
 /// Changes to the SCTP_INITMSG parameters (to control the timeout of the connect() syscall)
-bool sctp_set_init_msg_opts(const unique_fd&      fd,
-                            std::optional<int>    init_max_attempts,
-                            std::optional<int>    max_init_timeo,
-                            const std::string&    if_name,
-                            srslog::basic_logger& logger)
+bool sctp_set_init_msg_opts(const unique_fd&                         fd,
+                            std::optional<int>                       init_max_attempts,
+                            std::optional<std::chrono::milliseconds> max_init_timeo,
+                            const std::string&                       if_name,
+                            srslog::basic_logger&                    logger)
 {
   srsran_sanity_check(fd.is_open(), "Invalid FD");
 
@@ -125,7 +124,7 @@ bool sctp_set_init_msg_opts(const unique_fd&      fd,
     init_opts.sinit_max_attempts = init_max_attempts.value();
   }
   if (max_init_timeo.has_value()) {
-    init_opts.sinit_max_init_timeo = max_init_timeo.value();
+    init_opts.sinit_max_init_timeo = max_init_timeo.value().count();
   }
 
   logger.debug("{}: Setting SCTP_INITMSG options on SCTP socket. Max attempts {}, Max init attempts timeout {}",
@@ -135,6 +134,82 @@ bool sctp_set_init_msg_opts(const unique_fd&      fd,
   if (::setsockopt(fd.value(), SOL_SCTP, SCTP_INITMSG, &init_opts, init_sz) < 0) {
     logger.error("{}: Error setting SCTP_INITMSG sockopts. errno={}\n", if_name, strerror(errno));
     return false; // Responsibility of closing the socket is on the caller
+  }
+  return true;
+}
+
+/// \brief Modify SCTP default Peer Address parameters for quicker detection of broken links.
+/// Changes to the heartbeat interval.
+bool sctp_set_paddr_opts(const unique_fd&                         fd,
+                         std::optional<std::chrono::milliseconds> hb_interval,
+                         const std::string&                       if_name,
+                         srslog::basic_logger&                    logger)
+{
+  srsran_sanity_check(fd.is_open(), "Invalid FD");
+
+  if (not hb_interval.has_value()) {
+    // no need to set heartbeat interval
+    return true;
+  }
+
+  // Set SCTP_PEER_ADDR_PARAMS to quickly detect broken links.
+  sctp_paddrparams paddr_opts = {};
+  socklen_t        paddr_sz   = sizeof(sctp_paddrparams);
+  paddr_opts.spp_assoc_id     = SCTP_FUTURE_ASSOC;
+  if (getsockopt(fd.value(), SOL_SCTP, SCTP_PEER_ADDR_PARAMS, &paddr_opts, &paddr_sz) < 0) {
+    logger.error("{}: Error getting SCTP_PEER_ADDR_PARAMS sockopts. errno={}", if_name, strerror(errno));
+    return false; // Responsibility of closing the socket is on the caller
+  }
+
+  if (hb_interval.has_value()) {
+    paddr_opts.spp_hbinterval = hb_interval.value().count();
+  }
+
+  logger.debug("{}: Setting SCTP_PEER_ADDR_PARAMS options on SCTP socket. Heartbeat Interval={}",
+               if_name,
+               (unsigned)paddr_opts.spp_hbinterval);
+
+  if (::setsockopt(fd.value(), SOL_SCTP, SCTP_PEER_ADDR_PARAMS, &paddr_opts, paddr_sz) < 0) {
+    logger.error("{}: Error setting SCTP_PEER_ADDR_PARAMS sockopts. errno={}", if_name, strerror(errno));
+    return false;
+  }
+  return true;
+}
+
+/// \brief Modify SCTP default Assocination parameters for quicker detection of broken links.
+/// Changes to the maximum number of re-transmission sent before a address is considered unreachable.
+bool sctp_set_assoc_opts(const unique_fd&      fd,
+                         std::optional<int>    assoc_max_rxt,
+                         const std::string&    if_name,
+                         srslog::basic_logger& logger)
+{
+  srsran_sanity_check(fd.is_open(), "Invalid FD");
+
+  if (not assoc_max_rxt.has_value()) {
+    // no need to set assoc max rxt
+    return true;
+  }
+
+  // Set SCTP_ASSOCINFO to quickly detect broken links.
+  sctp_assocparams assoc_opts = {};
+  socklen_t        assoc_sz   = sizeof(sctp_assocparams);
+  assoc_opts.sasoc_assoc_id   = SCTP_FUTURE_ASSOC;
+  if (getsockopt(fd.value(), SOL_SCTP, SCTP_ASSOCINFO, &assoc_opts, &assoc_sz) < 0) {
+    logger.error("{}: Error getting SCTP_ASSOCINFO sockopts. errno={}", if_name, strerror(errno));
+    return false; // Responsibility of closing the socket is on the caller
+  }
+
+  if (assoc_max_rxt.has_value()) {
+    assoc_opts.sasoc_asocmaxrxt = assoc_max_rxt.value();
+  }
+
+  logger.debug("{}: Setting SCTP_ASSOCINFO options on SCTP socket. Maximum Retransmissions {}",
+               if_name,
+               assoc_opts.sasoc_asocmaxrxt);
+
+  if (::setsockopt(fd.value(), SOL_SCTP, SCTP_ASSOCINFO, &assoc_opts, assoc_sz) < 0) {
+    logger.error("{}: Error setting SCTP_ASSOCINFO sockopts. errno={}", if_name, strerror(errno));
+    return false;
   }
   return true;
 }
@@ -206,11 +281,6 @@ sctp_socket& sctp_socket::operator=(sctp_socket&& other) noexcept
   return *this;
 }
 
-sctp_socket::~sctp_socket()
-{
-  close();
-}
-
 bool sctp_socket::close()
 {
   if (not sock_fd.is_open()) {
@@ -225,8 +295,7 @@ bool sctp_socket::close()
   return true;
 }
 
-SRSRAN_NODISCARD bool
-sctp_socket::bind(struct sockaddr& ai_addr, const socklen_t& ai_addrlen, const std::string& bind_interface)
+bool sctp_socket::bind(struct sockaddr& ai_addr, const socklen_t& ai_addrlen, const std::string& bind_interface)
 {
   if (not is_open()) {
     logger.error("Failed to bind to {}. Cause: Socket is closed", get_nameinfo(ai_addr, ai_addrlen));
@@ -256,7 +325,7 @@ sctp_socket::bind(struct sockaddr& ai_addr, const socklen_t& ai_addrlen, const s
   return true;
 }
 
-SRSRAN_NODISCARD bool sctp_socket::connect(struct sockaddr& ai_addr, const socklen_t& ai_addrlen)
+bool sctp_socket::connect(struct sockaddr& ai_addr, const socklen_t& ai_addrlen)
 {
   logger.debug("{}: Connecting to {}...", if_name, get_nameinfo(ai_addr, ai_addrlen));
   if (not is_open()) {
@@ -279,7 +348,7 @@ SRSRAN_NODISCARD bool sctp_socket::connect(struct sockaddr& ai_addr, const sockl
   return true;
 }
 
-SRSRAN_NODISCARD bool sctp_socket::listen()
+bool sctp_socket::listen()
 {
   if (not is_open()) {
     logger.error("{}: Failed to listen for new SCTP connections. Cause: socket is closed", if_name);
@@ -326,6 +395,16 @@ bool sctp_socket::set_sockopts(const sctp_socket_params& params)
 
   // Set SCTP init options
   if (not sctp_set_init_msg_opts(sock_fd, params.init_max_attempts, params.max_init_timeo, if_name, logger)) {
+    return false;
+  }
+
+  // Set SCTP association options
+  if (not sctp_set_assoc_opts(sock_fd, params.assoc_max_rxt, if_name, logger)) {
+    return false;
+  }
+
+  // Set SCTP peer address options
+  if (not sctp_set_paddr_opts(sock_fd, params.hb_interval, if_name, logger)) {
     return false;
   }
 

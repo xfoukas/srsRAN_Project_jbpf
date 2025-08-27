@@ -1,5 +1,5 @@
 #
-# Copyright 2021-2024 Software Radio Systems Limited
+# Copyright 2021-2025 Software Radio Systems Limited
 #
 # This file is part of srsRAN
 #
@@ -18,9 +18,13 @@
 # and at http://www.gnu.org/licenses/.
 #
 
-add_subdirectory(examples)
 add_subdirectory(cu)
-add_subdirectory(gnb)
+add_subdirectory(cu_cp)
+add_subdirectory(cu_up)
 add_subdirectory(du)
-add_subdirectory(units)
+add_subdirectory(du_low)
+add_subdirectory(examples)
+add_subdirectory(gnb)
+add_subdirectory(helpers)
 add_subdirectory(services)
+add_subdirectory(units)

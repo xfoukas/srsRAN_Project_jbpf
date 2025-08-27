@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -22,12 +22,12 @@
 
 #include "ptrs_pdsch_generator_impl.h"
 #include "srsran/phy/support/resource_grid_mapper.h"
+#include "srsran/ran/precoding/precoding_weight_matrix_formatters.h"
 #include "srsran/ran/ptrs/ptrs_pattern.h"
 
 using namespace srsran;
 
-void ptrs_pdsch_generator_generic_impl::generate(resource_grid_mapper&                      mapper,
-                                                 const ptrs_pdsch_generator::configuration& config)
+void ptrs_pdsch_generator_generic_impl::generate(resource_grid_writer& grid, const configuration& config)
 {
   // Get the number of ports used for PT-RS: it is equal to the number of layers used for the PDSCH transmission.
   unsigned nof_ports = config.precoding.get_nof_layers();
@@ -108,16 +108,16 @@ void ptrs_pdsch_generator_generic_impl::generate(resource_grid_mapper&          
 
     // Prepare RE mapping pattern for the symbol.
     re_pattern map_pattern;
-    map_pattern.prb_mask.resize(config.rb_mask.size());
+    map_pattern.crb_mask.resize(config.rb_mask.size());
     map_pattern.symbols.resize(MAX_NSYMB_PER_SLOT);
     map_pattern.symbols.set(i_symbol);
     for (unsigned i_prb = pattern.rb_begin; i_prb < pattern.rb_end; i_prb += pattern.rb_stride) {
-      map_pattern.prb_mask.set(i_prb);
+      map_pattern.crb_mask.set(i_prb);
     }
     map_pattern.re_mask.resize(NOF_SUBCARRIERS_PER_RB);
     map_pattern.re_mask.set(pattern.re_offset[0]);
 
     // Map sequence in the resource grid.
-    mapper.map(sequence, map_pattern, port_precoding);
+    mapper->map(grid, sequence, map_pattern, port_precoding);
   }
 }

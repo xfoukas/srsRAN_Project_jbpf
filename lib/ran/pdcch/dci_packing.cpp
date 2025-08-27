@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -24,7 +24,8 @@
 #include "srsran/adt/interval.h"
 #include "srsran/adt/span.h"
 #include "srsran/ran/pdcch/dci_packing_formatters.h"
-#include "srsran/support/math_utils.h"
+#include "srsran/support/math/math_utils.h"
+#include "fmt/std.h"
 
 using namespace srsran;
 
@@ -203,7 +204,7 @@ static units::bits ul_precoding_info_size_2port(tx_scheme_codebook_subset codebo
   using namespace units::literals;
   srsran_assert(codebook_subset != tx_scheme_codebook_subset::partial_and_non_coherent,
                 "Codebook subset \"partial and non-coherent\" is not supported with two ports.",
-                codebook_subset);
+                fmt::underlying(codebook_subset));
 
   if (codebook_subset == tx_scheme_codebook_subset::fully_and_partial_and_non_coherent) {
     return 4_bits;
@@ -218,13 +219,13 @@ static units::bits ul_precoding_info_size_2port_maxrank1(tx_scheme_codebook_subs
   using namespace units::literals;
   srsran_assert(codebook_subset != tx_scheme_codebook_subset::partial_and_non_coherent,
                 "Codebook subset \"partial and non-coherent\" is not supported with two ports.",
-                codebook_subset);
+                fmt::underlying(codebook_subset));
 
   if (codebook_subset == tx_scheme_codebook_subset::fully_and_partial_and_non_coherent) {
     return 3_bits;
   }
 
-  return 2_bits;
+  return 1_bits;
 }
 
 // Computes the UL precoding information field size for DCI format 0_1.
@@ -524,6 +525,11 @@ static dci_1_1_size dci_f1_1_bits_before_padding(const dci_size_config& dci_conf
   sizes.total += sizes.time_resource;
 
   // VRB-to-PRB mapping - 0 or 1 bit.
+  // As per TS 38.212, Section 7.3.1.2.2, the VRB-to-PRB mapping size is "0 bit if only resource allocation type 0 is
+  // configured or if interleaved VRB-to-PRB mapping is not configured by high layers". In the following,
+  // dci_config.interleaved_vrb_prb_mapping (if present) is used to determine if the interleaved VRB-to-PRB mapping is
+  // configured by high layers; dci_config.interleaved_vrb_prb_mapping is not required to be present for
+  // resource_allocation_type_0.
   sizes.vrb_prb_mapping = (dci_config.pdsch_res_allocation_type != resource_allocation::resource_allocation_type_0) &&
                                   dci_config.interleaved_vrb_prb_mapping.value()
                               ? units::bits(1)
@@ -980,7 +986,7 @@ dci_payload srsran::dci_1_0_c_rnti_pack(const dci_1_0_c_rnti_configuration& conf
   payload.push_back(config.time_resource, 4);
 
   // VRB-to-PRB mapping - 1 bit.
-  payload.push_back(config.vrb_to_prb_mapping, 1);
+  payload.push_back(config.vrb_to_prb_mapping != vrb_to_prb::mapping_type::non_interleaved, 1);
 
   // Modulation coding scheme - 5 bits.
   payload.push_back(config.modulation_coding_scheme, 5);
@@ -1055,7 +1061,7 @@ dci_payload srsran::dci_1_0_p_rnti_pack(const dci_1_0_p_rnti_configuration& conf
     payload.push_back(config.time_resource, 4);
 
     // VRB-to-PRB mapping - 1 bit.
-    payload.push_back(config.vrb_to_prb_mapping, 1);
+    payload.push_back(config.vrb_to_prb_mapping != vrb_to_prb::mapping_type::non_interleaved, 1);
 
     // Modulation and coding scheme - 5 bits.
     payload.push_back(config.modulation_coding_scheme, 5);
@@ -1082,7 +1088,7 @@ dci_payload srsran::dci_1_0_si_rnti_pack(const dci_1_0_si_rnti_configuration& co
   payload.push_back(config.time_resource, 4);
 
   // VRB-to-PRB mapping - 1 bit.
-  payload.push_back(config.vrb_to_prb_mapping, 1);
+  payload.push_back(config.vrb_to_prb_mapping != vrb_to_prb::mapping_type::non_interleaved, 1);
 
   // Modulation coding scheme - 5 bits.
   payload.push_back(config.modulation_coding_scheme, 5);
@@ -1111,7 +1117,7 @@ dci_payload srsran::dci_1_0_ra_rnti_pack(const dci_1_0_ra_rnti_configuration& co
   payload.push_back(config.time_resource, 4);
 
   // VRB-to-PRB mapping - 1 bit.
-  payload.push_back(config.vrb_to_prb_mapping, 1);
+  payload.push_back(config.vrb_to_prb_mapping != vrb_to_prb::mapping_type::non_interleaved, 1);
 
   // Modulation and coding scheme - 5 bits.
   payload.push_back(config.modulation_coding_scheme, 5);
@@ -1140,7 +1146,7 @@ dci_payload srsran::dci_1_0_tc_rnti_pack(const dci_1_0_tc_rnti_configuration& co
   payload.push_back(config.time_resource, 4);
 
   // VRB-to-PRB mapping - 1 bit.
-  payload.push_back(config.vrb_to_prb_mapping, 1);
+  payload.push_back(config.vrb_to_prb_mapping != vrb_to_prb::mapping_type::non_interleaved, 1);
 
   // Modulation coding scheme - 5 bits.
   payload.push_back(config.modulation_coding_scheme, 5);
@@ -1370,7 +1376,7 @@ dci_payload srsran::dci_1_1_pack(const dci_1_1_configuration& config)
 
   // VRB-to-PRB mapping - 0 or 1 bit.
   if (config.vrb_prb_mapping.has_value()) {
-    payload.push_back(config.vrb_prb_mapping.value(), config.payload_size.vrb_prb_mapping.value());
+    payload.push_back(config.vrb_prb_mapping.value() ? 1U : 0U, config.payload_size.vrb_prb_mapping.value());
   }
 
   // PRB bundling size indicator - 0 or 1 bit.
@@ -1504,8 +1510,8 @@ error_type<std::string> srsran::validate_dci_size_config(const dci_size_config& 
   static constexpr unsigned max_nof_time_domain_res = 16;
 
   // Valid bandwidth range.
-  static constexpr interval<unsigned, true> bwp_bw_range(1, MAX_RB);
-  static constexpr interval<unsigned, true> coreset0_bw_range(0, MAX_RB);
+  static constexpr interval<unsigned, true> bwp_bw_range(1, MAX_NOF_PRBS);
+  static constexpr interval<unsigned, true> coreset0_bw_range(0, MAX_NOF_PRBS);
   static constexpr interval<unsigned, true> nof_bwp_rrc_range(0, max_nof_bwp_rrc);
   static constexpr interval<unsigned, true> nof_time_domain_res_range(1, max_nof_time_domain_res);
   static constexpr interval<unsigned, true> non_codebook_nof_srs_res_range(1, 4);
@@ -1620,8 +1626,8 @@ error_type<std::string> srsran::validate_dci_size_config(const dci_size_config& 
         return make_unexpected("The number of UL RBGs is required for resource allocation type 0.");
       }
       if (!nof_rb_groups_range.contains(config.nof_ul_rb_groups.value())) {
-        return make_unexpected(fmt::format(
-            "The number of UL RBGs {} is out of range {}.", config.nof_ul_rb_groups.value(), nof_rb_groups_range));
+        return make_unexpected(
+            fmt::format("The number of UL RBGs {} is out of range {}.", config.nof_ul_rb_groups, nof_rb_groups_range));
       }
     }
 
@@ -1632,8 +1638,8 @@ error_type<std::string> srsran::validate_dci_size_config(const dci_size_config& 
         return make_unexpected("The number of DL RBGs is required for resource allocation type 0.");
       }
       if (!nof_rb_groups_range.contains(config.nof_dl_rb_groups.value())) {
-        return make_unexpected(fmt::format(
-            "The number of DL RBGs {} is out of range {}.", config.nof_dl_rb_groups.value(), nof_rb_groups_range));
+        return make_unexpected(
+            fmt::format("The number of DL RBGs {} is out of range {}.", config.nof_dl_rb_groups, nof_rb_groups_range));
       }
     }
 
@@ -1660,9 +1666,8 @@ error_type<std::string> srsran::validate_dci_size_config(const dci_size_config& 
 
       // PUSCH max number of layers must be within the valid range.
       if (!pusch_max_layers_range.contains(config.pusch_max_layers.value())) {
-        return make_unexpected(fmt::format("Maximum number of PUSCH layers {} is out of range {}.",
-                                           config.pusch_max_layers.value(),
-                                           pusch_max_layers_range));
+        return make_unexpected(fmt::format(
+            "Maximum number of PUSCH layers {} is out of range {}.", config.pusch_max_layers, pusch_max_layers_range));
       }
 
       // Multiple layers on PUSCH are not currently supported.
@@ -1738,7 +1743,7 @@ error_type<std::string> srsran::validate_dci_size_config(const dci_size_config& 
       // The Maximum PUSCH CBG per TB must be set to a valid value.
       if (!max_cbg_tb_is_valid(config.max_cbg_tb_pusch.value())) {
         return make_unexpected(
-            fmt::format("The maximum CBG per PUSCH TB {} is neither 2, 4, 6, nor 8.", config.max_cbg_tb_pusch.value()));
+            fmt::format("The maximum CBG per PUSCH TB {} is neither 2, 4, 6, nor 8.", config.max_cbg_tb_pusch));
       }
     }
 
@@ -1746,7 +1751,7 @@ error_type<std::string> srsran::validate_dci_size_config(const dci_size_config& 
       // The Maximum PDSCH CBG per TB must be set to a valid value.
       if (!max_cbg_tb_is_valid(config.max_cbg_tb_pdsch.value())) {
         return make_unexpected(
-            fmt::format("The maximum CBG per PDSCH TB {} is neither 2, 4, 6, nor 8.", config.max_cbg_tb_pdsch.value()));
+            fmt::format("The maximum CBG per PDSCH TB {} is neither 2, 4, 6, nor 8.", config.max_cbg_tb_pdsch));
       }
     }
   }

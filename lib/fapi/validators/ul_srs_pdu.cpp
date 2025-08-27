@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -22,7 +22,7 @@
 
 #include "ul_srs_pdu.h"
 #include "field_checkers.h"
-#include "srsran/fapi/messages.h"
+#include "srsran/fapi/messages/ul_tti_request.h"
 #include "srsran/ran/srs/srs_configuration.h"
 
 using namespace srsran;
@@ -237,8 +237,8 @@ static bool validate_frequency_hopping(unsigned value, validator_report& report)
 /// Validates the group or sequence hopping property of the SRS PDU, as per SCF-222 v4.0 Section 3.4.3.3
 static bool validate_group_or_sequence_hopping(srs_group_or_sequence_hopping value, validator_report& report)
 {
-  if (value == srs_group_or_sequence_hopping::groupHopping || value == srs_group_or_sequence_hopping::sequenceHopping ||
-      value == srs_group_or_sequence_hopping::neither) {
+  if (value == srs_group_or_sequence_hopping::group_hopping ||
+      value == srs_group_or_sequence_hopping::sequence_hopping || value == srs_group_or_sequence_hopping::neither) {
     return true;
   }
 

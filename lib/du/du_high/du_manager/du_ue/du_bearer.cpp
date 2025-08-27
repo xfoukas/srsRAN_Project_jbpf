@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -22,7 +22,6 @@
 
 #include "du_bearer.h"
 #include "../converters/rlc_config_helpers.h"
-#include "srsran/du/du_high/du_manager/du_manager_params.h"
 #include "srsran/f1u/du/f1u_bearer_factory.h"
 #include "srsran/gtpu/gtpu_teid_pool.h"
 #include "srsran/srslog/srslog.h"
@@ -128,55 +127,58 @@ void du_ue_drb::stop()
 
 std::unique_ptr<du_ue_drb> srsran::srs_du::create_drb(const drb_creation_info& drb_info)
 {
-  srsran_assert(not is_srb(drb_info.lcid), "Invalid DRB LCID={}", drb_info.lcid);
+  srsran_assert(not is_srb(drb_info.lcid), "Invalid DRB LCID={}", fmt::underlying(drb_info.lcid));
   srsran_assert(not drb_info.uluptnl_info_list.empty(), "Invalid UP TNL Info list");
 
   const du_ue_index_t ue_index  = drb_info.ue_index;
   f1u_du_gateway&     f1u_gw    = drb_info.du_params.f1u.f1u_gw;
   gtpu_teid_pool&     teid_pool = drb_info.teid_pool;
 
-  // > Get DL UP TNL bind address.
-  expected<std::string> f1u_bind_string = f1u_gw.get_du_bind_address(drb_info.du_params.ran.gnb_du_id);
-  srsran_assert(f1u_bind_string.has_value(), "Unable to bind F1U address");
-  transport_layer_address f1u_bind_addr = transport_layer_address::create_from_string(f1u_bind_string.value());
-
   // > Setup DL UP TNL info.
   expected<gtpu_teid_t> dl_teid = teid_pool.request_teid();
   if (not dl_teid.has_value()) {
-    srslog::fetch_basic_logger("DU-MNG").warning("ue={}: Failed to allocate DL GTP-TEID.", ue_index);
+    srslog::fetch_basic_logger("DU-MNG").warning("ue={}: Failed to allocate DL GTP-TEID.", fmt::underlying(ue_index));
     return nullptr;
   }
-  // Note: We are computing the DL GTP-TEID as a concatenation of the UE index and DRB-id.
-  std::array<up_transport_layer_info, 1> dluptnl_info_list = {up_transport_layer_info{f1u_bind_addr, dl_teid.value()}};
 
   // > Create DRB instance.
   std::unique_ptr<du_ue_drb> drb = std::make_unique<du_ue_drb>();
 
   // > Setup DRB config
-  drb->drb_id = drb_info.drb_id;
-  drb->lcid   = drb_info.lcid;
+  drb->drb_id  = drb_info.drb_id;
+  drb->lcid    = drb_info.lcid;
+  drb->five_qi = drb_info.five_qi;
   drb->uluptnl_info_list.assign(drb_info.uluptnl_info_list.begin(), drb_info.uluptnl_info_list.end());
-  drb->dluptnl_info_list.assign(dluptnl_info_list.begin(), dluptnl_info_list.end());
 
   drb->f1u_gw_bearer = drb_info.du_params.f1u.f1u_gw.create_du_bearer(
       ue_index,
       drb->drb_id,
+      drb->five_qi,
       drb_info.f1u_cfg,
-      drb->dluptnl_info_list[0],
+      dl_teid.value(),
       drb->uluptnl_info_list[0],
       drb->connector.f1u_gateway_nru_rx_notif,
       timer_factory{drb_info.du_params.services.timers, drb_info.du_params.services.ue_execs.ctrl_executor(ue_index)},
       drb_info.du_params.services.ue_execs.f1u_dl_pdu_executor(ue_index));
   if (drb->f1u_gw_bearer == nullptr) {
-    srslog::fetch_basic_logger("DU-MNG").warning("ue={}: Failed to connect F1-U GW bearer to CU-UP.", ue_index);
+    srslog::fetch_basic_logger("DU-MNG").warning("ue={}: Failed to connect F1-U GW bearer to CU-UP.",
+                                                 fmt::underlying(ue_index));
     return nullptr;
   }
+
+  // > Get DL UP TNL bind address.
+  expected<std::string> f1u_bind_string = drb->f1u_gw_bearer->get_bind_address();
+  srsran_assert(f1u_bind_string.has_value(), "Unable to bind F1-U address");
+  transport_layer_address f1u_bind_addr = transport_layer_address::create_from_string(f1u_bind_string.value());
+  std::array<up_transport_layer_info, 1> dluptnl_info_list = {up_transport_layer_info{f1u_bind_addr, dl_teid.value()}};
+  drb->dluptnl_info_list.assign(dluptnl_info_list.begin(), dluptnl_info_list.end());
 
   // > Create F1-U bearer.
   f1u_bearer_creation_message f1u_msg = {};
   f1u_msg.ue_index                    = ue_index;
   f1u_msg.drb_id                      = drb->drb_id;
   f1u_msg.config                      = drb_info.f1u_cfg;
+  f1u_msg.config.buffer_ul_on_startup = drb_info.is_handover;
   f1u_msg.dl_tnl_info                 = drb->dluptnl_info_list[0];
   f1u_msg.rx_sdu_notifier             = &drb->connector.f1u_rx_sdu_notif;
   f1u_msg.tx_pdu_notifier             = drb->f1u_gw_bearer.get();
@@ -187,7 +189,7 @@ std::unique_ptr<du_ue_drb> srsran::srs_du::create_drb(const drb_creation_info& d
 
   drb->drb_f1u = srs_du::create_f1u_bearer(f1u_msg);
   if (drb->f1u_gw_bearer == nullptr) {
-    srslog::fetch_basic_logger("DU-MNG").warning("ue={}: Failed to create F1-U bearer.", ue_index);
+    srslog::fetch_basic_logger("DU-MNG").warning("ue={}: Failed to create F1-U bearer.", fmt::underlying(ue_index));
     return nullptr;
   }
 

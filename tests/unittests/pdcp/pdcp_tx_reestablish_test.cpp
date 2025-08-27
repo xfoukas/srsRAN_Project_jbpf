@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -23,6 +23,7 @@
 #include "pdcp_tx_reestablish_test.h"
 #include "pdcp_test_vectors.h"
 #include "srsran/pdcp/pdcp_config.h"
+#include "srsran/support/test_utils.h"
 #include <gtest/gtest.h>
 #include <queue>
 
@@ -37,7 +38,7 @@ TEST_P(pdcp_tx_reestablish_test, when_srb_reestablish_then_pdus_dropped)
   init(GetParam(), pdcp_rb_type::srb);
 
   // Set state of PDCP entiy
-  pdcp_tx_state st = {0};
+  pdcp_tx_state st = {0, 0, 0};
   pdcp_tx->set_state(st);
   pdcp_tx->configure_security(sec_cfg, security::integrity_enabled::on, security::ciphering_enabled::off);
 
@@ -48,12 +49,13 @@ TEST_P(pdcp_tx_reestablish_test, when_srb_reestablish_then_pdus_dropped)
     pdcp_tx->handle_sdu(std::move(sdu));
   }
 
-  ASSERT_EQ(5, pdcp_tx->nof_discard_timers());
+  FLUSH_AND_ASSERT_EQ(5, pdcp_tx->nof_pdus_in_window());
   pdcp_tx->reestablish({});
-  ASSERT_EQ(0, pdcp_tx->nof_discard_timers());
+  FLUSH_AND_ASSERT_EQ(0, pdcp_tx->nof_pdus_in_window());
 
   // Check the state is reset
-  ASSERT_EQ(pdcp_tx->get_state(), pdcp_tx_state{});
+  pdcp_tx_state exp_st{0, 0, 0};
+  FLUSH_AND_ASSERT_EQ(pdcp_tx->get_state(), exp_st);
 }
 
 /// Test DRB UM reestablishment
@@ -62,7 +64,7 @@ TEST_P(pdcp_tx_reestablish_test, when_drb_um_reestablish_then_pdus_and_discard_t
   init(GetParam(), pdcp_rb_type::drb, pdcp_rlc_mode::um);
 
   // Set state of PDCP entiy
-  pdcp_tx_state st = {0};
+  pdcp_tx_state st = {0, 0, 0};
   pdcp_tx->set_state(st);
   pdcp_tx->configure_security(sec_cfg, security::integrity_enabled::on, security::ciphering_enabled::off);
 
@@ -72,12 +74,13 @@ TEST_P(pdcp_tx_reestablish_test, when_drb_um_reestablish_then_pdus_and_discard_t
     byte_buffer sdu = byte_buffer::create(sdu1).value();
     pdcp_tx->handle_sdu(std::move(sdu));
   }
-  ASSERT_EQ(5, pdcp_tx->nof_discard_timers());
+  FLUSH_AND_ASSERT_EQ(5, pdcp_tx->nof_pdus_in_window());
   pdcp_tx->reestablish(sec_cfg);
-  ASSERT_EQ(0, pdcp_tx->nof_discard_timers());
+  FLUSH_AND_ASSERT_EQ(0, pdcp_tx->nof_pdus_in_window());
 
   // Check the state is reset
-  ASSERT_EQ(pdcp_tx->get_state(), pdcp_tx_state{});
+  pdcp_tx_state exp_st{0, 0, 0};
+  FLUSH_AND_ASSERT_EQ(pdcp_tx->get_state(), exp_st);
 }
 
 /// Test DRB AM reestablishment
@@ -86,7 +89,7 @@ TEST_P(pdcp_tx_reestablish_test, when_drb_am_reestablish_then_pdus_retx)
   init(GetParam(), pdcp_rb_type::drb, pdcp_rlc_mode::am);
 
   // Set state of PDCP entiy
-  pdcp_tx_state st = {0};
+  pdcp_tx_state st = {0, 0, 0};
   pdcp_tx->set_state(st);
   pdcp_tx->configure_security(sec_cfg, security::integrity_enabled::on, security::ciphering_enabled::off);
 
@@ -97,7 +100,7 @@ TEST_P(pdcp_tx_reestablish_test, when_drb_am_reestablish_then_pdus_retx)
     pdcp_tx->handle_sdu(std::move(sdu));
   }
   tick_all(5);
-  ASSERT_EQ(5, pdcp_tx->nof_discard_timers());
+  FLUSH_AND_ASSERT_EQ(5, pdcp_tx->nof_pdus_in_window());
 
   // Confirm transmission of all PDUs (up to and including SN=4)
   pdcp_tx->handle_transmit_notification(4);
@@ -105,39 +108,39 @@ TEST_P(pdcp_tx_reestablish_test, when_drb_am_reestablish_then_pdus_retx)
   {
     // Check the expected state: tx_trans awaits SN=5; tx_next_ack still awaits delivery of SN=0
     pdcp_tx_state expected_state = {5, 5, 0};
-    ASSERT_EQ(pdcp_tx->get_state(), expected_state);
+    FLUSH_AND_ASSERT_EQ(pdcp_tx->get_state(), expected_state);
   }
 
   // Check that non-ACKed SDUs are retransmitted.
-  ASSERT_EQ(5, test_frame.pdu_queue.size());
+  FLUSH_AND_ASSERT_EQ(5, test_frame.pdu_queue.size());
   pdcp_tx->handle_delivery_notification(1); // ACK SN=0 and 1.
 
   {
     // Check the expected state: tx_trans awaits SN=5; tx_next_ack is advanced to SN=2
     pdcp_tx_state expected_state = {5, 5, 2};
-    ASSERT_EQ(pdcp_tx->get_state(), expected_state);
+    FLUSH_AND_ASSERT_EQ(pdcp_tx->get_state(), expected_state);
   }
 
   pdcp_tx->reestablish(sec_cfg);
-  ASSERT_EQ(5, test_frame.pdu_queue.size());  // unchanged
-  ASSERT_EQ(3, test_frame.retx_queue.size()); // SN=2, 3 and 4 RETXed
+  FLUSH_AND_ASSERT_EQ(5, test_frame.pdu_queue.size());  // unchanged
+  FLUSH_AND_ASSERT_EQ(3, test_frame.retx_queue.size()); // SN=2, 3 and 4 RETXed
 
   // Check if discard timer was not reset.
-  ASSERT_EQ(3, pdcp_tx->nof_discard_timers());
+  FLUSH_AND_ASSERT_EQ(3, pdcp_tx->nof_pdus_in_window());
 
   {
     // Check the expected state: not reset, but tx_trans shall be rewinded to tx_next_ack
     pdcp_tx_state expected_state = {5, 2, 2};
-    ASSERT_EQ(pdcp_tx->get_state(), expected_state);
+    FLUSH_AND_ASSERT_EQ(pdcp_tx->get_state(), expected_state);
   }
 
   tick_all(5);
-  ASSERT_EQ(0, pdcp_tx->nof_discard_timers());
+  FLUSH_AND_ASSERT_EQ(0, pdcp_tx->nof_pdus_in_window());
 
   {
     // Check the expected state: everything advanced to 5
     pdcp_tx_state expected_state = {5, 5, 5};
-    ASSERT_EQ(pdcp_tx->get_state(), expected_state);
+    FLUSH_AND_ASSERT_EQ(pdcp_tx->get_state(), expected_state);
   }
 }
 
@@ -147,7 +150,7 @@ TEST_P(pdcp_tx_reestablish_test, when_drb_am_reestablish_then_pdus_retx)
 std::string test_param_info_to_string(const ::testing::TestParamInfo<std::tuple<pdcp_sn_size, unsigned>>& info)
 {
   fmt::memory_buffer buffer;
-  fmt::format_to(buffer, "{}bit", pdcp_sn_size_to_uint(std::get<pdcp_sn_size>(info.param)));
+  fmt::format_to(std::back_inserter(buffer), "{}bit", pdcp_sn_size_to_uint(std::get<pdcp_sn_size>(info.param)));
   return fmt::to_string(buffer);
 }
 

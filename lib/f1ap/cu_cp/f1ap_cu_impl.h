@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -22,11 +22,15 @@
 
 #pragma once
 
+#include "procedures/f1ap_cu_event_manager.h"
 #include "ue_context/f1ap_cu_ue_context.h"
 #include "srsran/asn1/f1ap/f1ap.h"
 #include "srsran/f1ap/cu_cp/f1ap_configuration.h"
 #include "srsran/f1ap/cu_cp/f1ap_cu.h"
+#include "srsran/f1ap/cu_cp/f1ap_cu_configuration_update.h"
+#include "srsran/f1ap/cu_cp/f1ap_nrppa_msg_handling.h"
 #include "srsran/f1ap/f1ap_message_notifier.h"
+#include "srsran/ran/positioning/trp_information_exchange.h"
 #include "srsran/support/executors/task_executor.h"
 #include <memory>
 
@@ -47,10 +51,10 @@ public:
 
   async_task<void> stop() override;
 
-  // f1ap rrc message transfer procedure functions
+  // f1ap_rrc_message_handler functions.
   void handle_dl_rrc_message_transfer(const f1ap_dl_rrc_message& msg) override;
 
-  // f1ap ue context manager functions
+  // f1ap_ue_context_manager functions.
   async_task<f1ap_ue_context_setup_response>
   handle_ue_context_setup_request(const f1ap_ue_context_setup_request&   request,
                                   std::optional<rrc_ue_transfer_context> rrc_context) override;
@@ -62,25 +66,41 @@ public:
 
   bool handle_ue_id_update(ue_index_t ue_index, ue_index_t old_ue_index) override;
 
-  // f1ap paging handler functions
+  // f1ap_paging_handler functions.
   void handle_paging(const cu_cp_paging_message& msg) override;
 
-  // f1ap message handler functions
+  // f1ap_message_handler functions.
   void handle_message(const f1ap_message& msg) override;
 
-  // f1ap statistics
-  size_t get_nof_ues() const override { return ue_ctxt_list.size(); };
+  // f1ap_statistics_handler functions.
+  size_t get_nof_ues() const override { return ue_ctxt_list.size(); }
 
-  // f1ap_ue_context_removal_handler functions
+  // f1ap_ue_context_removal_handler functions.
   void remove_ue_context(ue_index_t ue_index) override;
 
+  // f1ap_nrppa_message_handler functions.
+  async_task<expected<trp_information_response_t, trp_information_failure_t>>
+  handle_trp_information_request(const trp_information_request_t& request) override;
+  async_task<expected<positioning_information_response_t, positioning_information_failure_t>>
+  handle_positioning_information_request(const positioning_information_request_t& request) override;
+  async_task<expected<positioning_activation_response_t, positioning_activation_failure_t>>
+  handle_positioning_activation_request(const positioning_activation_request_t& request) override;
+  async_task<expected<measurement_response_t, measurement_failure_t>>
+  handle_positioning_measurement_request(const measurement_request_t& request) override;
+
+  // f1ap_interface_management_handler functions.
+  async_task<f1ap_gnb_cu_configuration_update_response>
+  handle_gnb_cu_configuration_update(const f1ap_gnb_cu_configuration_update& request) override;
+
   // f1ap_cu_interface
-  f1ap_message_handler&            get_f1ap_message_handler() override { return *this; }
-  f1ap_rrc_message_handler&        get_f1ap_rrc_message_handler() override { return *this; }
-  f1ap_ue_context_manager&         get_f1ap_ue_context_manager() override { return *this; }
-  f1ap_statistics_handler&         get_f1ap_statistics_handler() override { return *this; }
-  f1ap_paging_manager&             get_f1ap_paging_manager() override { return *this; }
-  f1ap_ue_context_removal_handler& get_f1ap_ue_context_removal_handler() override { return *this; }
+  f1ap_message_handler&              get_f1ap_message_handler() override { return *this; }
+  f1ap_rrc_message_handler&          get_f1ap_rrc_message_handler() override { return *this; }
+  f1ap_ue_context_manager&           get_f1ap_ue_context_manager() override { return *this; }
+  f1ap_statistics_handler&           get_f1ap_statistics_handler() override { return *this; }
+  f1ap_paging_manager&               get_f1ap_paging_manager() override { return *this; }
+  f1ap_ue_context_removal_handler&   get_f1ap_ue_context_removal_handler() override { return *this; }
+  f1ap_nrppa_message_handler&        get_f1ap_nrppa_message_handler() override { return *this; }
+  f1ap_interface_management_handler& get_f1ap_interface_management_handler() override { return *this; }
 
 private:
   class tx_pdu_notifier_with_logging final : public f1ap_message_notifier
@@ -128,6 +148,10 @@ private:
   /// \param[in] msg The UE Context Release Request message.
   void handle_ue_context_release_request(const asn1::f1ap::ue_context_release_request_s& msg);
 
+  /// \brief Handle the reception of a gNB-DU Configuration Update.
+  /// \param[in] msg The gNB-DU Configuration Update message.
+  void handle_du_cfg_update(const asn1::f1ap::gnb_du_cfg_upd_s& request);
+
   /// \brief Log F1AP PDU.
   void log_pdu(bool is_rx, const f1ap_message& pdu);
 
@@ -140,13 +164,15 @@ private:
   // Repository of UE Contexts.
   f1ap_ue_context_list ue_ctxt_list;
 
-  // nofifiers and handles
+  // Nofifiers and handles.
   f1ap_du_processor_notifier& du_processor_notifier;
   task_executor&              ctrl_exec;
 
   tx_pdu_notifier_with_logging tx_pdu_notifier;
+  f1ap_event_manager           ev_mng;
 
-  unsigned current_transaction_id = 0; // store current F1AP transaction id
+  // Store current F1AP transaction ID.
+  unsigned current_transaction_id = 0;
 };
 
 } // namespace srs_cu_cp

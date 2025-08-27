@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -21,11 +21,15 @@
  */
 
 #include "cu_appconfig_cli11_schema.h"
+#include "apps/helpers/f1u/f1u_cli11_schema.h"
+#include "apps/helpers/logger/logger_appconfig_cli11_schema.h"
+#include "apps/services/app_resource_usage/app_resource_usage_config_cli11_schema.h"
 #include "apps/services/buffer_pool/buffer_pool_appconfig_cli11_schema.h"
-#include "apps/services/logger/logger_appconfig_cli11_schema.h"
+#include "apps/services/metrics/metrics_config_cli11_schema.h"
+#include "apps/services/remote_control/remote_control_appconfig_cli11_schema.h"
+#include "apps/services/worker_manager/worker_manager_cli11_schema.h"
 #include "cu_appconfig.h"
 #include "srsran/support/cli11_utils.h"
-#include "CLI/CLI11.hpp"
 
 using namespace srsran;
 
@@ -34,39 +38,33 @@ static void configure_cli11_f1ap_args(CLI::App& app, srs_cu::cu_f1ap_appconfig& 
   add_option(app, "--bind_addr", f1ap_params.bind_addr, "F1-C bind address")->capture_default_str();
 }
 
-static void configure_cli11_nru_args(CLI::App& app, srs_cu::cu_nru_appconfig& nru_cfg)
-{
-  add_option(app,
-             "--bind_addr",
-             nru_cfg.bind_addr,
-             "Default local IP address interfaces bind to, unless a specific bind address is specified")
-      ->check(CLI::ValidIPV4);
-  app.add_option(
-      "--ext_addr", nru_cfg.ext_addr, "External IP address that is advertised to receive F1-U packets from the DU");
-  add_option(app, "--udp_max_rx_msgs", nru_cfg.udp_rx_max_msgs, "Maximum amount of messages RX in a single syscall");
-  add_option(app,
-             "--pool_threshold",
-             nru_cfg.pool_occupancy_threshold,
-             "Pool occupancy threshold after which packets are dropped")
-      ->check(CLI::Range(0.0, 1.0));
-  ;
-}
-
 void srsran::configure_cli11_with_cu_appconfig_schema(CLI::App& app, cu_appconfig& cu_cfg)
 {
+  app.add_flag("--dryrun", cu_cfg.enable_dryrun, "Enable application dry run mode")->capture_default_str();
+
   // Logging section.
   configure_cli11_with_logger_appconfig_schema(app, cu_cfg.log_cfg);
 
   // Buffer pool section.
   configure_cli11_with_buffer_pool_appconfig_schema(app, cu_cfg.buffer_pool_config);
 
+  // Expert execution section.
+  configure_cli11_with_worker_manager_appconfig_schema(app, cu_cfg.expert_execution_cfg);
+
+  // Remote control section.
+  configure_cli11_with_remote_control_appconfig_schema(app, cu_cfg.remote_control_config);
+
+  // Metrics section.
+  app_services::configure_cli11_with_app_resource_usage_config_schema(app, cu_cfg.metrics_cfg.rusage_config);
+  app_services::configure_cli11_with_metrics_appconfig_schema(app, cu_cfg.metrics_cfg.metrics_service_cfg);
+
   // F1AP section.
-  CLI::App* cu_cp_subcmd = add_subcommand(app, "cu_cp", "CU-UP parameters")->configurable();
+  CLI::App* cu_cp_subcmd = add_subcommand(app, "cu_cp", "CU-CP parameters")->configurable();
   CLI::App* f1ap_subcmd  = add_subcommand(*cu_cp_subcmd, "f1ap", "F1AP parameters")->configurable();
   configure_cli11_f1ap_args(*f1ap_subcmd, cu_cfg.f1ap_cfg);
 
   // NR-U section.
   CLI::App* cu_up_subcmd = add_subcommand(app, "cu_up", "CU-UP parameters")->configurable();
-  CLI::App* nru_subcmd   = add_subcommand(*cu_up_subcmd, "nru", "NR-U parameters")->configurable();
-  configure_cli11_nru_args(*nru_subcmd, cu_cfg.nru_cfg);
+  CLI::App* f1u_subcmd   = add_subcommand(*cu_up_subcmd, "f1u", "F1-U parameters")->configurable();
+  configure_cli11_f1u_sockets_args(*f1u_subcmd, cu_cfg.f1u_cfg);
 }

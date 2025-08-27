@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -22,16 +22,15 @@
 
 #pragma once
 
-#include "sliv.h"
 #include "srsran/adt/interval.h"
 #include "srsran/ran/frame_types.h"
+#include "srsran/ran/resource_allocation/sliv.h"
 
 namespace srsran {
 
+struct ofdm_symbol_range_tag {};
 /// Range [start,stop) of OFDM symbols.
-struct ofdm_symbol_range : public interval<uint8_t> {
-  using interval<uint8_t>::interval;
-};
+using ofdm_symbol_range = interval<uint8_t, false, ofdm_symbol_range_tag>;
 
 /// \brief Converts SLIV to OFDM symbol start S and length L.
 /// \param[in] sliv An index giving a combination (jointly encoded) of start symbols and length indicator (SLIV).
@@ -52,17 +51,3 @@ inline uint32_t ofdm_symbol_range_to_sliv(ofdm_symbol_range symb_range)
 }
 
 } // namespace srsran
-
-namespace fmt {
-
-/// Format intervals with the notation [start, stop)
-template <>
-struct formatter<srsran::ofdm_symbol_range> : public formatter<srsran::interval<uint8_t>> {
-  template <typename FormatContext>
-  auto format(const srsran::ofdm_symbol_range& symbols, FormatContext& ctx)
-  {
-    return formatter<srsran::interval<uint8_t>>::format(symbols, ctx);
-  }
-};
-
-} // namespace fmt

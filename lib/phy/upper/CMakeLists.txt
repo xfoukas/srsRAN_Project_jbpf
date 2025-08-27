@@ -1,5 +1,5 @@
 #
-# Copyright 2021-2024 Software Radio Systems Limited
+# Copyright 2021-2025 Software Radio Systems Limited
 #
 # This file is part of srsRAN
 #
@@ -22,11 +22,12 @@ add_subdirectory(channel_coding)
 add_subdirectory(channel_modulation)
 add_subdirectory(channel_processors)
 add_subdirectory(equalization)
+add_subdirectory(metrics)
 add_subdirectory(sequence_generators)
 add_subdirectory(signal_processors)
 
 add_library(srsran_downlink_processor
-        downlink_processor_single_executor_impl.cpp
+        downlink_processor_multi_executor_impl.cpp
         downlink_processor_pool_impl.cpp)
 target_link_libraries(srsran_downlink_processor
         srsran_instrumentation
@@ -38,33 +39,32 @@ add_library(srsran_uplink_processor
         uplink_request_processor_impl.cpp)
 target_link_libraries(srsran_uplink_processor srsran_channel_processors)
 
-add_library(srsran_upper_phy upper_phy_factories.cpp upper_phy_impl.cpp upper_phy_factories.cpp
-                             upper_phy_rx_symbol_handler_impl.cpp upper_phy_rx_results_notifier_wrapper.cpp
-                             upper_phy_error_handler_impl.cpp)
-set(UPPER_PHY_LIBRARIES srsran_instrumentation
+add_library(srsran_upper_phy
+        upper_phy_error_handler_impl.cpp
+        upper_phy_factories.cpp
+        upper_phy_impl.cpp
+        upper_phy_rx_results_notifier_wrapper.cpp
+        upper_phy_rx_symbol_handler_impl.cpp)
+target_link_libraries(srsran_upper_phy
+        srsran_channel_coding
+        srsran_channel_equalizer
+        srsran_channel_precoder
+        srsran_channel_processors
         srsran_downlink_processor
-        srsran_uplink_processor
+        srsran_signal_processors
+        srsran_dft
+        srsran_instrumentation
+        srsran_phy_metrics
         srsran_phy_support
-        srsran_generic_funcs
         srsran_transform_precoding
-        srsran_channel_equalizer)
-
-# Hardware acceleration for both PUSCH and PDSCH is enabled by default when using DPDK.
-if (DPDK_FOUND)
-   set_source_files_properties(upper_phy_factories.cpp PROPERTIES COMPILE_DEFINITIONS "DPDK_FOUND; HWACC_PDSCH_ENABLED; HWACC_PUSCH_ENABLED")
-   list(APPEND UPPER_PHY_LIBRARIES hal_hwacc_pusch
-        hal_hwacc_pdsch
-        hal_bbdev_factory)
-endif (DPDK_FOUND)
-target_link_libraries(srsran_upper_phy ${UPPER_PHY_LIBRARIES})
+        srsran_uplink_processor
+        srsran_upper_phy_metrics)
 
 add_library(log_likelihood_ratio log_likelihood_ratio.cpp)
 target_link_libraries(log_likelihood_ratio srsvec)
 
 add_library(srsran_upper_phy_support
-        rb_allocation.cpp
         rx_buffer_pool_impl.cpp
-        vrb_to_prb_mapper.cpp
-        )
+)
 
 add_to_exported_libs(log_likelihood_ratio srsran_upper_phy_support)

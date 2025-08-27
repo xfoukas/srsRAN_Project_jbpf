@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -22,12 +22,13 @@
 
 #pragma once
 
-#include "unique_thread.h"
+#include "srsran/adt/moodycamel_mpmc_queue.h"
 #include "srsran/adt/mpmc_queue.h"
 #include "srsran/adt/mutexed_mpmc_queue.h"
 #include "srsran/srslog/srslog.h"
 #include "srsran/support/executors/detail/priority_task_queue.h"
 #include "srsran/support/executors/task_executor.h"
+#include "srsran/support/executors/unique_thread.h"
 
 namespace srsran {
 namespace detail {
@@ -84,7 +85,10 @@ template <>
 class base_task_queue<concurrent_queue_policy::lockfree_mpmc>
 {
 protected:
-  base_task_queue(size_t qsize, std::chrono::microseconds wait_sleep_time) : queue(qsize, wait_sleep_time) {}
+  base_task_queue(size_t qsize, std::chrono::microseconds wait_sleep_time, unsigned /* unused */) :
+    queue(qsize, wait_sleep_time)
+  {
+  }
 
   // Queue of pending tasks.
   concurrent_queue<unique_task, concurrent_queue_policy::lockfree_mpmc, concurrent_queue_wait_policy::sleep> queue;
@@ -94,12 +98,24 @@ template <>
 class base_task_queue<concurrent_queue_policy::locking_mpmc>
 {
 protected:
-  base_task_queue(size_t qsize, std::chrono::microseconds wait_sleep_time = std::chrono::microseconds{0}) : queue(qsize)
+  base_task_queue(size_t qsize, std::chrono::microseconds wait_sleep_time, unsigned /* unused */) : queue(qsize) {}
+
+  // Queue of pending tasks.
+  concurrent_queue<unique_task, concurrent_queue_policy::locking_mpmc, concurrent_queue_wait_policy::condition_variable>
+      queue;
+};
+
+template <>
+class base_task_queue<concurrent_queue_policy::moodycamel_lockfree_mpmc>
+{
+protected:
+  base_task_queue(size_t qsize, std::chrono::microseconds wait_sleep_time, unsigned nof_prereserved_producers) :
+    queue(qsize, nof_prereserved_producers, wait_sleep_time)
   {
   }
 
   // Queue of pending tasks.
-  concurrent_queue<unique_task, concurrent_queue_policy::locking_mpmc, concurrent_queue_wait_policy::condition_variable>
+  concurrent_queue<unique_task, concurrent_queue_policy::moodycamel_lockfree_mpmc, concurrent_queue_wait_policy::sleep>
       queue;
 };
 
@@ -130,7 +146,7 @@ public:
   /// \param prio Priority of the dispatched task.
   /// \param task Task to be run in the thread pool.
   /// \return True if task was successfully enqueued to be processed. False, if task queue is full.
-  SRSRAN_NODISCARD bool push_task(enqueue_priority prio, unique_task task)
+  [[nodiscard]] bool push_task(enqueue_priority prio, unique_task task)
   {
     return queue.try_push(prio, std::move(task));
   }
@@ -172,16 +188,17 @@ public:
   task_worker_pool(std::string                           worker_pool_name,
                    unsigned                              nof_workers_,
                    unsigned                              qsize_,
-                   std::chrono::microseconds             wait_sleep_time = std::chrono::microseconds{100},
-                   os_thread_realtime_priority           prio            = os_thread_realtime_priority::no_realtime(),
-                   span<const os_sched_affinity_bitmask> cpu_masks       = {});
+                   std::chrono::microseconds             wait_sleep_time           = std::chrono::microseconds{100},
+                   unsigned                              nof_prereserved_producers = 2,
+                   os_thread_realtime_priority           prio      = os_thread_realtime_priority::no_realtime(),
+                   span<const os_sched_affinity_bitmask> cpu_masks = {});
   ~task_worker_pool();
 
   /// \brief Push a new task to be processed by the worker pool. If the task queue is full, it skips the task and
   /// return false.
   /// \param task Task to be run in the thread pool.
   /// \return True if task was successfully enqueued to be processed. False, if task queue is full.
-  SRSRAN_NODISCARD bool push_task(unique_task task) { return this->queue.try_push(std::move(task)); }
+  [[nodiscard]] bool push_task(unique_task task) { return this->queue.try_push(std::move(task)); }
 
   /// \brief Push a new task to be processed by the worker pool. If the task queue is full, blocks.
   /// \param task Task to be run in the thread pool.
@@ -203,6 +220,7 @@ public:
 
 extern template class task_worker_pool<concurrent_queue_policy::lockfree_mpmc>;
 extern template class task_worker_pool<concurrent_queue_policy::locking_mpmc>;
+extern template class task_worker_pool<concurrent_queue_policy::moodycamel_lockfree_mpmc>;
 
 template <concurrent_queue_policy QueuePolicy>
 class task_worker_pool_executor final : public task_executor
@@ -211,14 +229,14 @@ public:
   task_worker_pool_executor() = default;
   task_worker_pool_executor(task_worker_pool<QueuePolicy>& worker_pool_) : worker_pool(&worker_pool_) {}
 
-  SRSRAN_NODISCARD bool execute(unique_task task) override
+  [[nodiscard]] bool execute(unique_task task) override
   {
     // TODO: Shortpath if can_run_task_inline() returns true. This feature has been disabled while we don't correct the
     //  use of .execute in some places.
     return worker_pool->push_task(std::move(task));
   }
 
-  SRSRAN_NODISCARD bool defer(unique_task task) override { return worker_pool->push_task(std::move(task)); }
+  [[nodiscard]] bool defer(unique_task task) override { return worker_pool->push_task(std::move(task)); }
 
   /// Determine whether the caller is in one of the threads of the worker pool.
   bool can_run_task_inline() const { return worker_pool->is_in_thread_pool(); }
@@ -250,7 +268,7 @@ public:
   {
   }
 
-  SRSRAN_NODISCARD bool execute(unique_task task) override
+  [[nodiscard]] bool execute(unique_task task) override
   {
     if (can_run_task_inline()) {
       task();
@@ -259,7 +277,7 @@ public:
     return workers.push_task(prio, std::move(task));
   }
 
-  SRSRAN_NODISCARD bool defer(unique_task task) override { return workers.push_task(prio, std::move(task)); }
+  [[nodiscard]] bool defer(unique_task task) override { return workers.push_task(prio, std::move(task)); }
 
   /// Determine whether the caller is in one of the threads of the worker pool and the the task can run without
   /// being dispatched.

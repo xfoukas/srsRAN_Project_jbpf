@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -100,7 +100,7 @@ public:
 
 private:
   const gtpu_tunnel_ngu_config::gtpu_tunnel_ngu_tx_config cfg;
-  sockaddr_storage                                        peer_sockaddr;
-  bool                                                    stopped = false;
+  sockaddr_storage                                        peer_sockaddr = {};
+  bool                                                    stopped       = false;
 };
 } // namespace srsran

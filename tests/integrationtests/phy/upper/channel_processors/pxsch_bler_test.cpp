@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -22,7 +22,6 @@
 
 #include "pxsch_bler_test_channel_emulator.h"
 #include "pxsch_bler_test_factories.h"
-#include "srsran/adt/concurrent_queue.h"
 #include "srsran/phy/constants.h"
 #include "srsran/phy/support/resource_grid.h"
 #include "srsran/phy/support/support_factories.h"
@@ -48,13 +47,12 @@ using namespace srsran;
 static constexpr subcarrier_spacing scs                              = subcarrier_spacing::kHz30;
 static constexpr uint16_t           rnti                             = 0x1234;
 static constexpr unsigned           bwp_start_rb                     = 0;
-static constexpr unsigned           nof_layers                       = 1;
 static constexpr unsigned           nof_ofdm_symbols                 = 14;
-static const symbol_slot_mask       dmrs_symbol_mask                 = {0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0};
+static const symbol_slot_mask       dmrs_symbol_mask                 = {0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0};
 static constexpr unsigned           nof_ldpc_iterations              = 10;
 static constexpr dmrs_type          dmrs                             = dmrs_type::TYPE1;
 static constexpr unsigned           nof_cdm_groups_without_data      = 2;
-static constexpr cyclic_prefix      cp                               = cyclic_prefix::NORMAL;
+static constexpr cyclic_prefix      cy_prefix                        = cyclic_prefix::NORMAL;
 static constexpr unsigned           rv                               = 0;
 static constexpr unsigned           n_id                             = 0;
 static constexpr unsigned           scrambling_id                    = 0;
@@ -66,8 +64,10 @@ static unsigned                     nof_repetitions                  = 1000;
 static std::string                  channel_delay_profile            = "single-tap";
 static std::string                  channel_fading_distribution      = "uniform-phase";
 static float                        sinr_dB                          = 60.0F;
+static float                        cfo_Hz                           = 0.0F;
 static unsigned                     nof_corrupted_re_per_ofdm_symbol = 0;
 static unsigned                     nof_rx_ports                     = 2;
+static unsigned                     nof_layers                       = 1;
 static unsigned                     bwp_size_rb                      = 273;
 static pusch_mcs_table              mcs_table                        = pusch_mcs_table::qam64;
 static sch_mcs_index                mcs_index                        = 20;
@@ -138,7 +138,11 @@ std::optional<pusch_mcs_table> to_mcs_table(const char* str)
 class pxsch_bler_test
 {
 public:
-  pxsch_bler_test() { setup(); }
+  pxsch_bler_test()
+  {
+    srslog::init();
+    setup();
+  }
 
   void run() { loop(); }
 
@@ -150,7 +154,7 @@ private:
     std::shared_ptr<channel_precoder_factory> precod_factory = create_channel_precoder_factory("auto");
     report_fatal_error_if_not(precod_factory, "Failed to create channel precoding factory.");
 
-    return create_resource_grid_factory(precod_factory);
+    return create_resource_grid_factory();
   }
 
   class pdsch_processor_notifier_adaptor : public pdsch_processor_notifier
@@ -243,8 +247,14 @@ private:
     report_fatal_error_if_not(pdsch_proc_factory, "Failted to create PDSCH processor factory.");
 
     // Create PUSCH processor factory.
-    std::shared_ptr<pusch_processor_factory> pusch_proc_factory = create_sw_pusch_processor_factory(
-        *executor, max_nof_threads + 1, nof_ldpc_iterations, use_early_stop, pxsch_type);
+    std::shared_ptr<pusch_processor_factory> pusch_proc_factory =
+        create_sw_pusch_processor_factory(*executor,
+                                          max_nof_threads + 1,
+                                          nof_ldpc_iterations,
+                                          use_early_stop,
+                                          pxsch_type,
+                                          port_channel_estimator_td_interpolation_strategy::average,
+                                          channel_equalizer_algorithm_type::zf);
     report_fatal_error_if_not(pusch_proc_factory, "Failted to create PUSCH processor factory.");
 
     // Create resource grid factory.
@@ -284,7 +294,7 @@ private:
     pdsch_config.rnti                        = rnti;
     pdsch_config.bwp_size_rb                 = bwp_size_rb;
     pdsch_config.bwp_start_rb                = bwp_start_rb;
-    pdsch_config.cp                          = cp;
+    pdsch_config.cp                          = cy_prefix;
     pdsch_config.n_id                        = n_id;
     pdsch_config.ref_point                   = pdsch_processor::pdu_t::PRB0;
     pdsch_config.dmrs_symbol_mask            = dmrs_symbol_mask;
@@ -312,7 +322,7 @@ private:
     pusch_config.rnti               = rnti;
     pusch_config.bwp_size_rb        = bwp_size_rb;
     pusch_config.bwp_start_rb       = bwp_start_rb;
-    pusch_config.cp                 = cp;
+    pusch_config.cp                 = cy_prefix;
     pusch_config.mcs_descr          = mcs_descr;
     pusch_config.codeword           = {rv, ldpc_base_graph, true};
     pusch_config.uci                = {};
@@ -341,7 +351,9 @@ private:
     emulator = std::make_unique<channel_emulator>(channel_delay_profile,
                                                   channel_fading_distribution,
                                                   sinr_dB,
+                                                  cfo_Hz,
                                                   nof_corrupted_re_per_ofdm_symbol,
+                                                  nof_layers,
                                                   nof_rx_ports,
                                                   MAX_RB * NRE,
                                                   nof_ofdm_symbols,
@@ -356,18 +368,43 @@ private:
     srslog::flush();
   }
 
+  void print_stats(double completion_percent)
+  {
+    double crc_bler        = static_cast<double>(crc_error_count) / static_cast<double>(count);
+    double data_bler       = static_cast<double>(data_error_count) / static_cast<double>(count);
+    double mean_iterations = static_cast<double>(count_iterations) / static_cast<double>(count * nof_codeblocks);
+
+    fmt::print("[{:>5.1f}%] "
+               "Iterations={{{:<2} {:<2} {:<3.1f}}}; "
+               "BLER={:.10f}/{:.10f}; "
+               "SINR={{{:+.2f} {:+.2f} {:+.2f}}}; "
+               "EVM={{{:.3f} {:.3f} {:.3f}}}; "
+               "TA={{{:.2f} {:.2f} {:.2f}}}us; "
+               "CFO={{{:.2f} {:.2f} {:.2f}}}Hz; "
+               "pxsch={}\r",
+               completion_percent,
+               min_iterations,
+               max_iterations,
+               mean_iterations,
+               crc_bler,
+               data_bler,
+               sinr_stats.get_min(),
+               sinr_stats.get_max(),
+               sinr_stats.get_mean(),
+               evm_stats.get_min(),
+               evm_stats.get_max(),
+               evm_stats.get_mean(),
+               ta_stats_us.get_min(),
+               ta_stats_us.get_max(),
+               ta_stats_us.get_mean(),
+               cfo_stats_Hz.get_min(),
+               cfo_stats_Hz.get_max(),
+               cfo_stats_Hz.get_mean(),
+               pxsch_type);
+  }
+
   void loop()
   {
-    uint64_t                 count            = 0;
-    uint64_t                 crc_error_count  = 0;
-    uint64_t                 data_error_count = 0;
-    unsigned                 max_iterations   = std::numeric_limits<unsigned>::min();
-    unsigned                 min_iterations   = std::numeric_limits<unsigned>::max();
-    uint64_t                 count_iterations = 0;
-    sample_statistics<float> sinr_stats;
-    sample_statistics<float> evm_stats;
-    sample_statistics<float> ta_stats_us;
-
     std::mt19937 rgen(0);
 
     // Iterate different seeds.
@@ -377,7 +414,7 @@ private:
 
       // Process PDSCH.
       pdsch_processor_notifier_adaptor tx_notifier;
-      transmitter->process(tx_grid->get_mapper(), tx_notifier, {tx_data}, pdsch_config);
+      transmitter->process(tx_grid->get_writer(), tx_notifier, {shared_transport_block(tx_data)}, pdsch_config);
       tx_notifier.wait_for_completion();
 
       emulator->run(rx_grid->get_writer(), tx_grid->get_reader());
@@ -406,14 +443,17 @@ private:
       min_iterations = std::min(sch_result.data.ldpc_decoder_stats.get_min(), min_iterations);
       count_iterations += static_cast<uint64_t>(sch_result.data.ldpc_decoder_stats.get_nof_observations() *
                                                 sch_result.data.ldpc_decoder_stats.get_mean());
-      if (sch_result.csi.get_evm().has_value()) {
-        evm_stats.update(sch_result.csi.get_evm().value());
+      if (sch_result.csi.get_total_evm().has_value()) {
+        evm_stats.update(sch_result.csi.get_total_evm().value());
       }
       if (sch_result.csi.get_sinr_dB().has_value()) {
         sinr_stats.update(sch_result.csi.get_sinr_dB().value());
       }
       if (sch_result.csi.get_time_alignment().has_value()) {
         ta_stats_us.update(sch_result.csi.get_time_alignment()->to_seconds() * 1e6);
+      }
+      if (sch_result.csi.get_cfo_Hz().has_value()) {
+        cfo_stats_Hz.update(*sch_result.csi.get_cfo_Hz());
       }
 
       // Increment slots.
@@ -422,68 +462,25 @@ private:
 
       // Set following line to 1 for printing partial results.
       if (show_stats && (n % 100 == 0)) {
-        // Calculate resultant metrics.
-        double crc_bler        = static_cast<double>(crc_error_count) / static_cast<double>(count);
-        double data_bler       = static_cast<double>(data_error_count) / static_cast<double>(count);
-        double mean_iterations = static_cast<double>(count_iterations) / static_cast<double>(count * nof_codeblocks);
-
-        fmt::print("[{:>5.1f}%] "
-                   "Iterations={{{:<2} {:<2} {:<3.1f}}}; "
-                   "BLER={:.10f}/{:.10f}; "
-                   "SINR={{{:+.2f} {:+.2f} {:+.2f}}}; "
-                   "EVM={{{:.3f} {:.3f} {:.3f}}}; "
-                   "TA={{{:.2f} {:.2f} {:.2f}}}us; "
-                   "pxsch={}\r",
-                   static_cast<double>(n) / static_cast<double>(nof_repetitions) * 100.0,
-                   min_iterations,
-                   max_iterations,
-                   mean_iterations,
-                   crc_bler,
-                   data_bler,
-                   sinr_stats.get_min(),
-                   sinr_stats.get_max(),
-                   sinr_stats.get_mean(),
-                   sinr_stats.get_std(),
-                   evm_stats.get_min(),
-                   evm_stats.get_max(),
-                   evm_stats.get_mean(),
-                   ta_stats_us.get_min(),
-                   ta_stats_us.get_max(),
-                   ta_stats_us.get_mean(),
-                   pxsch_type);
+        print_stats(static_cast<double>(n) / static_cast<double>(nof_repetitions) * 100.0);
       }
     }
 
-    // Calculate resultant metrics.
-    double crc_bler        = static_cast<double>(crc_error_count) / static_cast<double>(count);
-    double data_bler       = static_cast<double>(data_error_count) / static_cast<double>(count);
-    double mean_iterations = static_cast<double>(count_iterations) / static_cast<double>(count * nof_codeblocks);
-
-    // Print results.
-    fmt::print("Iterations={{{:<2} {:<2} {:<3.1f}}}; "
-               "BLER={:.10f}/{:.10f}; "
-               "SINR={{{:+.2f} {:+.2f} {:+.2f}}}; "
-               "EVM={{{:.3f} {:.3f} {:.3f}}}; "
-               "TA={{{:.2f} {:.2f} {:.2f}}}us;"
-               "pxsch={}\n",
-               min_iterations,
-               max_iterations,
-               mean_iterations,
-               crc_bler,
-               data_bler,
-               sinr_stats.get_min(),
-               sinr_stats.get_max(),
-               sinr_stats.get_mean(),
-               evm_stats.get_min(),
-               evm_stats.get_max(),
-               evm_stats.get_mean(),
-               ta_stats_us.get_min(),
-               ta_stats_us.get_max(),
-               ta_stats_us.get_mean(),
-               pxsch_type);
+    // Print final results.
+    print_stats(100.0);
   }
 
-  unsigned nof_codeblocks;
+  unsigned                 nof_codeblocks;
+  uint64_t                 count            = 0;
+  uint64_t                 crc_error_count  = 0;
+  uint64_t                 data_error_count = 0;
+  unsigned                 max_iterations   = std::numeric_limits<unsigned>::min();
+  unsigned                 min_iterations   = std::numeric_limits<unsigned>::max();
+  uint64_t                 count_iterations = 0;
+  sample_statistics<float> sinr_stats;
+  sample_statistics<float> evm_stats;
+  sample_statistics<float> ta_stats_us;
+  sample_statistics<float> cfo_stats_Hz;
 
   std::unique_ptr<pdsch_processor>           transmitter;
   std::unique_ptr<pusch_processor>           receiver;
@@ -508,14 +505,16 @@ static void usage(std::string_view prog)
 {
   fmt::print("Usage: {} [-C X] [-F X] [-S X] [-N X] [-P X] [-R X] [-M X] [-m X] [-D] [-T X] [eal_args ...]\n", prog);
   fmt::print("\t-C       Channel delay profile: single-tap, TDLA, TDLB or TDLC. [Default {}]\n", channel_delay_profile);
-  fmt::print("\t-F       Channel fading distribution: uniform-phase or rayleigh. [Default {}]\n",
+  fmt::print("\t-F       Channel fading distribution: uniform-phase, rayleigh or butler. [Default {}]\n",
              channel_fading_distribution);
   fmt::print("\t-D       Toggle enable DC position. [Default {}]\n", enable_dc_position);
   fmt::print("\t-S       SINR. [Default {}]\n", sinr_dB);
   fmt::print("\t-N       Number of corrupted RE per OFDM symbol. [Default {}]\n", nof_corrupted_re_per_ofdm_symbol);
   fmt::print("\t-P       Number of receive ports. [Default {}]\n", nof_rx_ports);
+  fmt::print("\t-L       Number of transmit layers. It must not exceed the number of ports. [Default {}]\n",
+             nof_layers);
   fmt::print("\t-B       Number of allocated PRBs (same as BWP size). [Default {}]\n", bwp_size_rb);
-  fmt::print("\t-M       MCS table. [Default {}]\n", mcs_table);
+  fmt::print("\t-M       MCS table. [Default {}]\n", fmt::underlying(mcs_table));
   fmt::print("\t-m       MCS index. [Default {}]\n", mcs_index);
   fmt::print("\t-R       Number of slots to process. [Default {}]\n", nof_repetitions);
   fmt::print("\t-T       PxSCH implementation type [auto,acc100][Default {}]\n", pxsch_type);
@@ -527,7 +526,7 @@ static void usage(std::string_view prog)
 static void parse_args(int argc, char** argv)
 {
   int opt = 0;
-  while ((opt = getopt(argc, argv, "C:F:S:N:P:R:B:M:m:DT:vh")) != -1) {
+  while ((opt = getopt(argc, argv, "C:F:S:N:P:L:R:B:M:m:DT:vh")) != -1) {
     switch (opt) {
       case 'C':
         if (optarg != nullptr) {
@@ -550,6 +549,9 @@ static void parse_args(int argc, char** argv)
         break;
       case 'P':
         nof_rx_ports = std::strtol(optarg, nullptr, 10);
+        break;
+      case 'L':
+        nof_layers = std::strtol(optarg, nullptr, 10);
         break;
       case 'B':
         bwp_size_rb = std::strtol(optarg, nullptr, 10);

@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -25,6 +25,8 @@
 #include "srsran/ran/slot_point.h"
 #include "srsran/ran/subcarrier_spacing.h"
 #include <array>
+#include <memory>
+#include <vector>
 
 namespace srsran {
 
@@ -72,6 +74,16 @@ public:
     srsran_assert(pool.empty(), "Numerology ({}) already has processors.", numerology);
 
     numerologies[numerology] = std::move(obj);
+  }
+
+  /// Stops all the instances.
+  void stop()
+  {
+    for (auto& procs : numerologies) {
+      for (auto& proc : procs) {
+        proc->stop();
+      }
+    }
   }
 };
 

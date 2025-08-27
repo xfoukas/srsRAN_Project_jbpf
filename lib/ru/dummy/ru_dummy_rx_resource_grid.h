@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -27,7 +27,7 @@
 #include "srsran/phy/support/resource_grid_reader.h"
 #include "srsran/srsvec/conversion.h"
 #include "srsran/srsvec/copy.h"
-#include "srsran/support/complex_normal_random.h"
+#include "srsran/support/math/complex_normal_random.h"
 
 namespace srsran {
 

@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -39,11 +39,18 @@ struct csi_builder_params {
   unsigned nof_rbs;
   /// Number of ports set for the CSI-RS.
   unsigned nof_ports = 1;
-  /// Symbol index for the CSI measurement.
-  unsigned csi_ofdm_symbol_index = 8;
-  /// Symbol indexes for tracking signals.
-  std::array<unsigned, 4> tracking_csi_ofdm_symbol_indexes = {4, 8, 4, 8};
-  /// Period of the CSI-RS resources.
+  /// Symbol index within the slot assigned to CSI-RS for channel measurement.
+  unsigned cm_csi_ofdm_symbol_index = 4;
+  /// Symbol index within the slot assigned to ZP-CSI-RS.
+  unsigned zp_csi_ofdm_symbol_index = 8;
+  /// \brief Symbol indices within the slot assigned to CSI-RS for tracking resources.
+  ///
+  /// The possible sets of values are given in TS38.214 Section 5.1.6.1.1. It must be set to {4, 8, 4, 8}, {5, 9, 5, 9}
+  /// or {6, 10, 6, 10}.
+  std::array<unsigned, 4> tracking_csi_ofdm_symbol_indices = {4, 8, 4, 8};
+  /// \brief Period of the CSI-RS resources.
+  ///
+  /// The UE expects a period of \f$2^\mu\{10, 20, 40, 80\}\f$ slots.
   csi_resource_periodicity csi_rs_period = csi_resource_periodicity::slots80;
   /// Slot offset for measurement CSI-RS resources. Note: Should avoid collisions with SSB and SIB1.
   unsigned meas_csi_slot_offset = 2;
@@ -53,14 +60,20 @@ struct csi_builder_params {
   unsigned zp_csi_slot_offset = 2;
   /// Report slot offset.
   unsigned csi_report_slot_offset = 9;
+  /// Maximum number of DL layers.
+  unsigned max_nof_layers = 1;
 };
 
 /// \brief Compute default CSI-RS signalling period to use, while constrained by TS38.214, 5.1.6.1.1.
 csi_resource_periodicity get_max_csi_rs_period(subcarrier_spacing pdsch_scs);
 
-/// Checks whether a specified CSI-RS period is valid for a given TDD pattern.
-SRSRAN_NODISCARD bool is_csi_rs_period_valid(csi_resource_periodicity       csi_rs_period,
-                                             const tdd_ul_dl_config_common& tdd_cfg);
+/// \brief Checks whether a specified CSI-RS period is valid for a given TDD pattern.
+///
+/// The CSI-RS period is valid if:
+/// - it is multiple of the TDD period; and
+/// - it is one that the UE expects it for the CSI-RS for tracking.
+[[nodiscard]] bool is_csi_rs_period_valid(csi_resource_periodicity       csi_rs_period,
+                                          const tdd_ul_dl_config_common& tdd_cfg);
 
 /// \brief Searches for a valid CSI-RS periodicity, while constrained by TDD pattern periodicity.
 std::optional<csi_resource_periodicity> find_valid_csi_rs_period(const tdd_ul_dl_config_common& tdd_cfg);
@@ -77,11 +90,15 @@ std::optional<csi_resource_periodicity> find_valid_csi_rs_period(const tdd_ul_dl
 /// \param zp_csi_slot_offset [in] Slot offset for IM CSI-RS resources. If passed as empty, a new value is derived.
 /// If passed as non-empty, the function will check whether the value is valid.
 /// \param tdd_cfg [in] TDD pattern.
-SRSRAN_NODISCARD bool derive_valid_csi_rs_slot_offsets(csi_builder_params&            csi_params,
-                                                       const std::optional<unsigned>& meas_csi_slot_offset,
-                                                       const std::optional<unsigned>& tracking_csi_slot_offset,
-                                                       const std::optional<unsigned>& zp_csi_slot_offset,
-                                                       const tdd_ul_dl_config_common& tdd_cfg);
+/// \param max_csi_symbol_index [in] Maximum CSI symbol among those used for CSI-RS.
+/// \param ssb_period_ms [in] SSB period in ms.
+[[nodiscard]] bool derive_valid_csi_rs_slot_offsets(csi_builder_params&            csi_params,
+                                                    const std::optional<unsigned>& meas_csi_slot_offset,
+                                                    const std::optional<unsigned>& tracking_csi_slot_offset,
+                                                    const std::optional<unsigned>& zp_csi_slot_offset,
+                                                    const tdd_ul_dl_config_common& tdd_cfg,
+                                                    unsigned                       max_csi_symbol_index,
+                                                    unsigned                       ssb_period_ms);
 
 /// \brief Generate list of zp-CSI-RS Resources.
 std::vector<zp_csi_rs_resource> make_periodic_zp_csi_rs_resource_list(const csi_builder_params& params);

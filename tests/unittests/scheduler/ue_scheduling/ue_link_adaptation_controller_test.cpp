@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -21,7 +21,8 @@
  */
 
 #include "lib/scheduler/support/mcs_calculator.h"
-#include "lib/scheduler/ue_scheduling/ue_link_adaptation_controller.h"
+#include "lib/scheduler/ue_context/ue_link_adaptation_controller.h"
+#include "tests/test_doubles/scheduler/scheduler_config_helper.h"
 #include "tests/unittests/scheduler/test_utils/config_generators.h"
 #include "srsran/support/test_utils.h"
 #include <gtest/gtest.h>
@@ -50,9 +51,9 @@ public:
   {
   }
 
-  scheduler_expert_config       sched_cfg;
-  cell_configuration            cell_cfg{sched_cfg, test_helpers::make_default_sched_cell_configuration_request()};
-  ue_channel_state_manager      ue_channel_state{sched_cfg.ue, 1};
+  scheduler_expert_config  sched_cfg;
+  cell_configuration       cell_cfg{sched_cfg, sched_config_helper::make_default_sched_cell_configuration_request()};
+  ue_channel_state_manager ue_channel_state{sched_cfg.ue, 1};
   ue_link_adaptation_controller controller{cell_cfg, ue_channel_state};
 
   const pdsch_mcs_table dl_mcs_table = pdsch_mcs_table::qam64;
@@ -95,6 +96,7 @@ TEST_F(ue_link_adaptation_controller_test, cqi_0_reports_empty_mcs)
 
   csi_report_data csi{};
   csi.first_tb_wideband_cqi = cqi_value{0};
+  csi.valid                 = true;
   ue_channel_state.handle_csi_report(csi);
 
   std::optional<sch_mcs_index> mcs = controller.calculate_dl_mcs(dl_mcs_table);
@@ -108,6 +110,7 @@ TEST_F(ue_link_adaptation_controller_test, cqi_positive_reports_non_empty_mcs)
 
   csi_report_data csi{};
   csi.first_tb_wideband_cqi = cqi_value{test_rgen::uniform_int<uint8_t>(1, 15)};
+  csi.valid                 = true;
   ue_channel_state.handle_csi_report(csi);
 
   std::optional<sch_mcs_index> mcs = controller.calculate_dl_mcs(dl_mcs_table);
@@ -126,6 +129,7 @@ TEST_F(ue_link_adaptation_controller_mcs_derivation_test,
 {
   csi_report_data csi{};
   csi.first_tb_wideband_cqi = cqi_value{5};
+  csi.valid                 = true;
   ue_channel_state.handle_csi_report(csi);
 
   const sch_mcs_index mcs_lb = map_cqi_to_mcs(csi.first_tb_wideband_cqi->value(), dl_mcs_table).value();

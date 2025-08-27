@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -21,6 +21,8 @@
  */
 
 #include "e2sm_rc_control_action_du_executor.h"
+#include "srsran/f1ap/du/f1ap_du.h"
+#include "srsran/support/format/fmt_to_c_str.h"
 #include <future>
 
 using namespace asn1::e2ap;
@@ -28,9 +30,13 @@ using namespace asn1::e2sm;
 using namespace srsran;
 
 e2sm_rc_control_action_du_executor_base::e2sm_rc_control_action_du_executor_base(
-    srs_du::du_configurator& du_configurator_,
-    uint32_t                 action_id_) :
-  logger(srslog::fetch_basic_logger("E2SM-RC")), action_id(action_id_), du_param_configurator(du_configurator_)
+    srs_du::du_configurator&       du_configurator_,
+    srs_du::f1ap_ue_id_translator& f1ap_ue_id_translator_,
+    uint32_t                       action_id_) :
+  logger(srslog::fetch_basic_logger("E2SM-RC")),
+  action_id(action_id_),
+  du_param_configurator(du_configurator_),
+  f1ap_ue_id_provider(f1ap_ue_id_translator_)
 {
 }
 
@@ -39,21 +45,24 @@ uint32_t e2sm_rc_control_action_du_executor_base::get_action_id()
   return action_id;
 }
 
-bool e2sm_rc_control_action_du_executor_base::fill_ran_function_description(
-    asn1::e2sm::ran_function_definition_ctrl_action_item_s& action_item)
+ran_function_definition_ctrl_action_item_s e2sm_rc_control_action_du_executor_base::get_control_action_definition()
 {
+  ran_function_definition_ctrl_action_item_s action_item;
   action_item.ric_ctrl_action_id = action_id;
+  action_item.ric_ctrl_action_name.resize(action_name.size());
   action_item.ric_ctrl_action_name.from_string(action_name);
 
   for (auto& ran_p : action_params) {
     ctrl_action_ran_param_item_s ctrl_action_ran_param_item;
     ctrl_action_ran_param_item.ran_param_id = ran_p.first;
+    ctrl_action_ran_param_item.ran_param_name.resize(ran_p.second.size());
     ctrl_action_ran_param_item.ran_param_name.from_string(ran_p.second);
     action_item.ran_ctrl_action_params_list.push_back(ctrl_action_ran_param_item);
   }
 
-  return true;
+  return action_item;
 }
+
 async_task<e2sm_ric_control_response>
 e2sm_rc_control_action_du_executor_base::return_ctrl_failure(const e2sm_ric_control_request& req)
 {
@@ -66,36 +75,14 @@ e2sm_rc_control_action_du_executor_base::return_ctrl_failure(const e2sm_ric_cont
   });
 }
 
-void e2sm_rc_control_action_du_executor_base::parse_ran_parameter_value(const ran_param_value_type_c& ran_param,
-                                                                        uint64_t                      ran_param_id,
-                                                                        uint64_t                      ue_id,
-                                                                        srs_du::du_mac_sched_control_config& ctrl_cfg)
-{
-  if (ran_param.type() == ran_param_value_type_c::types_opts::ran_p_choice_list) {
-    for (auto& ran_p_list : ran_param.ran_p_choice_list().ran_param_list.list_of_ran_param) {
-      for (auto& ran_p : ran_p_list.seq_of_ran_params) {
-        if (action_params.find(ran_p.ran_param_id) != action_params.end()) {
-          parse_ran_parameter_value(ran_p.ran_param_value_type, ran_p.ran_param_id, ue_id, ctrl_cfg);
-        }
-      }
-    }
-  } else if (ran_param.type() == ran_param_value_type_c::types_opts::ran_p_choice_structure) {
-    for (auto& ran_seq : ran_param.ran_p_choice_structure().ran_param_structure.seq_of_ran_params) {
-      if (action_params.find(ran_seq.ran_param_id) != action_params.end()) {
-        parse_ran_parameter_value(ran_seq.ran_param_value_type, ran_seq.ran_param_id, ue_id, ctrl_cfg);
-      }
-    }
-  } else if (ran_param.type() == ran_param_value_type_c::types_opts::ran_p_choice_elem_false) {
-    parse_action_ran_parameter_value(ran_param, ran_param_id, ue_id, ctrl_cfg);
-  }
-}
-
 e2sm_rc_control_action_2_6_du_executor::e2sm_rc_control_action_2_6_du_executor(
-    srs_du::du_configurator& du_configurator_) :
-  e2sm_rc_control_action_du_executor_base(du_configurator_, 6)
+    srs_du::du_configurator&       du_configurator_,
+    srs_du::f1ap_ue_id_translator& f1ap_ue_id_translator_) :
+  e2sm_rc_control_action_du_executor_base(du_configurator_, f1ap_ue_id_translator_, 6)
 {
   // Control Action description:
   // To control the radio resource management policy for slice-specific PRB quota allocation
+  // Note: Parameter id 4 missing/skipped in TS.
   action_name = "Slice-level PRB quota";
   action_params.insert({1, "RRM Policy Ratio List"});
   action_params.insert({2, "RRM Policy Ratio Group"});
@@ -109,7 +96,7 @@ e2sm_rc_control_action_2_6_du_executor::e2sm_rc_control_action_2_6_du_executor(
   action_params.insert({11, "Min PRB Policy Ratio"});
   action_params.insert({12, "Max PRB Policy Ratio"});
   action_params.insert({13, "Dedicated PRB Policy Ratio"});
-};
+}
 
 void e2sm_rc_control_action_2_6_du_executor::parse_action_ran_parameter_value(
     const ran_param_value_type_c&        ran_param,
@@ -117,77 +104,51 @@ void e2sm_rc_control_action_2_6_du_executor::parse_action_ran_parameter_value(
     uint64_t                             ue_id,
     srs_du::du_mac_sched_control_config& ctrl_cfg)
 {
-  if (action_params[ran_param_id] == "PLMN Identity") {
-    srs_du::control_config_params cur_control_params = {};
-    cur_control_params.rrm_policy_group.emplace();
-    cur_control_params.rrm_policy_group.value().pol_member.plmn_id =
-        plmn_identity::parse(ran_param.ran_p_choice_elem_false().ran_param_value.value_oct_s().to_string()).value();
-    ctrl_cfg.param_list.push_back(cur_control_params);
-  } else if (action_params[ran_param_id] == "SST") {
-    if (ctrl_cfg.param_list.size()) {
-      if (ctrl_cfg.param_list.back().rrm_policy_group.value().pol_member.s_nssai.sst) {
-        srs_du::control_config_params cur_control_params = {};
-        cur_control_params.rrm_policy_group.emplace();
-        cur_control_params = ctrl_cfg.param_list.back();
-        cur_control_params.rrm_policy_group.value().pol_member.s_nssai.sst =
-            ran_param.ran_p_choice_elem_false().ran_param_value.value_oct_s().to_number();
-        ctrl_cfg.param_list.push_back(cur_control_params);
-      } else {
-        ctrl_cfg.param_list.back().rrm_policy_group.value().pol_member.s_nssai.sst =
-            ran_param.ran_p_choice_elem_false().ran_param_value.value_oct_s().to_number();
-      }
+  // TODO: validate types.
+  if (ran_param_id == 1 or ran_param_id == 3 or ran_param_id == 5 or ran_param_id == 8) {
+    // No need to parse.
+  } else if (ran_param_id == 2) {
+    // RRM Policy Ratio Group.
+    ctrl_cfg.rrm_policy_ratio_list.emplace_back();
+  } else if (ran_param_id == 6) {
+    // RRM Policy Member List.
+    ctrl_cfg.rrm_policy_ratio_list.back().policy_members_list.emplace_back();
+  } else if (ran_param_id == 7) {
+    // PLMN Identity.
+    if (ran_param.ran_p_choice_elem_false().ran_param_value.value_oct_s().size() != 3) {
+      logger.info("E2SM-RC Slice-level PRB quota Control Request: PLMN (param_id={}) encoded not correctly.",
+                  ran_param_id);
+      return;
     }
-  } else if (action_params[ran_param_id] == "SD") {
-    if (ctrl_cfg.param_list.size()) {
-      if (ctrl_cfg.param_list.back().rrm_policy_group.value().pol_member.s_nssai.sd.has_value()) {
-        srs_du::control_config_params cur_control_params = {};
-        cur_control_params.rrm_policy_group.emplace();
-        cur_control_params = ctrl_cfg.param_list.back();
-        cur_control_params.rrm_policy_group.value().pol_member.s_nssai.sd.emplace();
-        cur_control_params.rrm_policy_group.value().pol_member.s_nssai.sd =
-            ran_param.ran_p_choice_elem_false().ran_param_value.value_oct_s().to_number();
-        ctrl_cfg.param_list.push_back(cur_control_params);
-      } else {
-        ctrl_cfg.param_list.back().rrm_policy_group.value().pol_member.s_nssai.sd.emplace();
-        ctrl_cfg.param_list.back().rrm_policy_group.value().pol_member.s_nssai.sd =
-            ran_param.ran_p_choice_elem_false().ran_param_value.value_oct_s().to_number();
-      }
-    }
-  } else if (action_params[ran_param_id] == "Min PRB Policy Ratio") {
-    if (ctrl_cfg.param_list.size()) {
-      if (!ctrl_cfg.param_list.back().rrm_policy_group.has_value()) {
-        ctrl_cfg.param_list.back().rrm_policy_group.emplace();
-      }
-      ctrl_cfg.param_list.back().rrm_policy_group.value().min_prb_policy_ratio.emplace();
-      ctrl_cfg.param_list.back().rrm_policy_group.value().min_prb_policy_ratio =
-          ran_param.ran_p_choice_elem_false().ran_param_value.value_int();
-    } else {
-      srs_du::control_config_params cur_control_params = {};
-      cur_control_params.rrm_policy_group.emplace();
-      cur_control_params.rrm_policy_group.value().min_prb_policy_ratio.emplace();
-      cur_control_params.rrm_policy_group.value().min_prb_policy_ratio =
-          ran_param.ran_p_choice_elem_false().ran_param_value.value_int();
-      ctrl_cfg.param_list.push_back(cur_control_params);
-    }
-  } else if (action_params[ran_param_id] == "Max PRB Policy Ratio") {
-    if (ctrl_cfg.param_list.size()) {
-      if (!ctrl_cfg.param_list.back().rrm_policy_group.has_value()) {
-        ctrl_cfg.param_list.back().rrm_policy_group.emplace();
-      }
-      ctrl_cfg.param_list.back().rrm_policy_group.value().max_prb_policy_ratio.emplace();
-      ctrl_cfg.param_list.back().rrm_policy_group.value().max_prb_policy_ratio =
-          ran_param.ran_p_choice_elem_false().ran_param_value.value_int();
-    } else {
-      srs_du::control_config_params cur_control_params = {};
-      cur_control_params.rrm_policy_group.emplace();
-      cur_control_params.rrm_policy_group.value().max_prb_policy_ratio.emplace();
-      cur_control_params.rrm_policy_group.value().max_prb_policy_ratio =
-          ran_param.ran_p_choice_elem_false().ran_param_value.value_int();
-      ctrl_cfg.param_list.push_back(cur_control_params);
-    }
+    std::array<uint8_t, 3> plmn_bytes;
+    std::copy(ran_param.ran_p_choice_elem_false().ran_param_value.value_oct_s().begin(),
+              ran_param.ran_p_choice_elem_false().ran_param_value.value_oct_s().end(),
+              plmn_bytes.begin());
+    ctrl_cfg.rrm_policy_ratio_list.back().policy_members_list.back().plmn_id =
+        plmn_identity::from_bytes(plmn_bytes).value();
+  } else if (ran_param_id == 9) {
+    // SST.
+    ctrl_cfg.rrm_policy_ratio_list.back().policy_members_list.back().s_nssai.sst =
+        slice_service_type{(uint8_t)ran_param.ran_p_choice_elem_false().ran_param_value.value_oct_s().to_number()};
+  } else if (ran_param_id == 10) {
+    // SD.
+    uint64_t sd = ran_param.ran_p_choice_elem_false().ran_param_value.value_oct_s().to_number();
+    ctrl_cfg.rrm_policy_ratio_list.back().policy_members_list.back().s_nssai.sd =
+        slice_differentiator::create(sd).value();
+  } else if (ran_param_id == 11) {
+    // Min PRB Policy Ratio.
+    ctrl_cfg.rrm_policy_ratio_list.back().min_prb_policy_ratio =
+        ran_param.ran_p_choice_elem_false().ran_param_value.value_int();
+  } else if (ran_param_id == 12) {
+    // Max PRB Policy Ratio.
+    ctrl_cfg.rrm_policy_ratio_list.back().max_prb_policy_ratio =
+        ran_param.ran_p_choice_elem_false().ran_param_value.value_int();
+  } else if (ran_param_id == 13) {
+    // Dedicated PRB Policy Ratio.
+    ctrl_cfg.rrm_policy_ratio_list.back().ded_prb_policy_ratio =
+        ran_param.ran_p_choice_elem_false().ran_param_value.value_int();
   } else {
     logger.error("Unknown RAN parameter ID {}", ran_param_id);
-    return;
   }
 }
 
@@ -202,15 +163,61 @@ bool e2sm_rc_control_action_2_6_du_executor::ric_control_action_supported(const 
     }
   };
   return true;
-};
+}
 
 async_task<e2sm_ric_control_response>
 e2sm_rc_control_action_2_6_du_executor::execute_ric_control_action(const e2sm_ric_control_request& req)
 {
   srs_du::du_mac_sched_control_config ctrl_config = convert_to_du_config_request(req);
-  if (ctrl_config.param_list.empty()) {
+  // If empty request, return failure.
+  if (ctrl_config.rrm_policy_ratio_list.empty()) {
     return return_ctrl_failure(req);
   }
+  // If any policy is missing members, return failure.
+  for (const auto& policy : ctrl_config.rrm_policy_ratio_list) {
+    if (policy.policy_members_list.empty()) {
+      return return_ctrl_failure(req);
+    }
+  }
+  // If PRB quota not provided, return failure.
+  for (const auto& policy : ctrl_config.rrm_policy_ratio_list) {
+    if (!policy.min_prb_policy_ratio.has_value()) {
+      return return_ctrl_failure(req);
+    }
+    if (!policy.max_prb_policy_ratio.has_value()) {
+      return return_ctrl_failure(req);
+    }
+    if (!policy.ded_prb_policy_ratio.has_value()) {
+      return return_ctrl_failure(req);
+    }
+  }
+
+  // Log received control request.
+  fmt::memory_buffer log_buffer;
+  fmt::format_to(std::back_inserter(log_buffer),
+                 "Slice-level PRB quota Control Request for UE gNB-DU-UE-F1AP-ID={}:\n",
+                 gnb_du_ue_f1ap_id_to_uint(ctrl_config.ue_id));
+  fmt::format_to(std::back_inserter(log_buffer), "RRM Policy Ratio Group:\n");
+  for (const auto& rrm_policy_ratio : ctrl_config.rrm_policy_ratio_list) {
+    fmt::format_to(std::back_inserter(log_buffer), " RRM Policy:\n");
+    fmt::format_to(
+        std::back_inserter(log_buffer), "  Min PRB Policy Ratio: {}\n", *rrm_policy_ratio.min_prb_policy_ratio);
+    fmt::format_to(
+        std::back_inserter(log_buffer), "  Max PRB Policy Ratio: {}\n", *rrm_policy_ratio.max_prb_policy_ratio);
+    fmt::format_to(
+        std::back_inserter(log_buffer), "  Dedicated PRB Policy Ratio: {}\n", *rrm_policy_ratio.ded_prb_policy_ratio);
+    fmt::format_to(std::back_inserter(log_buffer), "  RRM Policy Member List:\n");
+    for (const auto& policy_member : rrm_policy_ratio.policy_members_list) {
+      fmt::format_to(std::back_inserter(log_buffer),
+                     "  - PLMN:{}, SST:{}, SD:{}\n",
+                     policy_member.plmn_id.to_string(),
+                     policy_member.s_nssai.sst.value(),
+                     policy_member.s_nssai.sd.value());
+    }
+  }
+  logger.info("{}", to_c_str(log_buffer));
+  log_buffer.clear();
+
   return launch_async(
       [this, ctrl_config = std::move(ctrl_config)](coro_context<async_task<e2sm_ric_control_response>>& ctx) {
         CORO_BEGIN(ctx);
@@ -219,7 +226,7 @@ e2sm_rc_control_action_2_6_du_executor::execute_ric_control_action(const e2sm_ri
         e2sm_ric_control_response e2_resp = convert_to_e2sm_response(ctrl_config, ctrl_response);
         CORO_RETURN(e2_resp);
       });
-};
+}
 
 srs_du::du_mac_sched_control_config
 e2sm_rc_control_action_2_6_du_executor::convert_to_du_config_request(const e2sm_ric_control_request& e2sm_req_)
@@ -229,25 +236,37 @@ e2sm_rc_control_action_2_6_du_executor::convert_to_du_config_request(const e2sm_
       std::get<e2sm_rc_ctrl_hdr_s>(e2sm_req_.request_ctrl_hdr).ric_ctrl_hdr_formats.ctrl_hdr_format1();
   const e2sm_rc_ctrl_msg_format1_s& ctrl_msg =
       std::get<e2sm_rc_ctrl_msg_s>(e2sm_req_.request_ctrl_msg).ric_ctrl_msg_formats.ctrl_msg_format1();
-  switch (ctrl_hdr.ue_id.type()) {
-    case ue_id_c::types_opts::gnb_ue_id:
-      ctrl_config.ue_id = ctrl_hdr.ue_id.gnb_ue_id().amf_ue_ngap_id;
-      break;
-    case ue_id_c::types_opts::gnb_du_ue_id:
-      ctrl_config.ue_id = ctrl_hdr.ue_id.gnb_du_ue_id().gnb_cu_ue_f1ap_id;
-      break;
-    default:
-      ctrl_config.ue_id = 0;
-      break;
+
+  if (ctrl_hdr.ue_id.type() != ue_id_c::types_opts::gnb_du_ue_id) {
+    return {};
+  }
+  uint64_t gnb_cu_ue_f1ap_id = ctrl_hdr.ue_id.gnb_du_ue_id().gnb_cu_ue_f1ap_id;
+  ctrl_config.ue_id          = f1ap_ue_id_provider.get_gnb_du_ue_f1ap_id(int_to_gnb_cu_ue_f1ap_id(gnb_cu_ue_f1ap_id));
+
+  if (ctrl_config.ue_id == gnb_du_ue_f1ap_id_t::invalid) {
+    logger.info("Slice-level PRB quota Control Request received but UE not found, gNB-CU-UE-F1AP-ID={}",
+                gnb_cu_ue_f1ap_id);
+    return {};
   }
 
+  // Use a lambda to define the template function in parse_ran_parameter_value
+  auto parse_action_ran_parameter_value_lambda = [this](const ran_param_value_type_c&        ran_param,
+                                                        uint64_t                             ran_param_id,
+                                                        uint64_t                             ue_id,
+                                                        srs_du::du_mac_sched_control_config& ctrl_cfg) {
+    this->parse_action_ran_parameter_value(ran_param, ran_param_id, ue_id, ctrl_cfg);
+  };
   for (auto& ran_p : ctrl_msg.ran_p_list) {
     if (action_params.find(ran_p.ran_param_id) != action_params.end()) {
-      parse_ran_parameter_value(ran_p.ran_param_value_type, ran_p.ran_param_id, ctrl_config.ue_id, ctrl_config);
+      parse_ran_parameter_value(ran_p.ran_param_value_type,
+                                ran_p.ran_param_id,
+                                gnb_cu_ue_f1ap_id,
+                                ctrl_config,
+                                parse_action_ran_parameter_value_lambda);
     }
-    if (ctrl_config.param_list.empty()) {
-      return {};
-    }
+  }
+  if (ctrl_config.rrm_policy_ratio_list.empty()) {
+    return {};
   }
   return ctrl_config;
 }
@@ -261,30 +280,7 @@ e2sm_ric_control_response e2sm_rc_control_action_2_6_du_executor::convert_to_e2s
       du_response_.harq_processes_result and du_response_.max_prb_alloc_result and du_response_.min_prb_alloc_result;
 
   // Always fill outcome here, it will be decided later whether it should be included in the e2 response.
-  e2sm_response.ric_ctrl_outcome_present       = true;
-  e2sm_rc_ctrl_outcome_format1_s& ctrl_outcome = std::get<e2sm_rc_ctrl_outcome_s>(e2sm_response.ric_ctrl_outcome)
-                                                     .ric_ctrl_outcome_formats.set_ctrl_outcome_format1();
-
-  // TODO: fill outcome properly
-  srs_du::control_config_params req = du_config_req_.param_list[0];
-  if (req.rrm_policy_group.has_value()) {
-    e2sm_rc_ctrl_outcome_format1_item_s min_prb_outcome;
-    min_prb_outcome.ran_param_id = 10;
-    if (req.rrm_policy_group.value().min_prb_policy_ratio.has_value()) {
-      min_prb_outcome.ran_param_value.set_value_int() = req.rrm_policy_group.value().min_prb_policy_ratio.value();
-      ctrl_outcome.ran_p_list.push_back(min_prb_outcome);
-    }
-  }
-
-  if (req.rrm_policy_group.has_value()) {
-    e2sm_rc_ctrl_outcome_format1_item_s max_prb_outcome;
-    max_prb_outcome.ran_param_id = 11;
-    if (req.rrm_policy_group.value().max_prb_policy_ratio.has_value()) {
-      max_prb_outcome.ran_param_value.set_value_int() = req.rrm_policy_group.value().max_prb_policy_ratio.value();
-      ctrl_outcome.ran_p_list.push_back(max_prb_outcome);
-    }
-  }
-
+  e2sm_response.ric_ctrl_outcome_present = false;
   if (!e2sm_response.success) {
     e2sm_response.cause.set_misc().value = cause_misc_e::options::unspecified;
   }

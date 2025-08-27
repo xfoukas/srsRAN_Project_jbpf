@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -31,12 +31,15 @@ static message_receiver_config get_message_receiver_configuration(const receiver
 {
   message_receiver_config config;
 
+  config.sector                      = rx_config.sector;
   config.nof_symbols                 = get_nsymb_per_slot(rx_config.cp);
   config.scs                         = rx_config.scs;
   config.vlan_params.mac_src_address = rx_config.mac_src_address;
   config.vlan_params.mac_dst_address = rx_config.mac_dst_address;
   config.vlan_params.tci             = rx_config.tci;
   config.vlan_params.eth_type        = ether::ECPRI_ETH_TYPE;
+  config.warn_unreceived_frames      = rx_config.log_unreceived_ru_frames;
+  config.are_metrics_enabled         = rx_config.are_metrics_enabled;
 
   config.prach_eaxc = rx_config.prach_eaxc;
   config.ul_eaxc    = rx_config.ul_eaxc;
@@ -46,11 +49,13 @@ static message_receiver_config get_message_receiver_configuration(const receiver
 
 static message_receiver_dependencies
 get_message_receiver_dependencies(receiver_impl_dependencies::message_rx_dependencies rx_dependencies,
-                                  rx_window_checker&                                  window_checker)
+                                  rx_window_checker&                                  window_checker,
+                                  closed_rx_window_handler&                           window_handler)
 {
   message_receiver_dependencies dependencies;
   dependencies.logger         = rx_dependencies.logger;
   dependencies.window_checker = &window_checker;
+  dependencies.window_handler = &window_handler;
   dependencies.eth_receiver   = std::move(rx_dependencies.eth_receiver);
   srsran_assert(dependencies.eth_receiver, "Invalid ethernet receiver");
   dependencies.ecpri_decoder = std::move(rx_dependencies.ecpri_decoder);
@@ -70,28 +75,44 @@ get_message_receiver_dependencies(receiver_impl_dependencies::message_rx_depende
 static closed_rx_window_handler_config get_closed_rx_window_handler_config(const receiver_config& config)
 {
   closed_rx_window_handler_config out_config;
-  out_config.warn_unreceived_ru_frames = config.warn_unreceived_ru_frames;
-  out_config.rx_timing_params          = config.rx_timing_params;
+  out_config.sector                 = config.sector;
+  out_config.warn_unreceived_frames = config.log_unreceived_ru_frames;
+  out_config.rx_timing_params       = config.rx_timing_params;
   // As it runs in the same executor, do not delay the reception window close.
   out_config.nof_symbols_to_process_uplink = 0;
 
   return out_config;
 }
 
-void ota_symbol_boundary_dispatcher::on_new_symbol(slot_symbol_point symbol_point)
+static closed_rx_window_handler_dependencies
+generate_closed_rx_window_dependencies(receiver_impl_dependencies::close_rx_window_dependencies&& dependencies,
+                                       srslog::basic_logger&                                      logger,
+                                       task_executor&                                             executor)
+{
+  closed_rx_window_handler_dependencies out_dependencies;
+  out_dependencies.logger      = &logger;
+  out_dependencies.executor    = &executor;
+  out_dependencies.prach_repo  = std::move(dependencies.prach_repo);
+  out_dependencies.uplink_repo = std::move(dependencies.uplink_repo);
+  out_dependencies.notifier    = std::move(dependencies.notifier);
+
+  return out_dependencies;
+}
+
+void ota_symbol_boundary_dispatcher::on_new_symbol(const slot_symbol_point_context& symbol_point_context)
 {
   for (auto& handler : handlers) {
-    handler->on_new_symbol(symbol_point);
+    handler->on_new_symbol(symbol_point_context);
   }
 }
 
 receiver_impl::receiver_impl(const receiver_config& config, receiver_impl_dependencies&& dependencies) :
+  symbol_reorderer(std::move(dependencies.symbol_reorderer)),
   closed_window_handler(get_closed_rx_window_handler_config(config),
-                        std::move(dependencies.window_handler_dependencies)),
-  window_checker(*dependencies.logger,
-                 config.rx_timing_params,
-                 std::chrono::duration<double, std::nano>(
-                     1e6 / (get_nsymb_per_slot(config.cp) * get_nof_slots_per_subframe(config.scs)))),
+                        generate_closed_rx_window_dependencies(std::move(dependencies.window_handler_dependencies),
+                                                               *dependencies.logger,
+                                                               *dependencies.executor)),
+  window_checker(config.are_metrics_enabled, config.rx_timing_params),
   symbol_boundary_dispatcher([](closed_rx_window_handler& handler, rx_window_checker& checker) {
     std::vector<ota_symbol_boundary_notifier*> handlers;
     if (!checker.disabled()) {
@@ -102,8 +123,14 @@ receiver_impl::receiver_impl(const receiver_config& config, receiver_impl_depend
     return handlers;
   }(closed_window_handler, window_checker)),
   msg_receiver(get_message_receiver_configuration(config),
-               get_message_receiver_dependencies(std::move(dependencies.msg_rx_dependencies), window_checker)),
-  rcv_task_dispatcher(msg_receiver, *dependencies.executor),
+               get_message_receiver_dependencies(std::move(dependencies.msg_rx_dependencies),
+                                                 window_checker,
+                                                 closed_window_handler)),
+  metrics_collector(config.are_metrics_enabled,
+                    window_checker,
+                    msg_receiver.get_metrics_collector(),
+                    msg_receiver.get_ethernet_receiver().get_metrics_collector()),
+  rcv_task_dispatcher(*dependencies.logger, msg_receiver, *dependencies.executor, config.sector),
   ctrl(rcv_task_dispatcher)
 {
 }
@@ -113,7 +140,12 @@ ota_symbol_boundary_notifier* receiver_impl::get_ota_symbol_boundary_notifier()
   return &symbol_boundary_dispatcher;
 }
 
-controller& receiver_impl::get_controller()
+operation_controller& receiver_impl::get_operation_controller()
 {
   return ctrl;
+}
+
+receiver_metrics_collector* receiver_impl::get_metrics_collector()
+{
+  return metrics_collector.disabled() ? nullptr : &metrics_collector;
 }

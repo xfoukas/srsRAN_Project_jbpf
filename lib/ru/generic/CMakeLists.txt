@@ -1,5 +1,5 @@
 #
-# Copyright 2021-2024 Software Radio Systems Limited
+# Copyright 2021-2025 Software Radio Systems Limited
 #
 # This file is part of srsRAN
 #
@@ -19,10 +19,17 @@
 #
 
 set(SOURCES
+        lower_phy/lower_phy_sector.cpp
+        lower_phy/low_phy_sector_metrics_collector.cpp
+        lower_phy/low_phy_sector_timing_handler.cpp
+        lower_phy/lower_phy_factory.cpp
         ru_controller_generic_impl.cpp
         ru_downlink_handler_generic_impl.cpp
         ru_factory_generic_impl.cpp
+        ru_generic_executor_mapper.cpp
         ru_generic_impl.cpp
+        ru_metrics_collector_generic_impl.cpp
+        ru_radio_metrics_collector.cpp
         ru_uplink_request_handler_generic_impl.cpp)
 
 add_library(srsran_ru_generic STATIC ${SOURCES})

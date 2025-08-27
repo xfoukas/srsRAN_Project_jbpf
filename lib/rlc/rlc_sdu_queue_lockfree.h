@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -25,6 +25,7 @@
 #include "rlc_bearer_logger.h"
 #include "srsran/adt/spsc_queue.h"
 #include "srsran/rlc/rlc_tx.h"
+#include "fmt/std.h"
 
 namespace srsran {
 
@@ -47,13 +48,13 @@ namespace srsran {
 class rlc_sdu_queue_lockfree
 {
 public:
-  explicit rlc_sdu_queue_lockfree(uint16_t capacity_, uint32_t byte_limit_, rlc_bearer_logger& logger_) :
+  explicit rlc_sdu_queue_lockfree(uint32_t capacity_, uint32_t byte_limit_, rlc_bearer_logger& logger_) :
     logger(logger_), capacity(capacity_), byte_limit(byte_limit_)
   {
     sdu_states = std::make_unique<std::atomic<uint32_t>[]>(capacity);
     sdu_sizes  = std::make_unique<std::atomic<size_t>[]>(capacity);
 
-    for (uint16_t i = 0; i < capacity; i++) {
+    for (uint32_t i = 0; i < capacity; i++) {
       sdu_states[i].store(STATE_FREE, std::memory_order_relaxed);
     }
 
@@ -202,6 +203,58 @@ public:
     return true;
   }
 
+  rlc_sdu* front()
+  {
+    rlc_sdu* front_sdu;
+    bool     sdu_is_valid = true;
+    do {
+      // first try to access front (SDU can still get discarded from upper layers)
+      front_sdu = queue->front();
+      if (front_sdu == nullptr) {
+        // queue is empty
+        return nullptr;
+      }
+
+      if (front_sdu->pdcp_sn.has_value()) {
+        // Check if the SDU is still valid (i.e. the PDCP SN was not already discarded)
+        const uint32_t pdcp_sn = front_sdu->pdcp_sn.value();
+        sdu_is_valid           = check(pdcp_sn);
+
+        if (not sdu_is_valid) {
+          // Pop the invalid SDU that is marked as discarded
+          rlc_sdu pop_sdu;
+          bool    popped = queue->try_pop(pop_sdu);
+          if (not popped) {
+            logger.log_error("Failed to pop SDU from SDU queue with front marked as invalid. pdcp_sn={}", pdcp_sn);
+            return nullptr;
+          }
+          if (not pop_sdu.pdcp_sn.has_value() || pop_sdu.pdcp_sn.value() != pdcp_sn) {
+            logger.log_error(
+                "Popped unexpected SDU from SDU queue with front marked as invalid. pdcp_sn={} pop_sdu.pdcp_sn={}",
+                pdcp_sn,
+                pop_sdu.pdcp_sn);
+            return nullptr;
+          }
+
+          // Release the slot using the check_and_release function; this must return false (i.e. the SDU was invalid)
+          sdu_is_valid = check_and_release(pdcp_sn); // this also updates totals
+          if (sdu_is_valid) {
+            logger.log_error(
+                "Unexpected result of check_and_release for popped front that was marked as invalid. pdcp_sn={}",
+                pdcp_sn);
+            return nullptr;
+          }
+        }
+      } else {
+        // SDUs without PDCP SN are always valid as they can't be discarded
+        sdu_is_valid = true;
+      }
+      // try again if SDU is not valid
+    } while (not sdu_is_valid);
+
+    return front_sdu;
+  }
+
   /// \brief Container for return value of \c get_state function.
   struct state_t {
     uint32_t n_sdus;  ///< Number of buffered SDUs that are not marked as discarded.
@@ -282,12 +335,28 @@ private:
     return sdu_is_valid;
   }
 
+  /// \brief Checks if the RLC SDU with a PDCP SN is valid (i.e. not marked as discarded)
+  ///
+  /// This private function may be called by \c read by the lower-layer thread.
+  ///
+  /// The function fails (returns false) in the following cases:
+  /// - The SDU with the PDCP SN is already marked as discarded.
+  /// - The SDU with the PDCP SN is not in the queue.
+  ///
+  /// \param pdcp_sn The PDCP SN of the SDU that shall be checked.
+  /// \return True if the RLC SDU with given PDCP SN is valid, otherwise false.
+  bool check(uint32_t pdcp_sn)
+  {
+    uint32_t sdu_state = sdu_states[pdcp_sn % capacity].load(std::memory_order_relaxed);
+    return sdu_state == pdcp_sn;
+  }
+
   static constexpr uint32_t STATE_FREE      = 0xffffffff; ///< Sentinel value to mark a slot as free.
   static constexpr uint32_t STATE_DISCARDED = 0xfffffffe; ///< Sentinel value to mark a slot as discarded.
 
   rlc_bearer_logger& logger;
 
-  const uint16_t capacity;
+  const uint32_t capacity;
   const uint32_t byte_limit;
 
   /// Combined atomic state of the queue reflecting the number of SDUs and the number of bytes.
@@ -324,13 +393,13 @@ namespace fmt {
 template <>
 struct formatter<srsran::rlc_sdu_queue_lockfree::state_t> {
   template <typename ParseContext>
-  auto parse(ParseContext& ctx) -> decltype(ctx.begin())
+  auto parse(ParseContext& ctx)
   {
     return ctx.begin();
   }
 
   template <typename FormatContext>
-  auto format(const srsran::rlc_sdu_queue_lockfree::state_t& state, FormatContext& ctx)
+  auto format(const srsran::rlc_sdu_queue_lockfree::state_t& state, FormatContext& ctx) const
   {
     return format_to(ctx.out(), "queued_sdus={} queued_bytes={}", state.n_sdus, state.n_bytes);
   }

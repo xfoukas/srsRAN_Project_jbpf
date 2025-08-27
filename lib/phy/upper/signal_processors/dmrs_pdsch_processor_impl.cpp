@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -38,7 +38,7 @@ static const re_prb_mask& get_re_mask_type_1(unsigned cdm_group_id)
        {false, true, false, true, false, true, false, true, false, true, false, true}}};
 
   return re_mask_type1[cdm_group_id];
-};
+}
 
 // Resource element allocation patterns within a resource block for PDSCH DM-RS type 2.
 static const re_prb_mask& get_re_mask_type_2(unsigned cdm_group_id)
@@ -51,35 +51,7 @@ static const re_prb_mask& get_re_mask_type_2(unsigned cdm_group_id)
        {false, false, false, false, true, true, false, false, false, false, true, true}}};
 
   return re_mask_type2[cdm_group_id];
-};
-
-const std::array<dmrs_pdsch_processor_impl::params_t, dmrs_type::DMRS_MAX_PORTS_TYPE1>
-    dmrs_pdsch_processor_impl::params_type1 = {{
-        /* Port 1000 */ {{+1.0f, +1.0f}, {+1.0f, +1.0f}},
-        /* Port 1001 */ {{+1.0f, -1.0f}, {+1.0f, +1.0f}},
-        /* Port 1002 */ {{+1.0f, +1.0f}, {+1.0f, +1.0f}},
-        /* Port 1003 */ {{+1.0f, -1.0f}, {+1.0f, +1.0f}},
-        /* Port 1004 */ {{+1.0f, +1.0f}, {+1.0f, -1.0f}},
-        /* Port 1005 */ {{+1.0f, -1.0f}, {+1.0f, -1.0f}},
-        /* Port 1006 */ {{+1.0f, +1.0f}, {+1.0f, -1.0f}},
-        /* Port 1007 */ {{+1.0f, -1.0f}, {+1.0f, -1.0f}},
-    }};
-
-const std::array<dmrs_pdsch_processor_impl::params_t, dmrs_type::DMRS_MAX_PORTS_TYPE2>
-    dmrs_pdsch_processor_impl::params_type2 = {{
-        /* Port 1000 */ {{+1.0f, +1.0f}, {+1.0f, +1.0f}},
-        /* Port 1001 */ {{+1.0f, -1.0f}, {+1.0f, +1.0f}},
-        /* Port 1002 */ {{+1.0f, +1.0f}, {+1.0f, +1.0f}},
-        /* Port 1003 */ {{+1.0f, -1.0f}, {+1.0f, +1.0f}},
-        /* Port 1004 */ {{+1.0f, +1.0f}, {+1.0f, +1.0f}},
-        /* Port 1005 */ {{+1.0f, -1.0f}, {+1.0f, +1.0f}},
-        /* Port 1006 */ {{+1.0f, +1.0f}, {+1.0f, -1.0f}},
-        /* Port 1007 */ {{+1.0f, -1.0f}, {+1.0f, -1.0f}},
-        /* Port 1008 */ {{+1.0f, +1.0f}, {+1.0f, -1.0f}},
-        /* Port 1009 */ {{+1.0f, -1.0f}, {+1.0f, -1.0f}},
-        /* Port 1010 */ {{+1.0f, +1.0f}, {+1.0f, -1.0f}},
-        /* Port 1011 */ {{+1.0f, -1.0f}, {+1.0f, -1.0f}},
-    }};
+}
 
 void srsran::dmrs_pdsch_processor_impl::sequence_generation(span<cf_t>      sequence,
                                                             unsigned        symbol,
@@ -118,7 +90,7 @@ void dmrs_pdsch_processor_impl::apply_cdm(span<cf_t>       sequence,
   }
 
   // Apply CDM to DM-RS ports other than port zero.
-  const params_t& params = (config.type == dmrs_type::TYPE1) ? params_type1[dmrs_port] : params_type2[dmrs_port];
+  dmrs_pxsch_parameters params = get_pxsch_dmrs_params(config.type, dmrs_port);
 
   // If no weights are applied, copy the original sequence.
   if ((params.w_t[l_prime] == +1.0F) && (params.w_f[0] == params.w_f[1])) {
@@ -128,7 +100,7 @@ void dmrs_pdsch_processor_impl::apply_cdm(span<cf_t>       sequence,
 
   // Apply w_t weight can be +1 or -1 depending on l_prime and port.
   if (params.w_t[l_prime] != +1.0F) {
-    srsvec::sc_prod(base_sequence, -1, sequence);
+    srsvec::sc_prod(sequence, base_sequence, -1);
   } else {
     srsvec::copy(sequence, base_sequence);
   }
@@ -142,7 +114,7 @@ void dmrs_pdsch_processor_impl::apply_cdm(span<cf_t>       sequence,
   }
 }
 
-void srsran::dmrs_pdsch_processor_impl::map(resource_grid_mapper& mapper, const config_t& config)
+void srsran::dmrs_pdsch_processor_impl::map(resource_grid_writer& grid, const config_t& config)
 {
   // Number of DM-RS RE in an OFDM symbol.
   unsigned nof_dmrs_re_symbol = config.type.nof_dmrs_per_rb() * config.rb_mask.count();
@@ -201,7 +173,7 @@ void srsran::dmrs_pdsch_processor_impl::map(resource_grid_mapper& mapper, const 
 
     // Set DM-RS allocation pattern of the CDM group.
     re_pattern dmrs_pattern_cdm;
-    dmrs_pattern_cdm.prb_mask = config.rb_mask;
+    dmrs_pattern_cdm.crb_mask = config.rb_mask;
     dmrs_pattern_cdm.symbols  = config.symbols_mask;
     dmrs_pattern_cdm.re_mask =
         (config.type == dmrs_type::TYPE1) ? get_re_mask_type_1(i_cdm_group) : get_re_mask_type_2(i_cdm_group);
@@ -257,6 +229,6 @@ void srsran::dmrs_pdsch_processor_impl::map(resource_grid_mapper& mapper, const 
     }
 
     // Map the CDM group symbols into the resource grid.
-    mapper.map(temp_re, dmrs_pattern_cdm, cdm_group_precoding);
+    mapper->map(grid, temp_re, dmrs_pattern_cdm, cdm_group_precoding);
   }
 }

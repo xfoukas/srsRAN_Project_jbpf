@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -22,9 +22,10 @@
 
 #pragma once
 
-#include "cu_cp_types.h"
-#include "srsran/ran/lcid.h"
+#include "srsran/cu_cp/cu_cp_types.h"
+#include "srsran/ran/rb_id.h"
 #include "srsran/rlc/rlc_config.h"
+#include <map>
 
 namespace srsran {
 
@@ -56,7 +57,7 @@ struct up_drb_context {
 };
 
 struct up_pdu_session_context {
-  up_pdu_session_context(pdu_session_id_t id_) : id(id_){};
+  up_pdu_session_context(pdu_session_id_t id_) : id(id_) {}
   pdu_session_id_t                   id = pdu_session_id_t::invalid;
   std::map<drb_id_t, up_drb_context> drbs;
 };

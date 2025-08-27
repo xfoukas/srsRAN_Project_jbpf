@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -20,9 +20,6 @@
  *
  */
 
-#include "../../../support/resource_grid_mapper_test_doubles.h"
-#include "../../rx_buffer_test_doubles.h"
-#include "pdsch_processor_test_doubles.h"
 #include "srsran/phy/support/support_factories.h"
 #include "srsran/phy/upper/channel_processors/channel_processor_formatters.h"
 #include "srsran/phy/upper/channel_processors/pdsch/factories.h"
@@ -31,6 +28,7 @@
 #include "srsran/ran/precoding/precoding_codebooks.h"
 #include "fmt/ostream.h"
 #include "gtest/gtest.h"
+#include <regex>
 
 using namespace srsran;
 
@@ -80,13 +78,13 @@ const std::vector<test_case_t> pdsch_processor_validator_test_data = {
        pdu.bwp_size_rb            = MAX_RB + 1;
        return pdu;
      },
-     R"(Invalid BWP configuration \[0, 276\) for the given frequency allocation \[0\, 52\)\.)"},
+     R"(Invalid BWP configuration, i\.e\., \[0, 276\) for the given RB allocation, i\.e\., \[0, 52\)\.)"},
     {[] {
        pdsch_processor::pdu_t pdu = base_pdu;
        pdu.dmrs_symbol_mask       = {1};
        return pdu;
      },
-     R"(The DM-RS symbol mask size \(i\.e\., 1\), must be equal to the number of symbols in the slot \(i\.e\., 14\)\.)"},
+     R"(The DM-RS symbol mask size \(i\.e\., 1\) must be equal to the slot size \(i\.e\., 14\)\.)"},
     {[] {
        pdsch_processor::pdu_t pdu = base_pdu;
        pdu.dmrs_symbol_mask       = bounded_bitset<MAX_NSYMB_PER_SLOT>(MAX_NSYMB_PER_SLOT);
@@ -117,7 +115,7 @@ const std::vector<test_case_t> pdsch_processor_validator_test_data = {
        pdu.nof_symbols            = 13;
        return pdu;
      },
-     R"(The transmission with time allocation \[2, 15\) exceeds the slot boundary of 14 symbols.)"},
+     R"(The symbol allocation \(i\.e\., \[2, 15\)\) exceeds the slot size \(i\.e\., 14\)\.)"},
     {[] {
        pdsch_processor::pdu_t pdu = base_pdu;
        pdu.dmrs                   = dmrs_type::TYPE2;
@@ -135,7 +133,7 @@ const std::vector<test_case_t> pdsch_processor_validator_test_data = {
        pdu.freq_alloc             = rb_allocation::make_type0({1, 0, 1, 0, 1, 0});
        return pdu;
      },
-     R"(Only contiguous allocation is currently supported\.)"},
+     R"(Only contiguous VRB mask allocation is currently supported\.)"},
     {[] {
        pdsch_processor::pdu_t pdu = base_pdu;
        pdu.tbs_lbrm               = units::bytes(0);
@@ -147,48 +145,48 @@ const std::vector<test_case_t> pdsch_processor_validator_test_data = {
        pdu.codewords.clear();
        return pdu;
      },
-     R"(Expected 1 codewords and got 0 for 1 layers\.)"},
+     R"(Only one codeword is currently supported\.)"},
     {[] {
        pdsch_processor::pdu_t pdu = base_pdu;
        pdu.bwp_start_rb           = 0;
        pdu.bwp_size_rb            = 52;
        pdu.freq_alloc             = rb_allocation::make_type1(0, 52);
-       pdu.freq_alloc = rb_allocation::make_type1(0, 52, vrb_to_prb_mapper::create_non_interleaved_common_ss(1));
+       pdu.freq_alloc             = rb_allocation::make_type1(0, 52, vrb_to_prb::create_non_interleaved_common_ss(1));
        return pdu;
      },
-     R"(Invalid BWP configuration \[0, 52\) for the given frequency allocation \[1\, 53\)\.)"},
+     R"(Invalid BWP configuration, i\.e\., \[0, 52\) for the given RB allocation, i\.e\., \[0, 52\)\.)"},
     {[] {
        pdsch_processor::pdu_t pdu = base_pdu;
        pdu.bwp_start_rb           = 0;
        pdu.bwp_size_rb            = 52;
        pdu.freq_alloc             = rb_allocation::make_type1(0, 52);
-       pdu.freq_alloc = rb_allocation::make_type1(0, 52, vrb_to_prb_mapper::create_interleaved_common(1, 0, 52));
+       pdu.freq_alloc = rb_allocation::make_type1(0, 52, vrb_to_prb::create_interleaved_common_ss(1, 0, 52));
        return pdu;
      },
-     R"(Invalid BWP configuration \[0, 52\) for the given frequency allocation non-contiguous.)"},
+     R"(Invalid BWP configuration, i\.e\., \[0, 52\) for the given RB allocation, i\.e\., \[0, 52\)\.)"},
     {[] {
        pdsch_processor::pdu_t pdu = base_pdu;
        pdu.bwp_start_rb           = 0;
        pdu.bwp_size_rb            = 52;
        pdu.freq_alloc             = rb_allocation::make_type1(0, 52);
-       pdu.freq_alloc = rb_allocation::make_type1(0, 52, vrb_to_prb_mapper::create_interleaved_coreset0(1, 52));
+       pdu.freq_alloc             = rb_allocation::make_type1(0, 52, vrb_to_prb::create_interleaved_coreset0(1, 52));
        return pdu;
      },
-     R"(Invalid BWP configuration \[0, 52\) for the given frequency allocation non-contiguous.)"},
+     R"(Invalid BWP configuration, i\.e\., \[0, 52\) for the given RB allocation, i\.e\., \[0, 52\)\.)"},
     {[] {
        pdsch_processor::pdu_t pdu = base_pdu;
 
        // Create RE pattern that collides with DM-RS.
        re_pattern reserved_pattern;
-       reserved_pattern.prb_mask = ~bounded_bitset<MAX_RB>(MAX_RB);
-       reserved_pattern.prb_mask.fill(0, MAX_RB);
+       reserved_pattern.crb_mask = ~crb_bitmap(MAX_RB);
+       reserved_pattern.crb_mask.fill(0, MAX_RB);
        reserved_pattern.symbols = pdu.dmrs_symbol_mask;
        reserved_pattern.re_mask = ~bounded_bitset<NRE>(NRE);
        pdu.reserved.merge(reserved_pattern);
 
        return pdu;
      },
-     R"(The DM-RS symbol mask must not collide with reserved elements.)"},
+     R"(Reserved REs collide with DM-RS\.)"},
 };
 
 class pdschProcessorFixture : public ::testing::TestWithParam<test_case_t>
@@ -208,7 +206,7 @@ protected:
     ASSERT_NE(prg_factory, nullptr);
 
     // Create demodulator mapper factory.
-    std::shared_ptr<channel_modulation_factory> chan_modulation_factory = create_channel_modulation_sw_factory();
+    std::shared_ptr<modulation_mapper_factory> chan_modulation_factory = create_modulation_mapper_factory();
     ASSERT_NE(chan_modulation_factory, nullptr);
 
     // Create CRC calculator factory.
@@ -228,14 +226,28 @@ protected:
         create_ldpc_segmenter_tx_factory_sw(crc_calc_factory);
     ASSERT_NE(ldpc_segm_tx_factory, nullptr);
 
+    // Create channel precoding factory.
+    std::shared_ptr<channel_precoder_factory> precoding_factory = create_channel_precoder_factory("auto");
+    ASSERT_NE(precoding_factory, nullptr);
+
+    // Create resource grid mapper factory.
+    std::shared_ptr<resource_grid_mapper_factory> rg_mapper_factory =
+        create_resource_grid_mapper_factory(precoding_factory);
+    ASSERT_NE(rg_mapper_factory, nullptr);
+
     // Create DM-RS for pdsch channel estimator.
     std::shared_ptr<dmrs_pdsch_processor_factory> dmrs_pdsch_proc_factory =
-        create_dmrs_pdsch_processor_factory_sw(prg_factory);
+        create_dmrs_pdsch_processor_factory_sw(prg_factory, rg_mapper_factory);
     ASSERT_NE(dmrs_pdsch_proc_factory, nullptr);
+
+    // Create PT-RS for pdsch channel estimator.
+    std::shared_ptr<ptrs_pdsch_generator_factory> ptrs_pdsch_gen_factory =
+        create_ptrs_pdsch_generator_generic_factory(prg_factory, rg_mapper_factory);
+    ASSERT_NE(ptrs_pdsch_gen_factory, nullptr);
 
     // Create PDSCH demodulator factory.
     std::shared_ptr<pdsch_modulator_factory> pdsch_mod_factory =
-        create_pdsch_modulator_factory_sw(chan_modulation_factory, prg_factory);
+        create_pdsch_modulator_factory_sw(chan_modulation_factory, prg_factory, rg_mapper_factory);
     ASSERT_NE(pdsch_mod_factory, nullptr);
 
     // Create PDSCH decoder factory.
@@ -247,8 +259,8 @@ protected:
     ASSERT_NE(pdsch_enc_factory, nullptr);
 
     // Create PDSCH processor.
-    std::shared_ptr<pdsch_processor_factory> pdsch_proc_factory =
-        create_pdsch_processor_factory_sw(pdsch_enc_factory, pdsch_mod_factory, dmrs_pdsch_proc_factory);
+    std::shared_ptr<pdsch_processor_factory> pdsch_proc_factory = create_pdsch_processor_factory_sw(
+        pdsch_enc_factory, pdsch_mod_factory, dmrs_pdsch_proc_factory, ptrs_pdsch_gen_factory);
     ASSERT_NE(pdsch_proc_factory, nullptr);
 
     // Create actual PDSCH processor.
@@ -275,21 +287,10 @@ TEST_P(pdschProcessorFixture, pdschProcessorValidatorDeathTest)
   const test_case_t& param = GetParam();
 
   // Make sure the configuration is invalid.
-  ASSERT_FALSE(pdu_validator->is_valid(param.get_pdu()));
-
-  // Prepare resource grid and resource grid mapper spies.
-  resource_grid_writer_spy              grid(MAX_PORTS, MAX_NSYMB_PER_SLOT, MAX_RB);
-  std::unique_ptr<resource_grid_mapper> mapper = create_resource_grid_mapper(0, 0, grid);
-
-  // Prepare receive data.
-  std::vector<uint8_t> data;
-
-  pdsch_processor_notifier_spy notifier_spy;
-
-  // Process pdsch PDU.
-#ifdef ASSERTS_ENABLED
-  ASSERT_DEATH({ pdsch_proc->process(*mapper, notifier_spy, {data}, param.get_pdu()); }, param.expr);
-#endif // ASSERTS_ENABLED
+  error_type<std::string> validator_out = pdu_validator->is_valid(param.get_pdu());
+  ASSERT_FALSE(validator_out.has_value()) << "Validation should fail.";
+  ASSERT_TRUE(std::regex_match(validator_out.error(), std::regex(param.expr))) << fmt::format(
+      R"(The assertion message "{}" doesn't match the expected pattern "{}".)", validator_out.error(), param.expr);
 }
 
 // Creates test suite that combines all possible parameters.

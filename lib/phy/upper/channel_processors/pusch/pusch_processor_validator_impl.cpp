@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -169,16 +169,16 @@ error_type<std::string> pusch_processor_validator_impl::is_valid(const pusch_pro
     }
 
     // Number of PRB must be valid.
-    if (!is_transform_precoding_nof_prb_valid(pdu.freq_alloc.get_nof_rb())) {
+    if (!transform_precoding::is_nof_prbs_valid(pdu.freq_alloc.get_nof_rb())) {
       return make_unexpected("Transform precoding is only possible with a valid number of PRB.");
     }
   }
 
   // DC position is outside the channel estimate dimensions.
   interval<unsigned> dc_position_range(0, ce_dims.nof_prb * NRE);
-  if (pdu.dc_position.has_value() && !dc_position_range.contains(pdu.dc_position.value())) {
+  if (pdu.dc_position.has_value() && !dc_position_range.contains(*pdu.dc_position)) {
     return make_unexpected(
-        fmt::format("DC position (i.e., {}) is out of range {}.", pdu.dc_position.value(), dc_position_range));
+        fmt::format("DC position (i.e., {}) is out of range {}.", *pdu.dc_position, dc_position_range));
   }
 
   return default_success_t();

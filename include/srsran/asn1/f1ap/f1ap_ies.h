@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -2487,7 +2487,7 @@ using srs_cfg_ext_ies_o = protocol_ext_empty_o;
 using srs_res_list_l = dyn_array<srs_res_s>;
 
 // SRSResourceSet-List ::= SEQUENCE (SIZE (1..16)) OF SRSResourceSet
-using srs_res_set_list_l = dyn_array<srs_res_set_s>;
+using srs_res_set_list2_l = dyn_array<srs_res_set_s>;
 
 // ActiveULBWP-ExtIEs ::= OBJECT SET OF F1AP-PROTOCOL-EXTENSION
 using active_ul_bwp_ext_ies_o = protocol_ext_empty_o;
@@ -2499,7 +2499,7 @@ struct srs_cfg_s {
   bool                      ie_exts_present = false;
   srs_res_list_l            srs_res_list;
   pos_srs_res_list_l        pos_srs_res_list;
-  srs_res_set_list_l        srs_res_set_list;
+  srs_res_set_list2_l       srs_res_set_list;
   pos_srs_res_set_list_l    pos_srs_res_set_list;
   srs_cfg_ext_ies_container ie_exts;
 
@@ -17136,7 +17136,7 @@ using trp_info_ext_ies_container = protocol_ext_container_empty_l;
 // TRPInformation ::= SEQUENCE
 struct trp_info_s {
   bool                       ie_exts_present = false;
-  uint32_t                   trp_id          = 0;
+  uint32_t                   trp_id          = 1;
   trp_info_type_resp_list_l  trp_info_type_resp_list;
   trp_info_ext_ies_container ie_exts;
 
@@ -20219,6 +20219,9 @@ struct sldrx_cycle_item_s {
 // SRSCarrier-List ::= SEQUENCE (SIZE (1..32)) OF SRSCarrier-List-Item
 using srs_carrier_list_l = dyn_array<srs_carrier_list_item_s>;
 
+// SRSResourceSetList ::= SEQUENCE (SIZE (1..16)) OF SRSResourceSetItem
+using srs_res_set_list_l = dyn_array<srs_res_set_item_s>;
+
 using serving_cells_list_item_ext_ies_container = protocol_ext_container_empty_l;
 
 // Serving-Cells-List-Item ::= SEQUENCE
@@ -21700,6 +21703,18 @@ using sitype_list_l = dyn_array<sitype_item_s>;
 
 // SLDRXCycleList ::= SEQUENCE (SIZE (1..32)) OF SLDRXCycleItem
 using sldrx_cycle_list_l = dyn_array<sldrx_cycle_item_s>;
+
+// SRSConfiguration ::= SEQUENCE
+struct srs_configuration_s {
+  bool                      ie_exts_present = false;
+  srs_carrier_list_l        srs_carrier_list;
+  srs_cfg_ext_ies_container ie_exts;
+
+  // sequence methods
+  SRSASN_CODE pack(bit_ref& bref) const;
+  SRSASN_CODE unpack(cbit_ref& bref);
+  void        to_json(json_writer& j) const;
+};
 
 // SRSPosRRCInactiveQueryIndication ::= ENUMERATED
 struct srs_pos_rrc_inactive_query_ind_opts {

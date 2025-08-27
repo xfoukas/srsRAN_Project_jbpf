@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -22,7 +22,7 @@
 
 #include "srsran/fapi_adaptor/phy/messages/pdsch.h"
 #include "srsran/fapi_adaptor/precoding_matrix_repository.h"
-#include "srsran/ran/precoding/precoding_codebooks.h"
+#include "srsran/ran/resource_allocation/vrb_to_prb.h"
 #include "srsran/ran/sch/sch_dmrs_power.h"
 
 using namespace srsran;
@@ -73,29 +73,37 @@ static float get_power_control_offset_ss_dB(fapi::power_control_offset_ss power_
 /// Fills the power related parameters in the PDSCH PDU.
 static void fill_power_values(pdsch_processor::pdu_t& proc_pdu, const fapi::dl_pdsch_pdu& fapi_pdu)
 {
-  proc_pdu.ratio_pdsch_data_to_sss_dB = get_power_control_offset_ss_dB(fapi_pdu.power_control_offset_ss_profile_nr) +
-                                        static_cast<float>(fapi_pdu.power_control_offset_profile_nr);
+  if (const auto* profile_nr = std::get_if<fapi::dl_pdsch_pdu::power_profile_nr>(&fapi_pdu.power_config)) {
+    proc_pdu.ratio_pdsch_data_to_sss_dB =
+        get_power_control_offset_ss_dB(profile_nr->power_control_offset_ss_profile_nr) +
+        static_cast<float>(profile_nr->power_control_offset_profile_nr);
 
-  // Determine the PDSCH DMRS power from the PDSCH data power as per TS38.214 Table 4.1-1.
-  proc_pdu.ratio_pdsch_dmrs_to_sss_dB =
-      proc_pdu.ratio_pdsch_data_to_sss_dB + get_sch_to_dmrs_ratio_dB(fapi_pdu.num_dmrs_cdm_grps_no_data);
+    // Determine the PDSCH DMRS power from the PDSCH data power as per TS38.214 Table 4.1-1.
+    proc_pdu.ratio_pdsch_dmrs_to_sss_dB =
+        proc_pdu.ratio_pdsch_data_to_sss_dB + get_sch_to_dmrs_ratio_dB(fapi_pdu.num_dmrs_cdm_grps_no_data);
+  } else if (const auto* profile_sss = std::get_if<fapi::dl_pdsch_pdu::power_profile_sss>(&fapi_pdu.power_config)) {
+    proc_pdu.ratio_pdsch_dmrs_to_sss_dB = profile_sss->dmrs_power_offset_sss_db;
+    proc_pdu.ratio_pdsch_data_to_sss_dB = profile_sss->data_power_offset_sss_db;
+  } else {
+    report_error("PDCH PDU power values are not configured");
+  }
 }
 
-static unsigned get_interleaver_size(fapi::vrb_to_prb_mapping_type vrb_to_prb_mapping)
+static vrb_to_prb::mapping_type get_mapping_type(fapi::vrb_to_prb_mapping_type vrb_to_prb_mapping)
 {
   switch (vrb_to_prb_mapping) {
     case fapi::vrb_to_prb_mapping_type::interleaved_rb_size2:
-      return 2;
+      return vrb_to_prb::mapping_type::interleaved_n2;
     case fapi::vrb_to_prb_mapping_type::interleaved_rb_size4:
-      return 4;
+      return vrb_to_prb::mapping_type::interleaved_n4;
     case fapi::vrb_to_prb_mapping_type::non_interleaved:
-      break;
+    default:
+      return vrb_to_prb::mapping_type::non_interleaved;
   }
-  return 0;
 }
 
-/// Constructs the VRB-to-PRB mapper in function of the transmission type parameter of the PDSCH PDU.
-static vrb_to_prb_mapper make_vrb_to_prb_mapper(const fapi::dl_pdsch_pdu& fapi_pdu)
+/// Constructs the VRB-to-PRB configuration in function of the transmission type parameter of the PDSCH PDU.
+static vrb_to_prb::configuration make_vrb_to_prb_config(const fapi::dl_pdsch_pdu& fapi_pdu)
 {
   // BWP i start.
   unsigned N_bwp_i_start = fapi_pdu.bwp_start;
@@ -106,38 +114,38 @@ static vrb_to_prb_mapper make_vrb_to_prb_mapper(const fapi::dl_pdsch_pdu& fapi_p
   // Initial BWP size.
   unsigned N_bwp_init_size = fapi_pdu.pdsch_maintenance_v3.initial_dl_bwp_size;
   // Bundle i size.
-  unsigned L_i = get_interleaver_size(fapi_pdu.vrb_to_prb_mapping);
+  vrb_to_prb::mapping_type L_i = get_mapping_type(fapi_pdu.vrb_to_prb_mapping);
 
   switch (fapi_pdu.pdsch_maintenance_v3.trans_type) {
     case fapi::pdsch_trans_type::non_interleaved_common_ss:
-      return vrb_to_prb_mapper::create_non_interleaved_common_ss(N_start_coreset);
+      return vrb_to_prb::create_non_interleaved_common_ss(N_start_coreset);
     case fapi::pdsch_trans_type::interleaved_common_type0_coreset0:
-      return vrb_to_prb_mapper::create_interleaved_coreset0(N_start_coreset, N_bwp_init_size);
+      return vrb_to_prb::create_interleaved_coreset0(N_start_coreset, N_bwp_init_size);
     case fapi::pdsch_trans_type::interleaved_common_any_coreset0_present:
-      return vrb_to_prb_mapper::create_interleaved_common(N_start_coreset, N_bwp_i_start, N_bwp_init_size);
+      return vrb_to_prb::create_interleaved_common_ss(N_start_coreset, N_bwp_i_start, N_bwp_init_size);
     case fapi::pdsch_trans_type::interleaved_common_any_coreset0_not_present:
-      return vrb_to_prb_mapper::create_interleaved_common(N_start_coreset, N_bwp_i_start, N_bwp_i_size);
+      return vrb_to_prb::create_interleaved_common_ss(N_start_coreset, N_bwp_i_start, N_bwp_i_size);
     case fapi::pdsch_trans_type::interleaved_other:
-      return vrb_to_prb_mapper::create_interleaved_other(N_bwp_i_start, N_bwp_i_size, L_i);
+      return vrb_to_prb::create_interleaved_other(N_bwp_i_start, N_bwp_i_size, L_i);
     default:
     case fapi::pdsch_trans_type::non_interleaved_other:
       break;
   }
-  return vrb_to_prb_mapper::create_non_interleaved_other();
+  return vrb_to_prb::create_non_interleaved_other();
 }
 
 /// Fills the rb_allocation parameter of the PDSCH PDU.
 static void fill_rb_allocation(pdsch_processor::pdu_t& proc_pdu, const fapi::dl_pdsch_pdu& fapi_pdu)
 {
-  vrb_to_prb_mapper mapper = make_vrb_to_prb_mapper(fapi_pdu);
+  vrb_to_prb::configuration vrb_to_prb_config = make_vrb_to_prb_config(fapi_pdu);
 
   if (fapi_pdu.resource_alloc == fapi::resource_allocation_type::type_1) {
-    proc_pdu.freq_alloc = rb_allocation::make_type1(fapi_pdu.rb_start, fapi_pdu.rb_size, mapper);
+    proc_pdu.freq_alloc = rb_allocation::make_type1(fapi_pdu.rb_start, fapi_pdu.rb_size, vrb_to_prb_config);
     return;
   }
 
   // Unpack the VRB bitmap. LSB of byte 0 of the bitmap represents the VRB 0.
-  bounded_bitset<MAX_RB> vrb_bitmap(fapi_pdu.bwp_size);
+  vrb_bitmap vrb_bitmap(fapi_pdu.bwp_size);
   for (unsigned vrb_index = 0, vrb_index_end = fapi_pdu.bwp_size; vrb_index != vrb_index_end; ++vrb_index) {
     unsigned byte = vrb_index / 8;
     unsigned bit  = vrb_index % 8;
@@ -146,7 +154,7 @@ static void fill_rb_allocation(pdsch_processor::pdu_t& proc_pdu, const fapi::dl_
     }
   }
 
-  proc_pdu.freq_alloc = rb_allocation::make_type0(vrb_bitmap, mapper);
+  proc_pdu.freq_alloc = rb_allocation::make_type0(vrb_bitmap, vrb_to_prb_config);
 }
 
 void srsran::fapi_adaptor::convert_pdsch_fapi_to_phy(pdsch_processor::pdu_t&            proc_pdu,

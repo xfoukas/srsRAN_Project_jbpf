@@ -1,5 +1,5 @@
 #
-# Copyright 2021-2024 Software Radio Systems Limited
+# Copyright 2021-2025 Software Radio Systems Limited
 #
 # This file is part of srsRAN
 #
@@ -35,7 +35,7 @@ target_link_libraries(channel_state_information_test srslog fmt gtest gtest_main
 add_test(channel_state_information_test channel_state_information_test)
 
 add_executable(downlink_processor_pool_test downlink_processor_pool_test.cpp)
-target_link_libraries(downlink_processor_pool_test srsran_upper_phy srslog)
+target_link_libraries(downlink_processor_pool_test srsran_ran srsran_upper_phy srslog gtest gtest_main)
 add_test(downlink_processor_pool_test downlink_processor_pool_test)
 
 add_executable(downlink_processor_test downlink_processor_test.cpp)
@@ -47,8 +47,8 @@ target_link_libraries(hard_decision_test log_likelihood_ratio srslog gtest gtest
 gtest_discover_tests(hard_decision_test)
 
 add_executable(log_likelihood_ratio_test log_likelihood_ratio_test.cpp)
-target_link_libraries(log_likelihood_ratio_test log_likelihood_ratio srslog)
-add_test(log_likelihood_ratio_test log_likelihood_ratio_test)
+target_link_libraries(log_likelihood_ratio_test log_likelihood_ratio srslog gtest gtest_main)
+gtest_discover_tests(log_likelihood_ratio_test)
 
 add_executable(rx_buffer_pool_test rx_buffer_pool_test.cpp)
 target_link_libraries(rx_buffer_pool_test srsran_upper_phy_support srslog gtest srsran_support)
@@ -65,7 +65,3 @@ gtest_discover_tests(uplink_request_processor_test)
 add_executable(upper_phy_rx_symbol_handler_test upper_phy_rx_symbol_handler_test.cpp)
 target_link_libraries(upper_phy_rx_symbol_handler_test srsran_upper_phy srsran_phy_support srslog gtest gtest_main)
 gtest_discover_tests(upper_phy_rx_symbol_handler_test)
-
-add_executable(vrb_to_prb_mapper_test vrb_to_prb_mapper_test.cpp)
-target_link_libraries(vrb_to_prb_mapper_test srsran_upper_phy_support srslog)
-add_test(vrb_to_prb_mapper_test vrb_to_prb_mapper_test)

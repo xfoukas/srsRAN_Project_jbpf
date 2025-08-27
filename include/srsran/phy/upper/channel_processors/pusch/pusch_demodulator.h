@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -25,11 +25,10 @@
 
 #pragma once
 
-#include "srsran/adt/optional.h"
+#include "srsran/phy/support/rb_allocation.h"
 #include "srsran/phy/upper/channel_estimation.h"
 #include "srsran/phy/upper/dmrs_mapping.h"
 #include "srsran/phy/upper/log_likelihood_ratio.h"
-#include "srsran/phy/upper/rb_allocation.h"
 #include "srsran/ran/sch/modulation_scheme.h"
 
 namespace srsran {
@@ -52,8 +51,8 @@ public:
   struct configuration {
     /// Radio Network Temporary Identifier, see parameter \f$n_{RNTI}\f$ in TS38.211 Section 6.3.1.1.
     uint16_t rnti;
-    /// Allocation RB list: the entries set to true are used for transmission.
-    bounded_bitset<MAX_RB> rb_mask;
+    /// Allocation CRB list: the entries set to true are used for transmission.
+    crb_bitmap rb_mask;
     /// Modulation scheme used for transmission.
     modulation_scheme modulation;
     /// Time domain allocation within a slot: start symbol index {0, ..., 12}.

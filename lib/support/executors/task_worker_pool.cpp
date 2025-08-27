@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -60,7 +60,7 @@ detail::base_worker_pool::base_worker_pool(unsigned                             
 
   if (cpu_masks.size() > 1) {
     // An array with a single mask is allowed, otherwise the number of masks must be equal to the number of workers.
-    report_error_if_not(cpu_masks.size() == nof_workers_, "Wrong array of CPU masks provided");
+    report_error_if_not(cpu_masks.size() == nof_workers_, "Wrong array of CPU masks provided for {}", worker_pool_name);
   }
 
   // Task dispatched to workers of the pool.
@@ -177,9 +177,10 @@ task_worker_pool<QueuePolicy>::task_worker_pool(std::string                     
                                                 unsigned                              nof_workers_,
                                                 unsigned                              qsize_,
                                                 std::chrono::microseconds             wait_sleep_time,
+                                                unsigned                              nof_prereserved_producers,
                                                 os_thread_realtime_priority           prio,
                                                 span<const os_sched_affinity_bitmask> cpu_masks) :
-  detail::base_task_queue<QueuePolicy>(qsize_, wait_sleep_time),
+  detail::base_task_queue<QueuePolicy>(qsize_, wait_sleep_time, nof_prereserved_producers),
   detail::base_worker_pool(
       nof_workers_,
       std::move(worker_pool_name),
@@ -262,3 +263,4 @@ void task_worker_pool<QueuePolicy>::wait_pending_tasks()
 // Explicit specializations of the task_worker_pool.
 template class srsran::task_worker_pool<concurrent_queue_policy::lockfree_mpmc>;
 template class srsran::task_worker_pool<concurrent_queue_policy::locking_mpmc>;
+template class srsran::task_worker_pool<concurrent_queue_policy::moodycamel_lockfree_mpmc>;

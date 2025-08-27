@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -42,15 +42,19 @@ rrc_setup_procedure::rrc_setup_procedure(rrc_ue_context_t&               context
                                          const byte_buffer&              du_to_cu_container_,
                                          rrc_ue_setup_proc_notifier&     rrc_ue_notifier_,
                                          rrc_ue_control_message_handler& srb_notifier_,
+                                         rrc_ue_event_notifier&          metrics_notifier_,
                                          rrc_ue_ngap_notifier&           ngap_notifier_,
                                          rrc_ue_event_manager&           event_mng_,
-                                         rrc_ue_logger&                  logger_) :
+                                         rrc_ue_logger&                  logger_,
+                                         bool                            is_reestablishment_fallback_) :
   context(context_),
   du_to_cu_container(du_to_cu_container_),
   rrc_ue(rrc_ue_notifier_),
   srb_notifier(srb_notifier_),
+  metrics_notifier(metrics_notifier_),
   ngap_notifier(ngap_notifier_),
   event_mng(event_mng_),
+  is_reestablishment_fallback(is_reestablishment_fallback_),
   logger(logger_)
 {
 }
@@ -100,6 +104,16 @@ void rrc_setup_procedure::operator()(coro_context<async_task<void>>& ctx)
 
   context.state = rrc_state::connected;
 
+  if (not is_reestablishment_fallback) {
+    // Notify metrics about successful RRC connection establishment.
+    metrics_notifier.on_successful_rrc_connection_establishment(context.connection_cause);
+  } else {
+    // Notify metrics about successful RRC connection reestablishment fallback.
+    metrics_notifier.on_successful_rrc_connection_reestablishment_fallback();
+  }
+  // Notify metrics about new RRC connection.
+  metrics_notifier.on_new_rrc_connection();
+
   send_initial_ue_msg(transaction.response().msg.c1().rrc_setup_complete());
 
   logger.log_debug("\"{}\" finished successfully", name());
@@ -144,7 +158,7 @@ void rrc_setup_procedure::send_initial_ue_msg(const asn1::rrc_nr::rrc_setup_comp
 
   init_ue_msg.ue_index                       = context.ue_index;
   init_ue_msg.nas_pdu                        = rrc_setup_complete.ded_nas_msg.copy();
-  init_ue_msg.establishment_cause            = static_cast<establishment_cause_t>(context.connection_cause.value);
+  init_ue_msg.establishment_cause            = context.connection_cause;
   init_ue_msg.user_location_info.nr_cgi      = context.cell.cgi;
   init_ue_msg.user_location_info.tai.plmn_id = context.cell.cgi.plmn_id;
   init_ue_msg.user_location_info.tai.tac     = context.cell.tac;

@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -22,19 +22,16 @@
 
 #pragma once
 
-#include "srsran/adt/static_vector.h"
 #include "srsran/phy/support/precoding_configuration.h"
 #include "srsran/phy/support/re_pattern.h"
 #include "srsran/phy/upper/dmrs_mapping.h"
-#include "srsran/ran/cyclic_prefix.h"
 #include "srsran/ran/ptrs/ptrs.h"
-#include "srsran/ran/ptrs/ptrs_constants.h"
 #include "srsran/ran/rnti.h"
 #include "srsran/ran/slot_point.h"
 
 namespace srsran {
 
-class resource_grid_mapper;
+class resource_grid_writer;
 
 /// Interface for the Phase Tracking Reference Signals (PT-RS) for PDSCH generator.
 class ptrs_pdsch_generator
@@ -54,12 +51,12 @@ public:
     unsigned scrambling_id;
     /// DM-RS for PDSCH sequence initialization (\f$n_{SCID}\f$).
     bool n_scid;
-    /// Indicates the generated signal linear amplitude.
+    /// Generated signal linear amplitude.
     float amplitude;
     /// DM-RS position mask. Indicates the OFDM symbols carrying DM-RS within the slot.
     symbol_slot_mask dmrs_symbols_mask;
-    /// PDSCH frequency domain allocation as RB list. The entries set to true are used for transmission.
-    bounded_bitset<MAX_NOF_PRBS> rb_mask;
+    /// PDSCH frequency domain allocation as a CRB mask. The entries set to true are used for transmission.
+    crb_bitmap rb_mask;
     /// PDSCH time domain allocation.
     interval<uint8_t> time_allocation;
     /// Frequency domain density.
@@ -80,9 +77,9 @@ public:
   virtual ~ptrs_pdsch_generator() = default;
 
   /// \brief Generates and maps PT-RS for PDSCH.
-  /// \param [out] mapper Destination resource grid.
+  /// \param [out] grid Destination resource grid.
   /// \param [in]  config Required configuration to generate and map the signal.
-  virtual void generate(resource_grid_mapper& mapper, const configuration& config) = 0;
+  virtual void generate(resource_grid_writer& grid, const configuration& config) = 0;
 };
 
 } // namespace srsran

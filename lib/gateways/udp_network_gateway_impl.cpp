@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -30,81 +30,110 @@
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <unistd.h>
-
 #include <utility>
 
 using namespace srsran;
 
 udp_network_gateway_impl::udp_network_gateway_impl(udp_network_gateway_config                   config_,
                                                    network_gateway_data_notifier_with_src_addr& data_notifier_,
-                                                   task_executor&                               io_tx_executor_) :
+                                                   task_executor&                               io_tx_executor_,
+                                                   task_executor&                               io_rx_executor_) :
   config(std::move(config_)),
   data_notifier(data_notifier_),
   logger(srslog::fetch_basic_logger("UDP-GW")),
-  io_tx_executor(io_tx_executor_)
+  io_tx_executor(io_tx_executor_),
+  io_rx_executor(io_rx_executor_),
+  tx_ctx(config.tx_max_mmsg, config.tx_max_segments),
+  batched_queue(
+      config.tx_qsize,
+      io_tx_executor,
+      logger,
+      [this](span<udp_tx_pdu_t> pdus) { handle_pdu_impl(pdus); },
+      config.tx_max_mmsg)
 {
-  logger.info("UDP GW configured. rx_max_mmsg={} pool_thres={}", config.rx_max_mmsg, config.pool_occupancy_threshold);
-
-  // Allocate RX buffers
-  rx_mem.resize(config.rx_max_mmsg);
-  for (uint32_t i = 0; i < config.rx_max_mmsg; ++i) {
-    rx_mem[i].resize(network_gateway_udp_max_len);
-  }
-
-  // Allocate context for recv_mmsg
-  rx_srcaddr.resize(config.rx_max_mmsg);
-  rx_msghdr.resize(config.rx_max_mmsg);
-  rx_iovecs.resize(config.rx_max_mmsg);
+  logger.info("UDP GW configured. rx_max_mmsg={} pool_thres={} ext_bind_addr={}",
+              config.rx_max_mmsg,
+              config.pool_occupancy_threshold,
+              config.ext_bind_addr);
 }
 
 bool udp_network_gateway_impl::subscribe_to(io_broker& broker)
 {
   io_subcriber = broker.register_fd(
-      get_socket_fd(), [this]() { receive(); }, [this](io_broker::error_code code) { handle_io_error(code); });
+      unique_fd(get_socket_fd()),
+      io_rx_executor,
+      [this]() { receive(); },
+      [this](io_broker::error_code code) { handle_io_error(code); });
   if (not io_subcriber.registered()) {
     logger.error("Failed to register UDP network gateway at IO broker. socket_fd={}", get_socket_fd());
     return false;
   }
+  logger.debug("Registered UDP network gateway at IO broker. socket_fd={}", get_socket_fd());
   return true;
 }
 
 void udp_network_gateway_impl::handle_pdu(byte_buffer pdu, const sockaddr_storage& dest_addr)
 {
-  auto fn = [this, p = std::move(pdu), dest_addr]() mutable { handle_pdu_impl(std::move(p), dest_addr); };
-  if (not io_tx_executor.execute(std::move(fn))) {
+  if (not batched_queue.try_push(udp_tx_pdu_t{std::move(pdu), dest_addr})) {
     logger.info("Dropped PDU, queue is full.");
   }
 }
 
-void udp_network_gateway_impl::handle_pdu_impl(const byte_buffer& pdu, const sockaddr_storage& dest_addr)
+void udp_network_gateway_impl::handle_pdu_impl(span<udp_tx_pdu_t> pdus)
 {
   if (not sock_fd.is_open()) {
     logger.error("Socket not initialized");
     return;
   }
 
-  if (pdu.length() > network_gateway_udp_max_len) {
-    logger.error("PDU of {} bytes exceeds maximum length of {} bytes", pdu.length(), network_gateway_udp_max_len);
-    return;
+  unsigned msg_index     = 0;
+  unsigned segment_index = 0;
+  for (const auto& pdu : pdus) {
+    if (pdu.pdu.length() > network_gateway_udp_max_len) {
+      logger.error("PDU of {} bytes exceeds maximum length of {} bytes", pdu.pdu.length(), network_gateway_udp_max_len);
+      break;
+    }
+    for (span segment : pdu.pdu.segments()) {
+      const unsigned char* data                      = segment.begin();
+      unsigned             size                      = segment.size();
+      tx_ctx.msgs[msg_index][segment_index].iov_base = (void*)data;
+      tx_ctx.msgs[msg_index][segment_index].iov_len  = size;
+      segment_index++;
+      if (segment_index >= config.tx_max_segments) {
+        logger.error("Too many segments. Truncating PDU.");
+        break;
+      }
+    }
+
+    tx_ctx.mmsg[msg_index].msg_hdr.msg_iov        = tx_ctx.msgs[msg_index].data();
+    tx_ctx.mmsg[msg_index].msg_hdr.msg_iovlen     = segment_index;
+    tx_ctx.mmsg[msg_index].msg_hdr.msg_name       = (void*)&pdu.dst_addr;
+    tx_ctx.mmsg[msg_index].msg_hdr.msg_namelen    = sizeof(pdu.dst_addr);
+    tx_ctx.mmsg[msg_index].msg_hdr.msg_control    = nullptr;
+    tx_ctx.mmsg[msg_index].msg_hdr.msg_controllen = 0;
+    tx_ctx.mmsg[msg_index].msg_hdr.msg_flags      = 0;
+
+    segment_index = 0;
+    msg_index++;
+    if (msg_index > 256) {
+      logger.error("Too many SDUs to send in a single burst, dropping.");
+      break;
+    }
+    if (logger.debug.enabled()) {
+      std::string local_addr_str;
+      std::string dest_addr_str;
+      uint16_t    dest_port = sockaddr_to_port((sockaddr*)&pdu.dst_addr, logger);
+      sockaddr_to_ip_str((sockaddr*)&pdu.dst_addr, dest_addr_str, logger);
+      sockaddr_to_ip_str((sockaddr*)&local_addr, local_addr_str, logger);
+      logger.debug(
+          "Sent PDU of {} bytes. local_ip={} dest={}:{}", pdu.pdu.length(), local_addr_str, dest_addr_str, dest_port);
+    }
   }
 
-  span<const uint8_t> pdu_span = to_span(pdu, tx_mem);
-
-  int bytes_sent = sendto(
-      sock_fd.value(), pdu_span.data(), pdu_span.size_bytes(), 0, (sockaddr*)&dest_addr, sizeof(sockaddr_storage));
-  if (bytes_sent == -1) {
-    std::string local_addr_str;
-    std::string dest_addr_str;
-    sockaddr_to_ip_str((sockaddr*)&dest_addr, dest_addr_str, logger);
-    sockaddr_to_ip_str((sockaddr*)&local_addr, local_addr_str, logger);
-    logger.error("Couldn't send {} B of data on UDP socket: local_ip={} dest_ip={} error=\"{}\"",
-                 pdu_span.size_bytes(),
-                 local_addr_str,
-                 dest_addr_str,
-                 strerror(errno));
+  int ret = sendmmsg(sock_fd.value(), tx_ctx.mmsg.data(), msg_index, 0);
+  if (ret < 0) {
+    logger.error("Could not send {} packets to socket. ret={} error={}", msg_index, ret, strerror(errno));
   }
-
-  logger.debug("Sent PDU of {} bytes", pdu.length());
 }
 
 void udp_network_gateway_impl::handle_io_error(io_broker::error_code code)
@@ -136,14 +165,9 @@ bool udp_network_gateway_impl::create_and_bind()
   struct addrinfo* result;
   for (result = results; result != nullptr; result = result->ai_next) {
     // create UDP socket
-    sock_fd = unique_fd{::socket(result->ai_family, result->ai_socktype, result->ai_protocol)};
+    sock_fd = unique_fd{::socket(result->ai_family, result->ai_socktype, result->ai_protocol), false};
     if (not sock_fd.is_open()) {
       ret = errno;
-      continue;
-    }
-
-    if (not set_sockopts()) {
-      close_socket();
       continue;
     }
 
@@ -204,7 +228,53 @@ bool udp_network_gateway_impl::create_and_bind()
     return false;
   }
 
+  // Set socket options. This is done after binding,
+  // so that we can set IPv4/IPv6 options accordingly.
+  if (not set_sockopts()) {
+    close_socket();
+    return false;
+  }
+
   return true;
+}
+
+namespace {
+
+/// Receive context used by the recvmmsg syscall.
+struct receive_context {
+  explicit receive_context(unsigned rx_max_mmsg);
+
+  std::vector<std::vector<uint8_t>> rx_mem;
+  std::vector<::sockaddr_storage>   rx_srcaddr;
+  std::vector<::mmsghdr>            rx_msghdr;
+  std::vector<::iovec>              rx_iovecs;
+};
+
+} // namespace
+
+receive_context::receive_context(unsigned rx_max_mmsg)
+{
+  // Allocate RX buffers.
+  rx_mem.resize(rx_max_mmsg);
+  for (unsigned i = 0; i != rx_max_mmsg; ++i) {
+    rx_mem[i].resize(network_gateway_udp_max_len);
+  }
+
+  // Allocate context for recv_mmsg.
+  rx_srcaddr.resize(rx_max_mmsg);
+  rx_msghdr.resize(rx_max_mmsg);
+  rx_iovecs.resize(rx_max_mmsg);
+
+  for (unsigned i = 0; i != rx_max_mmsg; ++i) {
+    rx_msghdr[i].msg_hdr             = {};
+    rx_msghdr[i].msg_hdr.msg_name    = &rx_srcaddr[i];
+    rx_msghdr[i].msg_hdr.msg_namelen = sizeof(::sockaddr_storage);
+
+    rx_iovecs[i].iov_base           = rx_mem[i].data();
+    rx_iovecs[i].iov_len            = network_gateway_udp_max_len;
+    rx_msghdr[i].msg_hdr.msg_iov    = &rx_iovecs[i];
+    rx_msghdr[i].msg_hdr.msg_iovlen = 1;
+  }
 }
 
 void udp_network_gateway_impl::receive()
@@ -213,20 +283,10 @@ void udp_network_gateway_impl::receive()
     logger.error("Cannot receive on UDP gateway: Socket is not initialized.");
   }
 
-  socklen_t src_addr_len = sizeof(struct sockaddr_storage);
+  thread_local receive_context rx_context(config.rx_max_mmsg);
 
-  for (unsigned i = 0; i < config.rx_max_mmsg; ++i) {
-    rx_msghdr[i].msg_hdr             = {};
-    rx_msghdr[i].msg_hdr.msg_name    = &rx_srcaddr[i];
-    rx_msghdr[i].msg_hdr.msg_namelen = src_addr_len;
-
-    rx_iovecs[i].iov_base           = rx_mem[i].data();
-    rx_iovecs[i].iov_len            = network_gateway_udp_max_len;
-    rx_msghdr[i].msg_hdr.msg_iov    = &rx_iovecs[i];
-    rx_msghdr[i].msg_hdr.msg_iovlen = 1;
-  }
-
-  int rx_msgs = recvmmsg(sock_fd.value(), rx_msghdr.data(), config.rx_max_mmsg, MSG_WAITFORONE, nullptr);
+  int rx_msgs = recvmmsg(sock_fd.value(), rx_context.rx_msghdr.data(), config.rx_max_mmsg, MSG_WAITFORONE, nullptr);
+  srslog::fetch_basic_logger("IO-EPOLL").info("UDP rx {} packets, max is {}", rx_msgs, config.rx_max_mmsg);
   if (rx_msgs == -1 && errno != EAGAIN) {
     logger.error("Error reading from UDP socket: {}", strerror(errno));
     return;
@@ -250,15 +310,16 @@ void udp_network_gateway_impl::receive()
       logger.info("Buffer pool at {:.1f}% occupancy. Dropping {} packets", pool_occupancy * 100, rx_msgs - i);
       return;
     }
-    span<uint8_t> payload(rx_mem[i].data(), rx_msghdr[i].msg_len);
+    span<uint8_t> payload(rx_context.rx_mem[i].data(), rx_context.rx_msghdr[i].msg_len);
 
     byte_buffer pdu = {};
     if (pdu.append(payload)) {
-      logger.debug(
-          "Received {} bytes on UDP socket. Pool occupancy {:.2f}%", rx_msghdr[i].msg_len, pool_occupancy * 100);
-      data_notifier.on_new_pdu(std::move(pdu), *(sockaddr_storage*)rx_msghdr[i].msg_hdr.msg_name);
+      logger.debug("Received {} bytes on UDP socket. Pool occupancy {:.2f}%",
+                   rx_context.rx_msghdr[i].msg_len,
+                   pool_occupancy * 100);
+      data_notifier.on_new_pdu(std::move(pdu), *(sockaddr_storage*)rx_context.rx_msghdr[i].msg_hdr.msg_name);
     } else {
-      logger.error("Could not allocate byte buffer. Received {} bytes on UDP socket", rx_msghdr[i].msg_len);
+      logger.error("Could not allocate byte buffer. Received {} bytes on UDP socket", rx_context.rx_msghdr[i].msg_len);
     }
   }
 }
@@ -310,6 +371,11 @@ bool udp_network_gateway_impl::get_bind_address(std::string& ip_address) const
     return false;
   }
 
+  if (config.ext_bind_addr != "" and config.ext_bind_addr != "auto") {
+    ip_address = config.ext_bind_addr;
+    return true;
+  }
+
   sockaddr_storage gw_addr_storage = {};
   sockaddr*        gw_addr         = (sockaddr*)&gw_addr_storage;
   socklen_t        gw_addr_len     = sizeof(gw_addr_storage);
@@ -335,9 +401,9 @@ bool udp_network_gateway_impl::get_bind_address(std::string& ip_address) const
     logger.error("Unhandled address family in UDP network gateway with sock_fd={}", sock_fd.value());
     return false;
   }
-
   ip_address = addr_str;
-  logger.debug("Read bind port of UDP network gateway: {}", ip_address);
+
+  logger.debug("Read bind address of UDP network gateway: {}", ip_address);
   return true;
 }
 
@@ -358,6 +424,13 @@ bool udp_network_gateway_impl::set_sockopts()
     }
   }
 
+  if (config.dscp.has_value()) {
+    if (not set_dscp()) {
+      logger.error("Couldn't set DSCP for socket");
+      return false;
+    }
+  }
+  logger.debug("Successfully set socket options");
   return true;
 }
 
@@ -402,9 +475,34 @@ bool udp_network_gateway_impl::set_reuse_addr()
   return true;
 }
 
+bool udp_network_gateway_impl::set_dscp()
+{
+  if (not config.dscp.has_value()) {
+    return true; // No DSCP code to set.
+  }
+  uint8_t option = config.dscp.value() << 2; // DSCP is the only the 6 most significant bits.
+  if (local_addr.ss_family == AF_INET) {
+    if (::setsockopt(sock_fd.value(), IPPROTO_IP, IP_TOS, &option, sizeof(option))) {
+      logger.error("Couldn't set DSCP for socket: {}", strerror(errno));
+      return false;
+    }
+    logger.debug("Set DSCP for socket. dscp={}", config.dscp.value());
+    return true;
+  }
+  if (local_addr.ss_family == AF_INET6) {
+    if (setsockopt(sock_fd.value(), IPPROTO_IPV6, IPV6_TCLASS, &option, sizeof(option))) {
+      logger.error("Couldn't set DSCP for socket: {}", strerror(errno));
+      return false;
+    }
+    logger.debug("Set DSCP for socket. dscp={}", config.dscp.value());
+    return true;
+  }
+  logger.error("Unknown socket familly when setting DSCP");
+  return false;
+}
+
 bool udp_network_gateway_impl::close_socket()
 {
-  io_subcriber.reset();
   if (not sock_fd.close()) {
     logger.error("Error closing socket: {}", strerror(errno));
     return false;

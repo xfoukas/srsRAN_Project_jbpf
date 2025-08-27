@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -26,7 +26,7 @@
 #include "quantizer.h"
 #include "srsran/ofh/compression/compression_properties.h"
 #include "srsran/srsvec/prod.h"
-#include "srsran/support/math_utils.h"
+#include "srsran/support/math/math_utils.h"
 #include "srsran/support/units.h"
 
 using namespace srsran;
@@ -209,7 +209,7 @@ void iq_compression_bfp_avx512::decompress(span<cbf16_t>                iq_data,
     mm512::unpack_prb_big_endian(unpacked_prb_span, comp_prb_buffer, params.data_width);
 
     // Save scaling factor.
-    std::fill(&unpacked_iq_scaling[idx], &unpacked_iq_scaling[idx + NOF_SUBCARRIERS_PER_RB * 2], scaler / fixp_gain);
+    std::fill(&unpacked_iq_scaling[idx], &unpacked_iq_scaling[idx] + (NOF_SUBCARRIERS_PER_RB * 2), scaler / fixp_gain);
 
     idx += (NOF_SUBCARRIERS_PER_RB * 2);
   }

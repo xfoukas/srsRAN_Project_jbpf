@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -26,6 +26,7 @@
 #include "du_manager_procedure_test_helpers.h"
 #include "lib/du/du_high/du_manager/procedures/ue_configuration_procedure.h"
 #include "tests/test_doubles/pdcp/pdcp_pdu_generator.h"
+#include "tests/test_doubles/rrc/rrc_packed_test_messages.h"
 #include "srsran/asn1/rrc_nr/cell_group_config.h"
 #include "srsran/du/du_cell_config_helpers.h"
 #include "srsran/mac/config/mac_config_helpers.h"
@@ -241,7 +242,7 @@ TEST_F(ue_config_tester, when_du_manager_completes_ue_configuration_procedure_th
   ASSERT_TRUE(proc.ready());
   f1ap_ue_context_update_response resp = proc.get();
   ASSERT_TRUE(resp.result);
-  ASSERT_NO_FATAL_FAILURE(check_du_to_cu_rrc_container(req, resp.du_to_cu_rrc_container, nullptr, true));
+  ASSERT_NO_FATAL_FAILURE(check_du_to_cu_rrc_container(req, resp.cell_group_cfg, nullptr, true));
 }
 
 TEST_F(ue_config_tester, when_du_manager_finishes_processing_ue_config_request_then_mac_rlc_f1c_bearers_are_connected)
@@ -285,55 +286,6 @@ TEST_F(ue_config_tester, when_du_manager_finishes_processing_ue_config_request_t
 
   // Run UE Configuration Procedure to completion.
   configure_ue(create_f1ap_ue_context_update_request(test_ue->ue_index, {}, {drb_id_t::drb1}));
-  srs_du::f1u_gw_bearer_dummy* bearer = f1u_gw.f1u_bearers.begin()->second.begin()->second;
-
-  // Forward MAC Rx SDU through DRB1 (UL).
-  // > Add dummy RLC data header.
-  byte_buffer mac_sdu = byte_buffer::create(dummy_rlc_header).value();
-  // > Append data buffer.
-  ASSERT_TRUE(mac_sdu.append(test_payload.copy()));
-  // > Push MAC Rx SDU through MAC logical channel.
-  mac.last_ue_reconf_msg->bearers_to_addmod[0].ul_bearer->on_new_sdu({mac_sdu.copy()});
-  // > Check arrival of F1-U Tx SDU to F1-U bearer.
-  auto last_sdu = bearer->last_sdu->t_pdu->deep_copy().value();
-  ASSERT_EQ(test_payload, last_sdu);
-
-  // Forward F1-U Rx SDU through DRB1 (DL).
-  // > Create data buffer.
-  nru_dl_message rx_sdu;
-  rx_sdu.t_pdu = test_payload.copy();
-  // > Push F1-U Rx SDU through F1-U bearer Rx SDU notifier.
-  bearer->du_rx.on_new_pdu(std::move(rx_sdu));
-
-  // > Check arrival of MAC Tx SDU to MAC logical channel.
-  std::vector<uint8_t> mac_tx_sdu(test_payload.length() + dummy_rlc_header.size());
-  unsigned             nwritten = mac.last_ue_reconf_msg->bearers_to_addmod[0].dl_bearer->on_new_tx_sdu(mac_tx_sdu);
-  byte_buffer          extracted_payload =
-      byte_buffer::create(mac_tx_sdu.begin() + dummy_rlc_header.size(), mac_tx_sdu.begin() + nwritten).value();
-  ASSERT_EQ(test_payload, extracted_payload);
-}
-
-TEST_F(ue_config_tester,
-       when_du_manager_finishes_processing_ue_config_request_with_f1u_ext_addr_then_mac_rlc_f1u_bearers_are_connected)
-{
-  // Add F1-U external address to the F1-U GW.
-  std::string f1u_ext_addr = "5.6.7.8";
-  f1u_gw.set_f1u_ext_addr(f1u_ext_addr);
-
-  static const std::array<uint8_t, 2> dummy_rlc_header = {0x80, 0x0};
-  byte_buffer                         test_payload     = test_helpers::create_pdcp_pdu(
-      pdcp_sn_size::size12bits, /* is_srb = */ false, 0, test_rgen::uniform_int<unsigned>(3, 100), 0);
-
-  // Run UE Configuration Procedure to completion.
-  f1ap_ue_context_update_response resp =
-      configure_ue(create_f1ap_ue_context_update_request(test_ue->ue_index, {}, {drb_id_t::drb1}));
-
-  // Check that the DL UP TNL Info has the correct F1-U external address.
-  ASSERT_EQ(resp.drbs_setup.size(), 1);
-  ASSERT_EQ(resp.drbs_setup[0].dluptnl_info_list.size(), 1);
-  ASSERT_EQ(resp.drbs_setup[0].dluptnl_info_list[0].tp_address,
-            transport_layer_address::create_from_string(f1u_ext_addr));
-
   srs_du::f1u_gw_bearer_dummy* bearer = f1u_gw.f1u_bearers.begin()->second.begin()->second;
 
   // Forward MAC Rx SDU through DRB1 (UL).
@@ -442,7 +394,7 @@ TEST_F(ue_config_tester, when_config_is_empty_then_procedure_avoids_configuring_
   ASSERT_TRUE(proc.ready());
   f1ap_ue_context_update_response resp = proc.get();
   ASSERT_TRUE(resp.result);
-  ASSERT_FALSE(resp.du_to_cu_rrc_container.empty());
+  ASSERT_FALSE(resp.cell_group_cfg.empty());
   ASSERT_TRUE(resp.drbs_setup.empty());
   ASSERT_TRUE(resp.failed_drbs_setups.empty());
 }
@@ -461,7 +413,7 @@ TEST_F(ue_config_tester, when_drbs_are_released_then_they_are_added_in_rrc_conta
   res             = this->configure_ue(req);
 
   ASSERT_TRUE(res.result);
-  ASSERT_NO_FATAL_FAILURE(check_du_to_cu_rrc_container(req, res.du_to_cu_rrc_container, nullptr, true));
+  ASSERT_NO_FATAL_FAILURE(check_du_to_cu_rrc_container(req, res.cell_group_cfg, nullptr, true));
 }
 
 TEST_F(ue_config_tester, when_drb_to_be_released_does_not_exist_then_request_is_ignored)
@@ -479,7 +431,7 @@ TEST_F(ue_config_tester, when_drb_to_be_released_does_not_exist_then_request_is_
   ASSERT_TRUE(res.result);
   auto req_no_drb_release = req;
   req_no_drb_release.drbs_to_rem.clear();
-  ASSERT_NO_FATAL_FAILURE(check_du_to_cu_rrc_container(req_no_drb_release, res.du_to_cu_rrc_container, nullptr, true));
+  ASSERT_NO_FATAL_FAILURE(check_du_to_cu_rrc_container(req_no_drb_release, res.cell_group_cfg, nullptr, true));
 }
 
 TEST_F(ue_config_tester,
@@ -510,7 +462,7 @@ TEST_F(ue_config_tester,
       create_f1ap_ue_context_update_request(test_ue->ue_index, {}, {}, {drb_id_t::drb1});
   f1ap_ue_context_update_response res = this->configure_ue(req);
   ASSERT_TRUE(res.result);
-  ASSERT_NO_FATAL_FAILURE(check_du_to_cu_rrc_container(req, res.du_to_cu_rrc_container, &reest_cfg_copy, true));
+  ASSERT_NO_FATAL_FAILURE(check_du_to_cu_rrc_container(req, res.cell_group_cfg, &reest_cfg_copy, true));
 }
 
 TEST_F(ue_config_tester,
@@ -533,5 +485,5 @@ TEST_F(ue_config_tester,
 
   ASSERT_TRUE(res.result);
   req.srbs_to_setup.erase(req.srbs_to_setup.begin()); // Remove SRB1 for the checks.
-  ASSERT_NO_FATAL_FAILURE(check_du_to_cu_rrc_container(req, res.du_to_cu_rrc_container, nullptr, true));
+  ASSERT_NO_FATAL_FAILURE(check_du_to_cu_rrc_container(req, res.cell_group_cfg, nullptr, true));
 }
