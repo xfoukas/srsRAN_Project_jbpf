@@ -144,6 +144,7 @@ if (ENABLE_JBPF)
     include_directories(include)
     add_subdirectory(external/jbpf)    
     add_definitions(-DJBPF_ENABLED)
+    add_definitions(-DFMT_USE_BITINT=0)   # This is needed as it is disabed by default for bpf
     include_directories(external/fmt/include)
     include_directories(external)
     include_directories(${JBPF_LIB_HEADER_FILES})
