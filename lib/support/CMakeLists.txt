@@ -61,7 +61,7 @@ add_backward(srsran_support)
 
 if (ENABLE_JBPF)
     add_definitions(-DJBPF_ENABLED)
-    target_link_libraries(srsran_support PRIVATE jbpf)
+    target_link_libraries(srsran_support PUBLIC jbpf)
 endif (ENABLE_JBPF)
 
 
