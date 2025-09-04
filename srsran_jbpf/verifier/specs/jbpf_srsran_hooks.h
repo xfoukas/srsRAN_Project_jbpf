@@ -218,7 +218,7 @@ DECLARE_MAC_SCHED_HOOK_NO_PAYLOAD(mac_sched_ue_config_applied);
 DECLARE_MAC_SCHED_HOOK(mac_sched_ul_bsr_indication);           /* ctx.data will be a srsran::ul_bsr_indication_message */
 DECLARE_MAC_SCHED_HOOK(mac_sched_uci_indication);              /* ctx.data will be a srsran::uci_indication::uci_pdu */
 DECLARE_MAC_SCHED_HOOK(mac_sched_dl_mac_ce_indication);        /* ctx.data will be a srsran::dl_mac_ce_indication */
-DECLARE_MAC_SCHED_HOOK(mac_sched_ul_phr_indication);           /* ctx.data will be a srsran::ul_phr_indication_message */
+DECLARE_MAC_SCHED_HOOK(mac_sched_ul_phr_indication);           /* ctx.data will be a srsran::cell_ph_report */
 DECLARE_MAC_SCHED_HOOK(mac_sched_dl_buffer_state_indication);  /* ctx.data will be a srsran::dl_buffer_state_indication_message */
 DECLARE_MAC_SCHED_HOOK(mac_sched_srs_indication);              /* ctx.data will be a srsran::srs_indication::srs_indication_pdu */
 

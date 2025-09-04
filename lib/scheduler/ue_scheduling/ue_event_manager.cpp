@@ -490,8 +490,8 @@ void ue_event_manager::handle_ul_phr_indication(const ul_phr_indication_message&
       ue_cc.get_pusch_power_controller().handle_phr(cell_phr, phr_ind->slot_rx);
 
 #ifdef JBPF_ENABLED
-      hook_mac_sched_ul_phr_indication(const_cast<void*>(static_cast<const void*>(&phr_ind)),
-          0, phr_ind->ue_index, ue_cc.cfg().cell_cfg_common.pci, (uint16_t)phr_ind->rnti, sizeof(ul_phr_indication_message));
+      hook_mac_sched_ul_phr_indication(const_cast<void*>(static_cast<const void*>(&cell_phr)),
+          0, phr_ind->ue_index, ue_cc.cfg().cell_cfg_common.pci, (uint16_t)phr_ind->rnti, sizeof(cell_ph_report));
 #endif
 
       // Log event.
