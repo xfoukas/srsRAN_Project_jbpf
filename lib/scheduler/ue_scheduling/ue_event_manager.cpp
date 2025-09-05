@@ -440,7 +440,7 @@ void ue_event_manager::handle_ul_bsr_indication(const ul_bsr_indication_message&
     du_cell_index_t pcell_idx = u.get_pcell().cell_index;
 
 #ifdef JBPF_ENABLED
-    hook_mac_sched_ul_bsr_indication(const_cast<void*>(static_cast<const void*>(&bsr_ind)),
+    hook_mac_sched_ul_bsr_indication(const_cast<void*>(static_cast<const void*>(bsr_ind.get())),
       0, bsr_ind->ue_index, u.get_pcell().cfg().cell_cfg_common.pci, (uint16_t)bsr_ind->crnti, sizeof(ul_bsr_indication_message));
 #endif
 
@@ -618,7 +618,7 @@ void ue_event_manager::handle_uci_indication(const uci_indication& ind)
             [this, uci_sl = ind.slot_rx, uci_pdu = std::move(uci_ptr)](ue_cell& ue_cc) {
 
 #ifdef JBPF_ENABLED
-              hook_mac_sched_uci_indication(const_cast<void*>(static_cast<const void*>(&uci_pdu)),
+              hook_mac_sched_uci_indication(const_cast<void*>(static_cast<const void*>(uci_pdu.get())),
                 0, ue_cc.ue_index, ue_cc.cfg().cell_cfg_common.pci, (uint16_t)uci_pdu->crnti, sizeof(uci_indication::uci_pdu));
 #endif
 
