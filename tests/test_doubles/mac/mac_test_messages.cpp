@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -21,7 +21,10 @@
  */
 
 #include "mac_test_messages.h"
-#include "srsran/scheduler/scheduler_slot_handler.h"
+#include "srsran/scheduler/result/pucch_info.h"
+#include "srsran/scheduler/result/pusch_info.h"
+#include "srsran/scheduler/result/srs_info.h"
+#include "srsran/support/test_utils.h"
 
 using namespace srsran;
 
@@ -87,41 +90,39 @@ mac_uci_pdu srsran::test_helpers::create_uci_pdu(const pucch_info& pucch)
 
   pdu.rnti = pucch.crnti;
 
-  switch (pucch.format) {
+  switch (pucch.format()) {
     case pucch_format::FORMAT_1: {
-      auto&       uci_f1   = pdu.pdu.emplace<mac_uci_pdu::pucch_f0_or_f1_type>();
-      const auto& pucch_f1 = pucch.format_1;
+      auto& uci_f1 = pdu.pdu.emplace<mac_uci_pdu::pucch_f0_or_f1_type>();
 
-      if (pucch_f1.harq_ack_nof_bits > 0) {
+      if (pucch.uci_bits.harq_ack_nof_bits > 0) {
         uci_f1.harq_info.emplace();
-        uci_f1.harq_info->harqs.resize(pucch_f1.harq_ack_nof_bits, uci_pucch_f0_or_f1_harq_values::ack);
+        uci_f1.harq_info->harqs.resize(pucch.uci_bits.harq_ack_nof_bits, uci_pucch_f0_or_f1_harq_values::ack);
       }
 
-      if (pucch_f1.sr_bits != sr_nof_bits::no_sr) {
+      if (pucch.uci_bits.sr_bits != sr_nof_bits::no_sr) {
         uci_f1.sr_info.emplace();
         uci_f1.sr_info->detected = true;
       }
     } break;
     case pucch_format::FORMAT_2: {
-      auto&       uci_f2   = pdu.pdu.emplace<mac_uci_pdu::pucch_f2_or_f3_or_f4_type>();
-      const auto& pucch_f2 = pucch.format_2;
+      auto& uci_f2 = pdu.pdu.emplace<mac_uci_pdu::pucch_f2_or_f3_or_f4_type>();
 
-      if (pucch_f2.harq_ack_nof_bits > 0) {
+      if (pucch.uci_bits.harq_ack_nof_bits > 0) {
         uci_f2.harq_info.emplace();
         uci_f2.harq_info->is_valid = true;
-        uci_f2.harq_info->payload.resize(pucch_f2.harq_ack_nof_bits);
+        uci_f2.harq_info->payload.resize(pucch.uci_bits.harq_ack_nof_bits);
         uci_f2.harq_info->payload.fill(true);
       }
 
-      if (pucch_f2.sr_bits != sr_nof_bits::no_sr) {
+      if (pucch.uci_bits.sr_bits != sr_nof_bits::no_sr) {
         uci_f2.sr_info.emplace();
-        uci_f2.sr_info->resize(sr_nof_bits_to_uint(pucch_f2.sr_bits));
+        uci_f2.sr_info->resize(sr_nof_bits_to_uint(pucch.uci_bits.sr_bits));
       }
 
-      if (pucch_f2.csi_part1_bits > 0) {
+      if (pucch.uci_bits.csi_part1_nof_bits > 0) {
         uci_f2.csi_part1_info.emplace();
         uci_f2.csi_part1_info->is_valid = true;
-        uci_f2.csi_part1_info->payload.resize(pucch_f2.csi_part1_bits);
+        uci_f2.csi_part1_info->payload.resize(pucch.uci_bits.csi_part1_nof_bits);
         uci_f2.csi_part1_info->payload.fill(true);
       }
     } break;
@@ -177,4 +178,28 @@ std::optional<mac_uci_indication_message> srsran::test_helpers::create_uci_indic
     }
   }
   return uci_ind.ucis.empty() ? std::nullopt : std::make_optional(uci_ind);
+}
+
+mac_srs_pdu test_helpers::create_srs_pdu(const srs_info& srs)
+{
+  phy_time_unit ta = phy_time_unit::from_timing_advance(test_rgen::uniform_int<unsigned>(0, 60), srs.bwp_cfg->scs);
+  if (srs.positioning_report_requested) {
+    // Set a random number, just to test the values are passed to the positioning report.
+    phy_time_unit rtoa = phy_time_unit::from_units_of_Tc(test_rgen::uniform_int<unsigned>(0, 1000));
+    const float   rsrp = -84.6f;
+    return mac_srs_pdu(srs.crnti, ta, rtoa, rsrp);
+  } else {
+    srs_channel_matrix ch_matrix(1, 1);
+    return mac_srs_pdu(srs.crnti, ta, ch_matrix);
+  }
+}
+
+mac_srs_indication_message test_helpers::create_srs_indication(slot_point sl_rx, span<const srs_info> srss)
+{
+  mac_srs_indication_message srs_ind;
+  srs_ind.sl_rx = sl_rx;
+  for (const auto& srs : srss) {
+    srs_ind.srss.push_back(create_srs_pdu(srs));
+  }
+  return srs_ind;
 }

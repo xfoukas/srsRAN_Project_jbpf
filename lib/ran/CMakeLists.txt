@@ -1,5 +1,5 @@
 #
-# Copyright 2021-2024 Software Radio Systems Limited
+# Copyright 2021-2025 Software Radio Systems Limited
 #
 # This file is part of srsRAN
 #
@@ -45,6 +45,7 @@ add_library(srsran_ran
         prach/prach_helper.cpp
         precoding/precoding_codebooks.cpp
         ptrs/ptrs_pattern.cpp
+        pucch/pucch_info.cpp
         pusch/pusch_antenna_port_mapping.cpp
         pusch/pusch_mcs.cpp
         pusch/pusch_tpmi_select.cpp
@@ -55,13 +56,16 @@ add_library(srsran_ran
         band_helper.cpp
         sch/tbs_calculator.cpp
         resource_allocation/resource_allocation_frequency.cpp
+        resource_allocation/vrb_to_prb.cpp
         sch/sch_segmentation.cpp
         srs/srs_bandwidth_configuration.cpp
         srs/srs_information.cpp
-        ssb_freq_position_generator.cpp
-        ssb_gscn.cpp
-        ssb_mapping.cpp
-        tdd_ul_dl_config.cpp)
+        ssb/pbch_mib_pack.cpp
+        ssb/ssb_freq_position_generator.cpp
+        ssb/ssb_gscn.cpp
+        ssb/ssb_mapping.cpp
+        tdd_ul_dl_config.cpp
+        drx_config.cpp)
 target_link_libraries(srsran_ran srslog)
 
 add_to_exported_libs(srsran_ran)

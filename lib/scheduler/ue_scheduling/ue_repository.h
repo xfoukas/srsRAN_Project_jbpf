@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -23,9 +23,9 @@
 #pragma once
 
 #include "../config/sched_config_manager.h"
-#include "ue.h"
+#include "../ue_context/ue.h"
+#include "srsran/adt/flat_map.h"
 #include "srsran/adt/ring_buffer.h"
-#include "srsran/adt/unique_function.h"
 
 namespace srsran {
 
@@ -40,6 +40,7 @@ public:
   using const_iterator = ue_list::const_iterator;
 
   explicit ue_repository();
+  ~ue_repository();
 
   /// \brief Mark start of new slot and update UEs states.
   void slot_indication(slot_point sl_tx);
@@ -74,14 +75,22 @@ public:
 
   const_iterator lower_bound(du_ue_index_t ue_index) const { return ues.lower_bound(ue_index); }
 
+  void destroy_pending_ues();
+
+  /// Handle cell removal by removing all UEs that are associated with the cell.
+  void handle_cell_removal(du_cell_index_t cell_index);
+
 private:
+  /// Force the removal of the UE without waiting for the flushing of pending events.
+  void rem_ue(const ue& u);
+
   srslog::basic_logger& logger;
 
   // Repository of UEs.
   ue_list ues;
 
   // Mapping of RNTIs to UE indexes.
-  std::vector<std::pair<rnti_t, du_ue_index_t>> rnti_to_ue_index_lookup;
+  flat_map<rnti_t, du_ue_index_t> rnti_to_ue_index_lookup;
 
   // Queue of UEs marked for later removal. For each UE, we store the slot after which its removal can be safely
   // carried out, and the original UE removal command.
@@ -89,6 +98,12 @@ private:
 
   // Last slot indication.
   slot_point last_sl_tx;
+
+  // UE objects pending to be destroyed by a low priority thread.
+  concurrent_queue<std::unique_ptr<ue>,
+                   concurrent_queue_policy::lockfree_mpmc,
+                   concurrent_queue_wait_policy::non_blocking>
+      ues_to_destroy;
 };
 
 } // namespace srsran

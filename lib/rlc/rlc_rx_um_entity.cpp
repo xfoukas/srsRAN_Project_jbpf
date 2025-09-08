@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -21,30 +21,45 @@
  */
 
 #include "rlc_rx_um_entity.h"
-#include "../support/sdu_window_impl.h"
 
 using namespace srsran;
 
 #ifdef JBPF_ENABLED
 #include "jbpf_srsran_hooks.h"
+
+#define CALL_JBPF_HOOK(hook_fn, ...) {                           \
+  struct jbpf_rlc_ctx_info jbpf_ctx = {0}; \
+  jbpf_ctx.ctx_id = 0;   \
+  jbpf_ctx.gnb_du_id = (uint64_t)gnb_du_id;\
+  jbpf_ctx.du_ue_index = ue_index;\
+  jbpf_ctx.is_srb = rb_id.is_srb();\
+  jbpf_ctx.rb_id = rb_id.is_srb() ? srb_id_to_uint(rb_id.get_srb_id()) \
+                                   : drb_id_to_uint(rb_id.get_drb_id());\
+  jbpf_ctx.direction = JBPF_UL; \
+  jbpf_ctx.rlc_mode = JBPF_RLC_MODE_UM;   \
+  jbpf_ctx.u.um_rx.window_num_pkts = (uint32_t)rx_window.size();   \
+  hook_fn(&jbpf_ctx, ##__VA_ARGS__); \
+}
+
 #endif
+
 
 rlc_rx_um_entity::rlc_rx_um_entity(gnb_du_id_t                       gnb_du_id_,
                                    du_ue_index_t                     ue_index_,
                                    rb_id_t                           rb_id_,
                                    const rlc_rx_um_config&           config,
                                    rlc_rx_upper_layer_data_notifier& upper_dn_,
-                                   rlc_metrics_aggregator&           metrics_agg_,
+                                   rlc_bearer_metrics_collector&     metrics_coll_,
                                    rlc_pcap&                         pcap_,
                                    task_executor&                    ue_executor,
                                    timer_manager&                    timers) :
-  rlc_rx_entity(gnb_du_id_, ue_index_, rb_id_, upper_dn_, metrics_agg_, pcap_, ue_executor, timers),
+  rlc_rx_entity(gnb_du_id_, ue_index_, rb_id_, upper_dn_, metrics_coll_, pcap_, ue_executor, timers),
   cfg(config),
   mod(cardinality(to_number(cfg.sn_field_length))),
   um_window_size(window_size(to_number(cfg.sn_field_length))),
-  rx_window(create_rx_window(cfg.sn_field_length)),
+  rx_window(logger, window_size(to_number(cfg.sn_field_length))),
   reassembly_timer(ue_timer_factory.create_timer()),
-  pcap_context(ue_index_, rb_id_, config)
+  pcap_context(ue_index, rb_id, config)
 {
   metrics.metrics_set_mode(rlc_mode::um_bidir);
 
@@ -57,6 +72,10 @@ rlc_rx_um_entity::rlc_rx_um_entity(gnb_du_id_t                       gnb_du_id_,
                          [this](timer_id_t tid) { on_expired_reassembly_timer(); });
   }
   logger.log_info("RLC UM configured. {}", cfg);
+
+#ifdef JBPF_ENABLED
+  CALL_JBPF_HOOK(hook_rlc_ul_creation);
+#endif  
 }
 
 // TS 38.322 v16.2.0 Sec. 5.2.3.2.2
@@ -100,13 +119,7 @@ void rlc_rx_um_entity::handle_pdu(byte_buffer_slice buf)
     auto latency = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - start);
 
 #ifdef JBPF_ENABLED
-    {
-      int rb_id_value = rb_id.is_srb() ? srb_id_to_uint(rb_id.get_srb_id()) 
-                                      : drb_id_to_uint(rb_id.get_drb_id());
-      struct jbpf_rlc_ctx_info ctx_info = {0, (uint64_t)gnb_du_id, ue_index, rb_id.is_srb(), 
-        (uint8_t)rb_id_value, JBPF_RLC_MODE_UM};
-      hook_rlc_ul_sdu_delivered(&ctx_info, header.sn, rx_window->size(), sdu.value().length());
-    }
+    CALL_JBPF_HOOK(hook_rlc_ul_sdu_delivered, header.sn, sdu.value().length(), latency.count());
 #endif
 
     metrics.metrics_add_sdu_latency(latency.count() / 1000);
@@ -131,12 +144,12 @@ void rlc_rx_um_entity::handle_pdu(byte_buffer_slice buf)
   /*
    * - if all byte segments with SN = x are received:
    */
-  if (rx_window->has_sn(header.sn) && (*rx_window)[header.sn].fully_received) {
+  if (rx_window.has_sn(header.sn) && rx_window[header.sn].fully_received) {
     /*
      * - reassemble the RLC SDU from all byte segments with SN = x, remove RLC headers and deliver the reassembled
      *   RLC SDU to upper layer;
      */
-    rlc_rx_um_sdu_info&         sdu_info = (*rx_window)[header.sn];
+    rlc_rx_um_sdu_info&         sdu_info = rx_window[header.sn];
     expected<byte_buffer_chain> sdu      = reassemble_sdu(sdu_info, header.sn);
     if (!sdu) {
       logger.log_error("Dropped SDU, failed to reassemble. sn={}", header.sn);
@@ -145,17 +158,10 @@ void rlc_rx_um_entity::handle_pdu(byte_buffer_slice buf)
     } else {
       logger.log_info("RX SDU. sn={} sdu_len={}", header.sn, sdu.value().length());
       auto latency = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() -
-                                                                          sdu_info.time_of_arrival);                                                     
+                                                                          sdu_info.time_of_arrival);
 #ifdef JBPF_ENABLED
-      {
-        int rb_id_value = rb_id.is_srb() ? srb_id_to_uint(rb_id.get_srb_id()) 
-                                        : drb_id_to_uint(rb_id.get_drb_id());
-        struct jbpf_rlc_ctx_info ctx_info = {0, (uint64_t)gnb_du_id, ue_index, rb_id.is_srb(), 
-          (uint8_t)rb_id_value, JBPF_RLC_MODE_UM};
-        hook_rlc_ul_sdu_delivered(&ctx_info, header.sn, rx_window->size(), sdu.value().length());
-      }
+      CALL_JBPF_HOOK(hook_rlc_ul_sdu_delivered, header.sn, sdu.value().length(), latency.count());
 #endif
-                                                                                                                                            
       metrics.metrics_add_sdu_latency(latency.count() / 1000);
       metrics.metrics_add_sdus(1, sdu.value().length());
       upper_dn.on_new_sdu(std::move(sdu.value()));
@@ -175,13 +181,13 @@ void rlc_rx_um_entity::handle_pdu(byte_buffer_slice buf)
       // move rx_next_reassembly forward and remove all fully received SDUs from rx_window
       for (sn_upd = (st.rx_next_reassembly) % mod; rx_mod_base(sn_upd) < rx_mod_base(st.rx_next_highest);
            sn_upd = (sn_upd + 1) % mod) {
-        if (rx_window->has_sn(sn_upd)) {
-          if (not(*rx_window)[sn_upd].fully_received) {
+        if (rx_window.has_sn(sn_upd)) {
+          if (not rx_window[sn_upd].fully_received) {
             break; // first SDU not fully received
           }
           // rx_next_reassembly serves as the lower edge of the receiving window
           // As such, we remove any SDU from the window if we update this value
-          rx_window->remove_sn(sn_upd);
+          rx_window.remove_sn(sn_upd);
         } else {
           break; // first SDU not fully received
         }
@@ -210,13 +216,13 @@ void rlc_rx_um_entity::handle_pdu(byte_buffer_slice buf)
                       (st.rx_next_highest - um_window_size) % mod,
                       st.rx_next_highest,
                       sn_upd);
-      if (rx_window->has_sn(sn_upd)) {
-        if (not(*rx_window)[sn_upd].fully_received) {
+      if (rx_window.has_sn(sn_upd)) {
+        if (not rx_window[sn_upd].fully_received) {
           // count incomplete SDUs as lost
           logger.log_info("Discarding incomplete SDU. sn={}", sn_upd);
           metrics.metrics_add_lost_pdus(1);
         }
-        rx_window->remove_sn(sn_upd);
+        rx_window.remove_sn(sn_upd);
       } else {
         // count non-existing SDUs as lost
         logger.log_info("Discarding SDU. sn={}", sn_upd);
@@ -231,10 +237,10 @@ void rlc_rx_um_entity::handle_pdu(byte_buffer_slice buf)
     // Since sn_upd just entered the reassembly window in the previous loop (and everything below was cleaned),
     // we continue (and clean) until we face any SN that is not fully received
     for (; rx_mod_base(sn_upd) < rx_mod_base(st.rx_next_highest); sn_upd = (sn_upd + 1) % mod) {
-      if (rx_window->has_sn(sn_upd) && (*rx_window)[sn_upd].fully_received) {
+      if (rx_window.has_sn(sn_upd) && rx_window[sn_upd].fully_received) {
         // rx_next_reassembly serves as the lower edge of the receiving window
         // As such, we remove any SDU from the window if we update this value
-        rx_window->remove_sn(sn_upd);
+        rx_window.remove_sn(sn_upd);
       } else {
         break; // first SDU not fully received
       }
@@ -266,7 +272,7 @@ void rlc_rx_um_entity::handle_pdu(byte_buffer_slice buf)
       stop_reassembly_timer = true;
     }
     if (st.rx_next_highest == st.rx_next_reassembly + 1) {
-      if (rx_window->has_sn(st.rx_next_highest) && not(*rx_window)[st.rx_next_highest].has_gap) {
+      if (rx_window.has_sn(st.rx_next_highest) && not rx_window[st.rx_next_highest].has_gap) {
         stop_reassembly_timer = true;
       }
     }
@@ -292,7 +298,7 @@ void rlc_rx_um_entity::handle_pdu(byte_buffer_slice buf)
       restart_reassembly_timer = true;
     }
     if (rx_mod_base(st.rx_next_highest) == rx_mod_base(st.rx_next_reassembly + 1)) {
-      if (rx_window->has_sn(st.rx_next_highest) && (*rx_window)[st.rx_next_highest].has_gap) {
+      if (rx_window.has_sn(st.rx_next_highest) && rx_window[st.rx_next_highest].has_gap) {
         restart_reassembly_timer = true;
       }
     }
@@ -305,13 +311,7 @@ void rlc_rx_um_entity::handle_pdu(byte_buffer_slice buf)
   }
 
 #ifdef JBPF_ENABLED
-  {
-    int rb_id_value = rb_id.is_srb() ? srb_id_to_uint(rb_id.get_srb_id()) 
-                                    : drb_id_to_uint(rb_id.get_drb_id());
-    struct jbpf_rlc_ctx_info ctx_info = {0, (uint64_t)gnb_du_id, ue_index, rb_id.is_srb(), 
-      (uint8_t)rb_id_value, JBPF_RLC_MODE_UM};
-    hook_rlc_ul_rx_pdu(&ctx_info, JBPF_RLC_PDUTYPE_DATA, (uint32_t)buf.length(), rx_window->size());
-  }
+  CALL_JBPF_HOOK(hook_rlc_ul_rx_pdu, JBPF_RLC_PDUTYPE_DATA, (uint32_t)buf.length());
 #endif
 }
 
@@ -326,23 +326,14 @@ bool rlc_rx_um_entity::handle_segment_data_sdu(const rlc_um_pdu_header& header, 
   logger.log_debug("RX SDU segment. payload_len={} {}", payload.length(), header);
 
   // Add new SN to RX window if no segments have been received yet
-  rlc_rx_um_sdu_info& rx_sdu = rx_window->has_sn(header.sn) ? (*rx_window)[header.sn] : ([&]() -> rlc_rx_um_sdu_info& {
-    rlc_rx_um_sdu_info& sdu = rx_window->add_sn(header.sn);
+  rlc_rx_um_sdu_info& rx_sdu = rx_window.has_sn(header.sn) ? rx_window[header.sn] : ([&]() -> rlc_rx_um_sdu_info& {
+    rlc_rx_um_sdu_info& sdu = rx_window.add_sn(header.sn);
+#ifdef JBPF_ENABLED
+    CALL_JBPF_HOOK(hook_rlc_ul_sdu_recv_started, header.sn);
+#endif
     sdu.time_of_arrival     = std::chrono::steady_clock::now();
     return sdu;
   })();
-
-#ifdef JBPF_ENABLED
-  {
-    int rb_id_value = rb_id.is_srb() ? srb_id_to_uint(rb_id.get_srb_id()) 
-                                    : drb_id_to_uint(rb_id.get_drb_id());
-    struct jbpf_rlc_ctx_info ctx_info = {0, (uint64_t)gnb_du_id, ue_index, rb_id.is_srb(), 
-      (uint8_t)rb_id_value, JBPF_RLC_MODE_UM};
-    hook_rlc_ul_sdu_recv_started(&ctx_info, header.sn, rx_window->size());
-  }
-#endif
-
-
   // Create SDU segment, to be stored later
   rlc_rx_um_sdu_segment segment = {};
   segment.si                    = header.si;
@@ -508,13 +499,13 @@ void rlc_rx_um_entity::on_expired_reassembly_timer()
   for (; rx_mod_base(sn_upd) < rx_mod_base(st.rx_next_highest); sn_upd = (sn_upd + 1) % mod) {
     if (rx_mod_base(sn_upd) < rx_mod_base(st.rx_timer_trigger)) {
       // remove anything below rx_timer_trigger
-      if (rx_window->has_sn(sn_upd)) {
-        if (not(*rx_window)[sn_upd].fully_received) {
+      if (rx_window.has_sn(sn_upd)) {
+        if (not rx_window[sn_upd].fully_received) {
           // count incomplete SDUs as lost
           logger.log_info("Discarding incomplete SDU. sn={}", sn_upd);
           metrics.metrics_add_lost_pdus(1);
         }
-        rx_window->remove_sn(sn_upd);
+        rx_window.remove_sn(sn_upd);
       } else {
         // count non-existing SDUs as lost
         logger.log_info("Discarding SDU. sn={}", sn_upd);
@@ -522,8 +513,8 @@ void rlc_rx_um_entity::on_expired_reassembly_timer()
       }
     } else {
       // continue removing fully received SDUs starting from rx_timer_trigger; stop at first incomplete or unseen SDU.
-      if (rx_window->has_sn(sn_upd) && (*rx_window)[sn_upd].fully_received) {
-        rx_window->remove_sn(sn_upd);
+      if (rx_window.has_sn(sn_upd) && rx_window[sn_upd].fully_received) {
+        rx_window.remove_sn(sn_upd);
       } else {
         break; // first SDU not fully received
       }
@@ -544,7 +535,7 @@ void rlc_rx_um_entity::on_expired_reassembly_timer()
     restart_reassembly_timer = true;
   }
   if (rx_mod_base(st.rx_next_highest) == rx_mod_base(st.rx_next_reassembly + 1)) {
-    if (rx_window->has_sn(st.rx_next_highest) && (*rx_window)[st.rx_next_highest].has_gap) {
+    if (rx_window.has_sn(st.rx_next_highest) && rx_window[st.rx_next_highest].has_gap) {
       restart_reassembly_timer = true;
     }
   }
@@ -570,24 +561,4 @@ bool rlc_rx_um_entity::sn_invalid_for_rx_buffer(const uint32_t sn)
 {
   return (rx_mod_base(st.rx_next_highest - um_window_size) <= rx_mod_base(sn) &&
           rx_mod_base(sn) < rx_mod_base(st.rx_next_reassembly));
-}
-
-std::unique_ptr<sdu_window<rlc_rx_um_sdu_info>> rlc_rx_um_entity::create_rx_window(rlc_um_sn_size sn_size)
-{
-  std::unique_ptr<sdu_window<rlc_rx_um_sdu_info>> rx_window_;
-  switch (sn_size) {
-    case rlc_um_sn_size::size6bits:
-      rx_window_ = std::make_unique<
-          sdu_window_impl<rlc_rx_um_sdu_info, window_size(to_number(rlc_um_sn_size::size6bits)), rlc_bearer_logger>>(
-          logger);
-      break;
-    case rlc_um_sn_size::size12bits:
-      rx_window_ = std::make_unique<
-          sdu_window_impl<rlc_rx_um_sdu_info, window_size(to_number(rlc_um_sn_size::size12bits)), rlc_bearer_logger>>(
-          logger);
-      break;
-    default:
-      srsran_assertion_failure("Cannot create rx_window for unsupported sn_size={}.", to_number(sn_size));
-  }
-  return rx_window_;
 }

@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -25,11 +25,13 @@
 #include "srsran/mac/mac_cell_control_information_handler.h"
 #include "srsran/mac/mac_pdu_handler.h"
 #include "srsran/scheduler/harq_id.h"
-#include "srsran/scheduler/scheduler_slot_handler.h"
 
 namespace srsran {
 
 struct pucch_info;
+struct uci_info;
+struct ul_sched_info;
+struct srs_info;
 
 namespace test_helpers {
 
@@ -53,6 +55,10 @@ std::optional<mac_uci_indication_message> create_uci_indication(slot_point sl_rx
 mac_crc_indication_message create_crc_indication(slot_point sl_rx, rnti_t rnti, harq_id_t h_id);
 
 mac_crc_indication_message create_crc_indication(slot_point sl_rx, span<const ul_sched_info> puschs);
+
+mac_srs_pdu create_srs_pdu(const srs_info& srs);
+
+mac_srs_indication_message create_srs_indication(slot_point sl_rx, span<const srs_info> srss);
 
 } // namespace test_helpers
 } // namespace srsran

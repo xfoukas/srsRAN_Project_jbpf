@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -23,7 +23,6 @@
 #include "ue_bearer_manager.h"
 #include "../procedures/f1ap_du_event_manager.h"
 #include "f1c_du_bearer_impl.h"
-#include "srsran/f1u/du/f1u_bearer_factory.h"
 
 using namespace srsran;
 using namespace srs_du;

@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -37,8 +37,9 @@ namespace srs_cu_cp {
 struct ngap_configuration {
   gnb_id_t                             gnb_id{0, 22};
   std::string                          ran_node_name;
+  amf_index_t                          amf_index;
   std::vector<supported_tracking_area> supported_tas;
-  std::chrono::seconds                 pdu_session_setup_timeout; // timeout for pdu session setup in seconds
+  std::chrono::seconds                 request_pdu_session_timeout; // timeout for requesting a pdu session in seconds
 };
 
 } // namespace srs_cu_cp

@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -23,7 +23,8 @@
 #pragma once
 
 #include "../ngap_repository.h"
-#include "common_task_scheduler.h"
+#include "../ue_manager/ue_manager_impl.h"
+#include "srsran/cu_cp/common_task_scheduler.h"
 #include "srsran/cu_cp/cu_cp.h"
 #include "srsran/ran/plmn_identity.h"
 #include <future>
@@ -37,11 +38,11 @@ struct cu_cp_configuration;
 class amf_connection_manager
 {
 public:
-  amf_connection_manager(ngap_repository&       ngaps_,
-                         connect_amfs_func      connect_amfs_,
-                         disconnect_amfs_func   disconnect_amfs_,
-                         task_executor&         cu_cp_exec_,
-                         common_task_scheduler& common_task_sched_);
+  amf_connection_manager(ngap_repository&                ngaps_,
+                         cu_cp_amf_reconnection_handler& cu_cp_notifier_,
+                         timer_manager&                  timers_,
+                         task_executor&                  cu_cp_exec_,
+                         common_task_scheduler&          common_task_sched_);
 
   /// \brief Initiates the connection to the AMF.
   /// A promise is passed as a parameter to enable blocking synchronization between the completion of the scheduled
@@ -50,6 +51,17 @@ public:
 
   /// \brief Initiate procedure to disconnect from the N2 interface.
   async_task<void> disconnect_amf();
+
+  /// \brief Handles the loss of connection to the AMF.
+  /// \param[in] amf_index The index of the AMF that has been disconnected.
+  void handle_amf_connection_loss(amf_index_t amf_index);
+
+  /// \brief Initiates the reconnection to the AMF.
+  /// \param[in] amf_index The index of the AMF to reconnect to.
+  /// \param[in] ue_mng The UE manager to re-enable UE connections in case the reconnection was successful.
+  /// \param[in] amf_reconnection_retry_time The time to wait before retrying the reconnection.
+  void
+  reconnect_to_amf(amf_index_t amf_index, ue_manager* ue_mng, std::chrono::milliseconds amf_reconnection_retry_time);
 
   void stop();
 
@@ -61,19 +73,16 @@ private:
   void        handle_connection_setup_result(amf_index_t amf_index, bool success);
   amf_index_t plmn_to_amf_index(plmn_identity plmn) const;
 
-  ngap_repository&       ngaps;
-  connect_amfs_func      connect_amfs;
-  disconnect_amfs_func   disconnect_amfs;
-  task_executor&         cu_cp_exec;
-  common_task_scheduler& common_task_sched;
-  srslog::basic_logger&  logger;
+  ngap_repository&                ngaps;
+  cu_cp_amf_reconnection_handler& cu_cp_notifier;
+  timer_manager&                  timers;
+  task_executor&                  cu_cp_exec;
+  common_task_scheduler&          common_task_sched;
+  srslog::basic_logger&           logger;
 
   std::unordered_map<amf_index_t, std::atomic<bool>> amfs_connected;
 
-  std::atomic<bool>       stopped{false};
-  std::mutex              stop_mutex;
-  std::condition_variable stop_cvar;
-  bool                    stop_completed = false;
+  std::atomic<bool> stopped{false};
 };
 
 } // namespace srs_cu_cp

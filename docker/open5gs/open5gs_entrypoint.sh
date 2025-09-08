@@ -1,7 +1,13 @@
 #! /bin/bash
 
-export UE_GATEWAY_IP="${UE_IP_BASE}.1/24"
+export UE_GATEWAY_IP="${UE_IP_BASE}.1"
 export UE_IP_RANGE="${UE_IP_BASE}.0/24"
+
+INSTALL_ARCH=x86_64-linux-gnu
+if [ "$(uname -m)" = "aarch64" ]; then
+    INSTALL_ARCH="aarch64-linux-gnu"
+fi
+export INSTALL_ARCH
 
 envsubst < open5gs-5gc.yml.in > open5gs-5gc.yml
 

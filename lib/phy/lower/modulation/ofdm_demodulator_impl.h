@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -25,7 +25,6 @@
 #include "phase_compensation_lut.h"
 #include "srsran/phy/generic_functions/dft_processor.h"
 #include "srsran/phy/lower/modulation/ofdm_demodulator.h"
-#include "srsran/srsvec/aligned_vec.h"
 #include <memory>
 
 namespace srsran {
@@ -58,10 +57,14 @@ private:
   std::unique_ptr<dft_processor> dft;
   /// Phase compensation table.
   phase_compensation_lut phase_compensation_table;
+  /// Next center frequency in Hertz.
+  std::atomic<double> next_center_freq_Hz;
+  /// Current center frequency in Hertz.
+  double current_center_freq_Hz;
   /// Internal buffer aimed at storing the phase compensated DFT outputs.
-  srsvec::aligned_vec<cf_t> compensated_output;
+  std::vector<cf_t> compensated_output;
   /// DFT window offset phase compensation.
-  srsvec::aligned_vec<cf_t> window_phase_compensation;
+  std::vector<cf_t> window_phase_compensation;
 
 public:
   /// \brief Constructs an OFDM symbol demodulator.
@@ -72,7 +75,7 @@ public:
 
   /// \brief Gets the resource grid bandwidth in resource elements.
   /// \return The number of resource elements in the grid.
-  unsigned get_rg_size() const { return rg_size; };
+  unsigned get_rg_size() const { return rg_size; }
 
   /// \brief Gets the offset in samples to the start of (the cyclic prefix of) a given symbol.
   /// \param[in] symbol_index Indicates the symbol index within the subframe.
@@ -85,6 +88,9 @@ public:
   {
     return cp.get_length(symbol_index, scs).to_samples(sampling_rate_Hz) + dft_size;
   }
+
+  // See interface for documentation.
+  void set_center_frequency(double center_frequency_Hz) override { next_center_freq_Hz = center_frequency_Hz; }
 
   // See interface for documentation.
   void

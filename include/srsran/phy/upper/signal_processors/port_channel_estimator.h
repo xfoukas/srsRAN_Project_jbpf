@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -26,7 +26,6 @@
 #pragma once
 
 #include "srsran/adt/bounded_bitset.h"
-#include "srsran/adt/optional.h"
 #include "srsran/phy/upper/channel_estimation.h"
 #include "srsran/phy/upper/dmrs_mapping.h"
 #include "srsran/phy/upper/re_measurement.h"
@@ -56,9 +55,9 @@ public:
     /// Boolean mask to specify the OFDM symbols carrying DM-RS.
     bounded_bitset<MAX_NSYMB_PER_SLOT> symbols;
     /// Boolean mask to specify the resource blocks carrying DM-RS.
-    bounded_bitset<MAX_RB> rb_mask;
+    crb_bitmap rb_mask;
     /// Boolean mask to specify the resource blocks carrying DM-RS after the frequency hop.
-    bounded_bitset<MAX_RB> rb_mask2;
+    crb_bitmap rb_mask2;
     /// Symbol index within the slot in which the first hop occurs if it has a value.
     std::optional<unsigned> hopping_symbol_index;
     /// Boolean mask to specify the resource elements within the resource blocks carrying DM-RS symbols.

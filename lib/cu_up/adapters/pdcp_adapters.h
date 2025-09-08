@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -98,8 +98,11 @@ public:
 
   void on_discard_pdu(uint32_t pdcp_sn) override
   {
-    srsran_assert(f1u_handler != nullptr, "F1-U handler must not be nullptr");
-    f1u_handler->discard_sdu(pdcp_sn);
+    if (f1u_handler == nullptr) {
+      srslog::fetch_basic_logger("PDCP").info("Dropped discard command. F1-U handler is not connected");
+    } else {
+      f1u_handler->discard_sdu(pdcp_sn);
+    }
   }
 
 private:

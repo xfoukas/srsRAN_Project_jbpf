@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -35,7 +35,6 @@
 #include "srsran/phy/upper/channel_modulation/channel_modulation_factories.h"
 #include "srsran/phy/upper/channel_processors/pusch/pusch_processor_result_notifier.h"
 #include "srsran/phy/upper/sequence_generators/sequence_generator_factories.h"
-#include "srsran/support/format_utils.h"
 
 using namespace srsran;
 
@@ -93,7 +92,7 @@ public:
           config.dematcher_factory->create(), config.decoder_factory->create(), crcs1);
     }
 
-    decoder_pool = std::make_unique<pusch_decoder_impl::codeblock_decoder_pool>(std::move(codeblock_decoders));
+    decoder_pool = std::make_unique<pusch_decoder_impl::codeblock_decoder_pool>(codeblock_decoders);
   }
 
   std::unique_ptr<pusch_decoder> create() override
@@ -137,7 +136,7 @@ public:
     }
 
     // Creates the hardware decoder pool. The pool is common among all the PUSCH decoders.
-    hw_decoder_pool = std::make_unique<pusch_decoder_hw_impl::hw_decoder_pool>(std::move(hw_decoders));
+    hw_decoder_pool = std::make_unique<pusch_decoder_hw_impl::hw_decoder_pool>(hw_decoders);
   }
 
   std::unique_ptr<pusch_decoder> create() override
@@ -160,34 +159,19 @@ private:
 class pusch_demodulator_factory_generic : public pusch_demodulator_factory
 {
 public:
-  std::unique_ptr<pusch_demodulator> create() override
-  {
-    std::unique_ptr<evm_calculator> evm_calc;
-    if (enable_evm) {
-      evm_calc = demodulation_factory->create_evm_calculator();
-    }
-    return std::make_unique<pusch_demodulator_impl>(equalizer_factory->create(),
-                                                    precoder_factory->create(),
-                                                    demodulation_factory->create_demodulation_mapper(),
-                                                    std::move(evm_calc),
-                                                    prg_factory->create(),
-                                                    max_nof_prb,
-                                                    enable_post_eq_sinr);
-  }
-
   pusch_demodulator_factory_generic(std::shared_ptr<channel_equalizer_factory>       equalizer_factory_,
                                     std::shared_ptr<transform_precoder_factory>      precoder_factory_,
-                                    std::shared_ptr<channel_modulation_factory>      demodulation_factory_,
+                                    std::shared_ptr<demodulation_mapper_factory>     demodulation_factory_,
+                                    std::shared_ptr<evm_calculator_factory>          evm_calc_factory_,
                                     std::shared_ptr<pseudo_random_generator_factory> prg_factory_,
                                     unsigned                                         max_nof_prb_,
-                                    bool                                             enable_evm_,
                                     bool                                             enable_post_eq_sinr_) :
     equalizer_factory(std::move(equalizer_factory_)),
     precoder_factory(std::move(precoder_factory_)),
     demodulation_factory(std::move(demodulation_factory_)),
+    evm_calc_factory(std::move(evm_calc_factory_)),
     prg_factory(std::move(prg_factory_)),
     max_nof_prb(max_nof_prb_),
-    enable_evm(enable_evm_),
     enable_post_eq_sinr(enable_post_eq_sinr_)
   {
     srsran_assert(equalizer_factory, "Invalid equalizer factory.");
@@ -196,13 +180,28 @@ public:
     srsran_assert(prg_factory, "Invalid PRG factory.");
   }
 
+  std::unique_ptr<pusch_demodulator> create() override
+  {
+    std::unique_ptr<evm_calculator> evm_calc;
+    if (evm_calc_factory) {
+      evm_calc = evm_calc_factory->create();
+    }
+    return std::make_unique<pusch_demodulator_impl>(equalizer_factory->create(),
+                                                    precoder_factory->create(),
+                                                    demodulation_factory->create(),
+                                                    std::move(evm_calc),
+                                                    prg_factory->create(),
+                                                    max_nof_prb,
+                                                    enable_post_eq_sinr);
+  }
+
 private:
   std::shared_ptr<channel_equalizer_factory>       equalizer_factory;
   std::shared_ptr<transform_precoder_factory>      precoder_factory;
-  std::shared_ptr<channel_modulation_factory>      demodulation_factory;
+  std::shared_ptr<demodulation_mapper_factory>     demodulation_factory;
+  std::shared_ptr<evm_calculator_factory>          evm_calc_factory;
   std::shared_ptr<pseudo_random_generator_factory> prg_factory;
   unsigned                                         max_nof_prb;
-  bool                                             enable_evm;
   bool                                             enable_post_eq_sinr;
 };
 
@@ -238,8 +237,7 @@ public:
     });
 
     // Create common dependencies pool.
-    dependencies_pool =
-        std::make_shared<pusch_processor_impl::concurrent_dependencies_pool_type>(std::move(dependencies));
+    dependencies_pool = std::make_shared<pusch_processor_impl::concurrent_dependencies_pool_type>(dependencies);
   }
 
   std::unique_ptr<pusch_processor> create() override
@@ -361,18 +359,18 @@ srsran::create_pusch_decoder_factory_hw(const pusch_decoder_factory_hw_configura
 std::shared_ptr<pusch_demodulator_factory>
 srsran::create_pusch_demodulator_factory_sw(std::shared_ptr<channel_equalizer_factory>       equalizer_factory,
                                             std::shared_ptr<transform_precoder_factory>      precoder_factory,
-                                            std::shared_ptr<channel_modulation_factory>      demodulation_factory,
+                                            std::shared_ptr<demodulation_mapper_factory>     demodulation_factory,
+                                            std::shared_ptr<evm_calculator_factory>          evm_calc_factory,
                                             std::shared_ptr<pseudo_random_generator_factory> prg_factory,
                                             unsigned                                         max_nof_prb,
-                                            bool                                             enable_evm,
                                             bool                                             enable_post_eq_sinr)
 {
   return std::make_shared<pusch_demodulator_factory_generic>(std::move(equalizer_factory),
                                                              std::move(precoder_factory),
                                                              std::move(demodulation_factory),
+                                                             std::move(evm_calc_factory),
                                                              std::move(prg_factory),
                                                              max_nof_prb,
-                                                             enable_evm,
                                                              enable_post_eq_sinr);
 }
 

@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -22,8 +22,8 @@
 
 #include "cu_cp_test_environment.h"
 #include "tests/test_doubles/f1ap/f1ap_test_message_validators.h"
+#include "tests/test_doubles/rrc/rrc_test_messages.h"
 #include "tests/unittests/e1ap/common/e1ap_cu_cp_test_messages.h"
-#include "tests/unittests/f1ap/common/f1ap_cu_test_messages.h"
 #include "tests/unittests/ngap/ngap_test_messages.h"
 #include "srsran/asn1/f1ap/f1ap_pdu_contents_ue.h"
 #include "srsran/asn1/rrc_nr/dl_ccch_msg.h"
@@ -89,6 +89,93 @@ TEST_F(cu_cp_connectivity_test, when_ng_setup_fails_then_cu_cp_is_not_in_amf_con
       << "CU-CP did not setup the AMF connection";
 
   ASSERT_FALSE(get_cu_cp().get_ng_handler().amfs_are_connected());
+}
+
+TEST_F(cu_cp_connectivity_test, when_amf_connection_is_lost_then_connected_ues_are_released_and_new_ues_are_rejected)
+{
+  // Run NG setup to completion.
+  run_ng_setup();
+
+  // Setup DU.
+  auto ret = connect_new_du();
+  ASSERT_TRUE(ret.has_value());
+  unsigned du_idx = ret.value();
+  ASSERT_TRUE(this->run_f1_setup(du_idx));
+
+  // Setup CU-UP.
+  ret = connect_new_cu_up();
+  ASSERT_TRUE(ret.has_value());
+  unsigned cu_up_idx = ret.value();
+  ASSERT_TRUE(this->run_e1_setup(cu_up_idx));
+
+  // Create UE.
+  gnb_du_ue_f1ap_id_t du_ue_f1ap_id = int_to_gnb_du_ue_f1ap_id(0);
+  rnti_t              crnti         = to_rnti(0x4601);
+  ASSERT_TRUE(connect_new_ue(du_idx, du_ue_f1ap_id, crnti));
+
+  ASSERT_TRUE(drop_amf_connection(0));
+
+  // TEST: Verify that connected UEs are released.
+  {
+    // Verify F1AP UE Context Release Command is sent to DU.
+    f1ap_message f1ap_pdu;
+    ASSERT_TRUE(this->wait_for_f1ap_tx_pdu(du_idx, f1ap_pdu));
+    ASSERT_TRUE(test_helpers::is_valid_ue_context_release_command(f1ap_pdu));
+
+    // Verify RRC Reject is sent to UE.
+    const auto&                 ue_rel = f1ap_pdu.pdu.init_msg().value.ue_context_release_cmd();
+    asn1::rrc_nr::dl_ccch_msg_s ccch;
+    {
+      asn1::cbit_ref bref{ue_rel->rrc_container};
+      ASSERT_EQ(ccch.unpack(bref), asn1::SRSASN_SUCCESS);
+    }
+    ASSERT_EQ(ccch.msg.c1().type().value, asn1::rrc_nr::dl_ccch_msg_type_c::c1_c_::types_opts::rrc_reject);
+
+    // DU sends F1AP UE Context Release Complete.
+    auto rel_complete = test_helpers::generate_ue_context_release_complete(
+        int_to_gnb_cu_ue_f1ap_id(ue_rel->gnb_cu_ue_f1ap_id), du_ue_f1ap_id);
+    get_du(du_idx).push_ul_pdu(rel_complete);
+
+    // TEST: Verify UE is removed in CU-CP.
+    auto report = this->get_cu_cp().get_metrics_handler().request_metrics_report();
+    ASSERT_TRUE(report.ues.empty());
+  }
+
+  // TEST: Verify that Cells are deactivated in DU.
+  {
+    // Verify F1AP GNB CU Configuration Update is sent to DU.
+    f1ap_message f1ap_pdu;
+    ASSERT_TRUE(this->wait_for_f1ap_tx_pdu(du_idx, f1ap_pdu));
+    ASSERT_TRUE(test_helpers::is_valid_gnb_cu_configuration_update(f1ap_pdu));
+
+    // DU sends F1AP UE Context Release Complete.
+    get_du(du_idx).push_ul_pdu(test_helpers::generate_gnb_cu_configuration_update_acknowledgement({}));
+  }
+
+  // TEST: Verify that new UE connection is rejected.
+  {
+    // Send Initial UL RRC Message.
+    gnb_du_ue_f1ap_id_t du_ue_f1ap_id_2 = int_to_gnb_du_ue_f1ap_id(1);
+    rnti_t              crnti_2         = to_rnti(0x4602);
+    get_du(du_idx).push_ul_pdu(test_helpers::generate_init_ul_rrc_message_transfer(du_ue_f1ap_id_2, crnti_2));
+
+    // TEST: DL RRC Message Transfer is sent to DU.
+    f1ap_message f1ap_pdu;
+    ASSERT_TRUE(this->wait_for_f1ap_tx_pdu(du_idx, f1ap_pdu));
+    ASSERT_TRUE(test_helpers::is_valid_dl_rrc_message_transfer(f1ap_pdu));
+
+    // TEST: RRC Reject is sent to UE.
+    asn1::rrc_nr::dl_ccch_msg_s ccch;
+    {
+      asn1::cbit_ref bref{f1ap_pdu.pdu.init_msg().value.dl_rrc_msg_transfer()->rrc_container};
+      ASSERT_EQ(ccch.unpack(bref), asn1::SRSASN_SUCCESS);
+    }
+    ASSERT_EQ(ccch.msg.c1().type().value, asn1::rrc_nr::dl_ccch_msg_type_c::c1_c_::types_opts::rrc_reject);
+
+    // TEST: Verify UE is removed in CU-CP.
+    auto report = this->get_cu_cp().get_metrics_handler().request_metrics_report();
+    ASSERT_TRUE(report.ues.empty());
+  }
 }
 
 //----------------------------------------------------------------------------------//
@@ -182,7 +269,7 @@ TEST_F(cu_cp_connectivity_test, when_a_du_with_non_matching_gnb_id_connects_then
   // DU sends F1 Setup Request.
   gnb_du_id_t  du_id    = int_to_gnb_du_id(0x55);
   f1ap_message f1ap_pdu = test_helpers::generate_f1_setup_request(
-      du_id, nr_cell_identity::create(0x0).value()); // the gnb-id does not match.
+      du_id, {{nr_cell_identity::create(0x0).value()}}); // the gnb-id does not match.
   get_du(du_idx).push_ul_pdu(f1ap_pdu);
 
   // Ensure the F1 Setup Failure is received for the DU.
@@ -348,7 +435,10 @@ TEST_F(cu_cp_connectivity_test, when_ng_f1_e1_are_setup_then_ues_can_attach)
   // Create UE by sending Initial UL RRC Message.
   gnb_du_ue_f1ap_id_t du_ue_f1ap_id = int_to_gnb_du_ue_f1ap_id(0);
   rnti_t              crnti         = to_rnti(0x4601);
-  get_du(du_idx).push_ul_pdu(generate_init_ul_rrc_message_transfer(du_ue_f1ap_id, crnti));
+  get_du(du_idx).push_ul_pdu(test_helpers::generate_init_ul_rrc_message_transfer(du_ue_f1ap_id, crnti));
+  report = this->get_cu_cp().get_metrics_handler().request_metrics_report();
+  ASSERT_EQ(report.dus[0].rrc_metrics.attempted_rrc_connection_establishments.get_count(establishment_cause_t::mo_sig),
+            1);
 
   // Verify F1AP DL RRC Message is sent with RRC Setup.
   f1ap_message f1ap_pdu;
@@ -359,6 +449,15 @@ TEST_F(cu_cp_connectivity_test, when_ng_f1_e1_are_setup_then_ues_can_attach)
   report = this->get_cu_cp().get_metrics_handler().request_metrics_report();
   ASSERT_EQ(report.ues.size(), 1);
   ASSERT_EQ(report.ues[0].rnti, crnti);
+
+  // Send RRC Setup Complete.
+  // > Generate UL RRC Message (containing RRC Setup Complete) with PDCP SN=0.
+  get_du(du_idx).push_rrc_ul_dcch_message(du_ue_f1ap_id, srb_id_t::srb1, pack_ul_dcch_msg(create_rrc_setup_complete()));
+  report = this->get_cu_cp().get_metrics_handler().request_metrics_report();
+  ASSERT_EQ(report.dus[0].rrc_metrics.attempted_rrc_connection_establishments.get_count(establishment_cause_t::mo_sig),
+            1);
+  ASSERT_EQ(report.dus[0].rrc_metrics.successful_rrc_connection_establishments.get_count(establishment_cause_t::mo_sig),
+            1);
 }
 
 TEST_F(cu_cp_connectivity_test, when_e1_is_not_setup_then_new_ues_are_rejected)
@@ -375,7 +474,7 @@ TEST_F(cu_cp_connectivity_test, when_e1_is_not_setup_then_new_ues_are_rejected)
   // Send Initial UL RRC Message.
   gnb_du_ue_f1ap_id_t ue_f1ap_id = int_to_gnb_du_ue_f1ap_id(0);
   rnti_t              crnti      = to_rnti(0x4601);
-  get_du(du_idx).push_ul_pdu(generate_init_ul_rrc_message_transfer(ue_f1ap_id, crnti));
+  get_du(du_idx).push_ul_pdu(test_helpers::generate_init_ul_rrc_message_transfer(ue_f1ap_id, crnti));
 
   // TEST: F1AP UE Context Command is sent to DU.
   f1ap_message f1ap_pdu;
@@ -402,8 +501,8 @@ TEST_F(cu_cp_connectivity_test, when_e1_is_not_setup_then_new_ues_are_rejected)
   ASSERT_EQ(report.ues[0].rnti, crnti);
 
   // DU sends F1AP UE Context Release Complete.
-  auto rel_complete =
-      generate_ue_context_release_complete(int_to_gnb_cu_ue_f1ap_id(ue_rel->gnb_cu_ue_f1ap_id), ue_f1ap_id);
+  auto rel_complete = test_helpers::generate_ue_context_release_complete(
+      int_to_gnb_cu_ue_f1ap_id(ue_rel->gnb_cu_ue_f1ap_id), ue_f1ap_id);
   get_du(du_idx).push_ul_pdu(rel_complete);
 
   // TEST: Verify UE is removed in CU-CP.

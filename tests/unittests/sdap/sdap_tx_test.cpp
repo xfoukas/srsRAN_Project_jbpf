@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -35,7 +35,7 @@ public:
   std::queue<byte_buffer> pdu_queue;
 
   // sdap_tx_pdu_notifier interface
-  void on_new_pdu(byte_buffer pdu) override { pdu_queue.push(std::move(pdu)); };
+  void on_new_pdu(byte_buffer pdu) override { pdu_queue.push(std::move(pdu)); }
 };
 
 /// Fixture class for SDAP TX tests

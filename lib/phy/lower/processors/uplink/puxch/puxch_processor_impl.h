@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -21,10 +21,12 @@
  */
 
 #pragma once
+
 #include "../../resource_grid_request_pool.h"
 #include "srsran/adt/circular_array.h"
 #include "srsran/gateways/baseband/buffer/baseband_gateway_buffer_dynamic.h"
 #include "srsran/phy/lower/modulation/ofdm_demodulator.h"
+#include "srsran/phy/lower/processors/lower_phy_center_freq_controller.h"
 #include "srsran/phy/lower/processors/uplink/puxch/puxch_processor.h"
 #include "srsran/phy/lower/processors/uplink/puxch/puxch_processor_baseband.h"
 #include "srsran/phy/lower/processors/uplink/puxch/puxch_processor_notifier.h"
@@ -37,6 +39,7 @@ namespace srsran {
 /// Implements PUxCH baseband processor.
 class puxch_processor_impl : public puxch_processor,
                              private puxch_processor_baseband,
+                             private lower_phy_center_freq_controller,
                              private puxch_processor_request_handler
 {
 public:
@@ -58,10 +61,16 @@ public:
   void connect(puxch_processor_notifier& notifier_) override { notifier = &notifier_; }
 
   // See interface for documentation.
+  void stop() override { stopped = true; }
+
+  // See interface for documentation.
   puxch_processor_request_handler& get_request_handler() override { return *this; }
 
   // See interface for documentation.
   puxch_processor_baseband& get_baseband() override { return *this; }
+
+  // See interface for documentation.
+  lower_phy_center_freq_controller& get_center_freq_control() override;
 
 private:
   // See interface for documentation.
@@ -71,6 +80,10 @@ private:
   // See interface for documentation.
   void handle_request(const shared_resource_grid& grid, const resource_grid_context& context) override;
 
+  // See interface for documentation.
+  bool set_carrier_center_frequency(double carrier_center_frequency_Hz) override;
+
+  std::atomic<bool>                        stopped = false;
   unsigned                                 nof_symbols_per_slot;
   unsigned                                 nof_rx_ports;
   puxch_processor_notifier*                notifier = nullptr;

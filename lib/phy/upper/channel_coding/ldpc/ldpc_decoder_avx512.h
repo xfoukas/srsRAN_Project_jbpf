@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -32,6 +32,9 @@ namespace srsran {
 /// LDPC decoder implementation based on AVX512 intrinsics.
 class ldpc_decoder_avx512 : public ldpc_decoder_impl
 {
+public:
+  ldpc_decoder_avx512();
+
 private:
   // See ldpc_decoder_impl for the documentation.
   void specific_init() override;
@@ -39,8 +42,6 @@ private:
   void compute_soft_bits(span<log_likelihood_ratio>       this_soft_bits,
                          span<const log_likelihood_ratio> this_var_to_check,
                          span<const log_likelihood_ratio> this_check_to_var) override;
-
-  bool get_hard_bits(bit_buffer& out) override;
 
   void compute_var_to_check_msgs(span<log_likelihood_ratio>       this_var_to_check,
                                  span<const log_likelihood_ratio> this_soft_bits,
@@ -53,6 +54,8 @@ private:
                                  span<const log_likelihood_ratio> rotated_node,
                                  unsigned                         var_node) override;
 
+  void scale(span<log_likelihood_ratio> out, span<const log_likelihood_ratio> in) override;
+
   void compute_check_to_var_msgs(span<log_likelihood_ratio>       this_check_to_var,
                                  span<const log_likelihood_ratio> this_var_to_check,
                                  span<const log_likelihood_ratio> rotated_node,
@@ -63,8 +66,8 @@ private:
                                  unsigned                         shift,
                                  unsigned                         var_node) override;
 
-  /// Auxiliary buffer to store the rotated variable-to-check messages.
-  std::array<log_likelihood_ratio, ldpc::MAX_LIFTING_SIZE * MAX_CHECK_NODE_DEGREE> rotated_var_to_check;
+  /// Auxiliary buffer to store the rotated check-to-variable messages.
+  std::vector<log_likelihood_ratio> help_check_to_var;
 
   /// Number of AVX512 vectors needed to cover a lifted node.
   unsigned node_size_avx512 = 0;

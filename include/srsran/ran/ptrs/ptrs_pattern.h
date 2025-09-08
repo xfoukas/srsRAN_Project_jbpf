@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -28,6 +28,7 @@
 #include "srsran/ran/dmrs.h"
 #include "srsran/ran/ptrs/ptrs.h"
 #include "srsran/ran/ptrs/ptrs_constants.h"
+#include "srsran/ran/resource_allocation/rb_bitmap.h"
 #include "srsran/ran/resource_block.h"
 #include "srsran/ran/rnti.h"
 
@@ -41,8 +42,8 @@ struct ptrs_pattern_configuration {
   dmrs_config_type dmrs_type;
   /// DM-RS position mask. Indicates the OFDM symbols carrying DM-RS within the slot.
   bounded_bitset<MAX_NSYMB_PER_SLOT> dmrs_symbol_mask;
-  /// Frequency domain allocation as RB list. The entries set to true are used for transmission.
-  bounded_bitset<MAX_NOF_PRBS> rb_mask;
+  /// Frequency domain allocation as CRB mask. The entries set to true are used for transmission.
+  crb_bitmap rb_mask;
   /// Time domain allocation of the transmission containing PT-RS.
   interval<uint8_t> time_allocation;
   /// Frequency domain density.

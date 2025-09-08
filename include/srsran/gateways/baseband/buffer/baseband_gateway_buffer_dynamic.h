@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -28,7 +28,6 @@
 #include "srsran/gateways/baseband/baseband_gateway_base.h"
 #include "srsran/gateways/baseband/buffer/baseband_gateway_buffer_reader.h"
 #include "srsran/gateways/baseband/buffer/baseband_gateway_buffer_writer.h"
-#include "srsran/srsvec/copy.h"
 #include "srsran/support/error_handling.h"
 #include "srsran/support/srsran_assert.h"
 #include <vector>

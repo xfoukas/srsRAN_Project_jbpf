@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -23,7 +23,6 @@
 #pragma once
 
 #include "../asn1_helpers.h"
-#include "srsran/adt/optional.h"
 #include "srsran/asn1/f1ap/common.h"
 #include "srsran/asn1/f1ap/f1ap_ies.h"
 #include "srsran/cu_cp/cu_cp_types.h"
@@ -99,7 +98,7 @@ inline void cu_to_du_rrc_info_to_asn1(asn1::f1ap::cu_to_du_rrc_info_s& asn1_cu_t
     // need for gap ncsg info eutra
     // cfg restrict info daps
   }
-};
+}
 
 /// \brief Convert scell to be setup/setup mod item to F1AP ASN.1.
 /// \param[out] asn1_scell_to_be_setup_mod_item The ASN.1 struct to store the result.

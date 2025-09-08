@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -111,10 +111,10 @@ class e2_sctp_gateway_client final : public e2_connection_client
 {
 public:
   e2_sctp_gateway_client(const e2_sctp_gateway_config& params) :
-    pcap_writer(params.pcap), broker(params.broker), sctp_params(params.sctp)
+    pcap_writer(params.pcap), broker(params.broker), sctp_params(params.sctp), logger(params.logger)
   {
     // Create SCTP network adapter.
-    sctp_gateway = create_sctp_network_client(sctp_network_client_config{params.sctp, broker});
+    sctp_gateway = create_sctp_network_client(sctp_network_client_config{params.sctp, broker, params.io_rx_executor});
     report_error_if_not(sctp_gateway != nullptr, "Failed to create SCTP gateway client.\n");
   }
 
@@ -131,7 +131,7 @@ public:
         sctp_params.connect_port,
         std::make_unique<sctp_to_e2_pdu_notifier>(std::move(e2_rx_pdu_notifier), pcap_writer, logger));
     if (sctp_sender == nullptr) {
-      logger.error("Failed to establish E2 connection to Near-RT RIC on {}:{}.\n",
+      logger.error("Failed to establish E2 connection to Near-RT RIC on {}:{}.",
                    sctp_params.connect_address,
                    sctp_params.connect_port);
       return nullptr;
@@ -155,7 +155,7 @@ private:
   dlt_pcap&                             pcap_writer;
   io_broker&                            broker;
   srsran::sctp_network_connector_config sctp_params;
-  srslog::basic_logger&                 logger = srslog::fetch_basic_logger("E2");
+  srslog::basic_logger&                 logger;
 
   // SCTP network gateway
   std::unique_ptr<sctp_network_client> sctp_gateway;

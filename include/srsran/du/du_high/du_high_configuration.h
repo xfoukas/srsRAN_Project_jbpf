@@ -6,9 +6,6 @@
 #include "srsran/du/du_high/du_qos_config.h"
 #include "srsran/du/du_high/du_srb_config.h"
 #include "srsran/du/du_high/du_test_mode_config.h"
-#include "srsran/e2/e2_du.h"
-#include "srsran/e2/e2ap_configuration.h"
-#include "srsran/e2/gateways/e2_connection_client.h"
 #include "srsran/f1ap/du/f1ap_du.h"
 #include "srsran/f1ap/gateways/f1c_connection_client.h"
 #include "srsran/mac/mac_cell_result.h"
@@ -28,6 +25,7 @@ class timer_manager;
 namespace srs_du {
 
 class f1u_du_gateway;
+class du_metrics_notifier;
 
 /// RAN-specific parameters of the DU-high.
 struct du_high_ran_config {
@@ -42,20 +40,31 @@ struct du_high_ran_config {
 
 /// Configuration passed to DU-High.
 struct du_high_configuration {
-  srs_du::du_high_ran_config       ran;
-  srs_du::du_high_executor_mapper* exec_mapper               = nullptr;
-  f1c_connection_client*           f1c_client                = nullptr;
-  f1u_du_gateway*                  f1u_gw                    = nullptr;
-  mac_result_notifier*             phy_adapter               = nullptr;
-  timer_manager*                   timers                    = nullptr;
-  scheduler_metrics_notifier*      sched_ue_metrics_notifier = nullptr;
-  rlc_metrics_notifier*            rlc_metrics_notif         = nullptr;
-  e2_connection_client*            e2_client                 = nullptr;
-  e2_du_metrics_interface*         e2_du_metric_iface        = nullptr;
-  mac_pcap*                        mac_p                     = nullptr;
-  rlc_pcap*                        rlc_p                     = nullptr;
-  du_test_mode_config              test_cfg;
-  e2ap_configuration               e2ap_config;
+  struct metrics_config {
+    bool                      enable_sched = false;
+    bool                      enable_mac   = false;
+    bool                      enable_rlc   = false;
+    bool                      enable_f1ap  = false;
+    std::chrono::milliseconds period{1000};
+    unsigned                  max_nof_sched_ue_events = 64;
+  };
+
+  du_high_ran_config  ran;
+  metrics_config      metrics;
+  du_test_mode_config test_cfg;
+};
+
+/// DU high dependencies
+struct du_high_dependencies {
+  du_high_executor_mapper* exec_mapper       = nullptr;
+  f1c_connection_client*   f1c_client        = nullptr;
+  f1u_du_gateway*          f1u_gw            = nullptr;
+  mac_result_notifier*     phy_adapter       = nullptr;
+  timer_manager*           timers            = nullptr;
+  du_metrics_notifier*     du_notifier       = nullptr;
+  rlc_metrics_notifier*    rlc_metrics_notif = nullptr;
+  mac_pcap*                mac_p             = nullptr;
+  rlc_pcap*                rlc_p             = nullptr;
 };
 
 } // namespace srs_du

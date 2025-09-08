@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -78,7 +78,7 @@ TEST_P(pdcp_tx_test, pdu_gen)
   auto test_pdu_gen = [this](uint32_t tx_next) {
     srsran::test_delimit_logger delimiter("TX PDU generation. SN_SIZE={} COUNT={}", sn_size, tx_next);
     // Set state of PDCP entiy
-    pdcp_tx_state st = {tx_next, tx_next};
+    pdcp_tx_state st = {tx_next, tx_next, tx_next};
     pdcp_tx->set_state(st);
     pdcp_tx->configure_security(sec_cfg, security::integrity_enabled::on, security::ciphering_enabled::on);
 
@@ -113,32 +113,36 @@ TEST_P(pdcp_tx_test, pdu_gen)
   }
 }
 
-/// \brief Test correct stalling of PDCP if RLC SDU queue is full
-TEST_P(pdcp_tx_test, pdu_stall)
+/// \brief Test correct stalling of PDCP if RLC SDU queue is full; then continue via delivery notification
+TEST_P(pdcp_tx_test, pdu_stall_then_continue_via_deliv_notif)
 {
   init(GetParam(), pdcp_rb_type::drb, pdcp_rlc_mode::am, pdcp_discard_timer::infinity);
 
-  auto test_pdu_gen = [this](uint32_t tx_next) {
-    srsran::test_delimit_logger delimiter("TX PDU stall. SN_SIZE={} COUNT={}", sn_size, tx_next);
+  auto test_pdu_gen = [this](uint32_t tx_next, uint32_t qsize = 16) {
+    srsran::test_delimit_logger delimiter(
+        "TX PDU stall; then continue via RETX notif. SN_SIZE={} COUNT={}", sn_size, tx_next);
     // Set state of PDCP entiy
     pdcp_tx_state st = {tx_next, tx_next, tx_next};
     pdcp_tx->set_state(st);
     pdcp_tx->configure_security(sec_cfg, security::integrity_enabled::on, security::ciphering_enabled::on);
 
-    uint32_t sdu_queue_size = 4096;
-    uint32_t window_size    = pdcp_window_size(sn_size);
-    uint32_t stall          = std::min(sdu_queue_size, window_size - 1); // nof SDUs before stalling
+    uint32_t pdu_size             = sn_size == pdcp_sn_size::size12bits ? pdu_size_snlen12 : pdu_size_snlen18;
+    uint32_t rlc_queue_size       = qsize;
+    uint32_t rlc_queue_size_bytes = rlc_queue_size * pdu_size;
+    pdcp_tx->handle_desired_buffer_size_notification(rlc_queue_size_bytes);
+    uint32_t window_size = pdcp_window_size(sn_size);
+    uint32_t stall       = std::min(rlc_queue_size, window_size - 1); // nof SDUs before stalling
 
     // Write SDU
     for (uint32_t count = tx_next; count < tx_next + stall; ++count) {
       byte_buffer sdu = byte_buffer::create(sdu1).value();
       pdcp_tx->handle_sdu(std::move(sdu));
-
       // Check there is a new PDU
       ASSERT_EQ(test_frame.pdu_queue.size(), 1);
       byte_buffer pdu = std::move(test_frame.pdu_queue.front());
       test_frame.pdu_queue.pop();
     }
+
     {
       // Write an SDU that should be dropped
       byte_buffer sdu = byte_buffer::create(sdu1).value();
@@ -147,15 +151,101 @@ TEST_P(pdcp_tx_test, pdu_stall)
       // Check there is no new PDU
       ASSERT_EQ(test_frame.pdu_queue.size(), 0);
     }
+
     {
       // Notify transmission of all PDUs
       pdcp_tx->handle_transmit_notification(pdcp_compute_sn(tx_next + stall - 1, sn_size));
 
+      // Write an SDU that should not be dropped
+      byte_buffer sdu = byte_buffer::create(sdu1).value();
+      pdcp_tx->handle_sdu(std::move(sdu));
+
+      // Check there is a new PDU
+      ASSERT_EQ(test_frame.pdu_queue.size(), 0);
+    }
+    {
+      // Notify delivery of all PDUs
+      pdcp_tx->handle_delivery_notification(pdcp_compute_sn(tx_next + stall - 1, sn_size));
+
+      // Write an SDU that should not be dropped
+      byte_buffer sdu = byte_buffer::create(sdu1).value();
+      pdcp_tx->handle_sdu(std::move(sdu));
+
+      // Check there is a new PDU
+      ASSERT_EQ(test_frame.pdu_queue.size(), 1);
+      test_frame.pdu_queue.pop();
+    }
+  };
+
+  if (config.sn_size == pdcp_sn_size::size12bits) {
+    // Test stall limited by RLC queue size.
+    test_pdu_gen(0);
+    test_pdu_gen(2048);
+    test_pdu_gen(4095);
+    test_pdu_gen(4096);
+    // Test stall limited by PDCP TX window size.
+    test_pdu_gen(0, 4096);
+    test_pdu_gen(2048, 4096);
+    test_pdu_gen(4095, 4096);
+    test_pdu_gen(4096, 4096);
+  } else if (config.sn_size == pdcp_sn_size::size18bits) {
+    test_pdu_gen(0);
+    test_pdu_gen(131072);
+    test_pdu_gen(262144);
+  } else {
+    FAIL();
+  }
+}
+
+/// \brief Test correct stalling of PDCP if RLC SDU queue is full; then continue via delivery retransmitted notification
+TEST_P(pdcp_tx_test, pdu_stall_then_continue_via_deliv_retx_notif)
+{
+  init(GetParam(), pdcp_rb_type::drb, pdcp_rlc_mode::am, pdcp_discard_timer::infinity);
+
+  auto test_pdu_gen = [this](uint32_t tx_next) {
+    srsran::test_delimit_logger delimiter(
+        "TX PDU stall; then continue via RETX notif. SN_SIZE={} COUNT={}", sn_size, tx_next);
+    // Set state of PDCP entiy
+    pdcp_tx_state st = {tx_next, tx_next, tx_next};
+    pdcp_tx->set_state(st);
+    pdcp_tx->configure_security(sec_cfg, security::integrity_enabled::on, security::ciphering_enabled::on);
+
+    uint32_t pdu_size             = sn_size == pdcp_sn_size::size12bits ? pdu_size_snlen12 : pdu_size_snlen18;
+    uint32_t rlc_queue_size       = 16;
+    uint32_t rlc_queue_size_bytes = rlc_queue_size * pdu_size;
+    pdcp_tx->handle_desired_buffer_size_notification(rlc_queue_size_bytes);
+    uint32_t window_size = pdcp_window_size(sn_size);
+    uint32_t stall       = std::min(rlc_queue_size, window_size - 1); // nof SDUs before stalling
+
+    // Write SDU
+    for (uint32_t count = tx_next; count < tx_next + stall; ++count) {
+      byte_buffer sdu = byte_buffer::create(sdu1).value();
+      pdcp_tx->handle_sdu(std::move(sdu));
+      // Check there is a new PDU
+      ASSERT_EQ(test_frame.pdu_queue.size(), 1);
+      byte_buffer pdu = std::move(test_frame.pdu_queue.front());
+      test_frame.pdu_queue.pop();
+    }
+
+    {
       // Write an SDU that should be dropped
       byte_buffer sdu = byte_buffer::create(sdu1).value();
       pdcp_tx->handle_sdu(std::move(sdu));
 
       // Check there is no new PDU
+      ASSERT_EQ(test_frame.pdu_queue.size(), 0);
+    }
+
+    {
+      // Notify retransmission of all PDUs
+      pdcp_tx->handle_retransmit_notification(pdcp_compute_sn(tx_next + stall - 1, sn_size));
+      pdcp_tx->handle_delivery_retransmitted_notification(pdcp_compute_sn(tx_next + stall - 1, sn_size));
+
+      // Write an SDU that should not be dropped
+      byte_buffer sdu = byte_buffer::create(sdu1).value();
+      pdcp_tx->handle_sdu(std::move(sdu));
+
+      // Check there is a new PDU
       ASSERT_EQ(test_frame.pdu_queue.size(), 1);
       test_frame.pdu_queue.pop();
     }
@@ -192,23 +282,38 @@ TEST_P(pdcp_tx_test, discard_timer_and_expiry)
       byte_buffer sdu = byte_buffer::create(sdu1).value();
       pdcp_tx->handle_sdu(std::move(sdu));
       pdcp_tx->handle_transmit_notification(pdcp_compute_sn(tx_next, sn_size));
-      ASSERT_EQ(1, pdcp_tx->nof_discard_timers());
+      ASSERT_EQ(1, pdcp_tx->nof_pdus_in_window());
     }
     // Write second SDU
     {
       byte_buffer sdu = byte_buffer::create(sdu1).value();
       pdcp_tx->handle_sdu(std::move(sdu));
       pdcp_tx->handle_transmit_notification(pdcp_compute_sn(tx_next + 1, sn_size));
-      ASSERT_EQ(2, pdcp_tx->nof_discard_timers());
+      ASSERT_EQ(2, pdcp_tx->nof_pdus_in_window());
     }
+    timers.tick(); // add one tick
+    // Write third SDU after a tick.
+    {
+      byte_buffer sdu = byte_buffer::create(sdu1).value();
+      pdcp_tx->handle_sdu(std::move(sdu));
+      pdcp_tx->handle_transmit_notification(pdcp_compute_sn(tx_next + 2, sn_size));
+      ASSERT_EQ(3, pdcp_tx->nof_pdus_in_window());
+    }
+
     // Let timers expire
-    for (int i = 0; i < 10; i++) {
+    for (int i = 0; i < 9; i++) {
       timers.tick();
       worker.run_pending_tasks();
     }
 
-    // Timers should have expired now.
-    ASSERT_EQ(0, pdcp_tx->nof_discard_timers());
+    // Timers should have expired now for the first two SDUs.
+    // Third should still be in the window.
+    ASSERT_EQ(1, pdcp_tx->nof_pdus_in_window());
+
+    // Tick one more time. All timers should have expired now.
+    timers.tick();
+    worker.run_pending_tasks();
+    FLUSH_AND_ASSERT_EQ(0, pdcp_tx->nof_pdus_in_window());
   };
 
   if (config.sn_size == pdcp_sn_size::size12bits) {
@@ -240,29 +345,47 @@ TEST_P(pdcp_tx_test, discard_timer_and_stop)
     for (uint32_t i = 0; i < nof_sdus; i++) {
       byte_buffer sdu = byte_buffer::create(sdu1).value();
       pdcp_tx->handle_sdu(std::move(sdu));
-      pdcp_tx->handle_transmit_notification(pdcp_compute_sn(st.tx_next, sn_size));
-      ASSERT_EQ(i + 1, pdcp_tx->nof_discard_timers());
+      pdcp_tx->handle_transmit_notification(pdcp_compute_sn(st.tx_next + i, sn_size));
+      ASSERT_EQ(i + 1, pdcp_tx->nof_pdus_in_window());
     }
+    // Write one SDU with one more tick, to make sure the discard timer is restarted
+    // If there are still PDUs after the delivery notifications.
+    timers.tick();
+    byte_buffer sdu = byte_buffer::create(sdu1).value();
+    pdcp_tx->handle_sdu(std::move(sdu));
+    pdcp_tx->handle_transmit_notification(pdcp_compute_sn(st.tx_next + nof_sdus, sn_size));
+    ASSERT_EQ(nof_sdus + 1, pdcp_tx->nof_pdus_in_window());
+
+    // Tick one more time before receiving the delivery notifications.
+    // This will make sure that the discard timers are restarted with the correct timeout.
+    timers.tick();
 
     // Notify delivery of first SDU
     pdcp_tx->handle_delivery_notification(pdcp_compute_sn(st.tx_next, sn_size));
-    ASSERT_EQ(nof_sdus - 1, pdcp_tx->nof_discard_timers());
+    ASSERT_EQ(nof_sdus, pdcp_tx->nof_pdus_in_window());
 
     // Notify delivery up to third SDU
     pdcp_tx->handle_delivery_notification(pdcp_compute_sn(st.tx_next + 2, sn_size));
-    ASSERT_EQ(nof_sdus - 3, pdcp_tx->nof_discard_timers());
+    ASSERT_EQ(nof_sdus - 2, pdcp_tx->nof_pdus_in_window());
 
     // Notify delivery of second SDU again
     // e.g. in case the UDP-based F1-U interface swaps the the order of transmit/delivery notifications
     pdcp_tx->handle_delivery_notification(pdcp_compute_sn(st.tx_next + 1, sn_size));
-    ASSERT_EQ(nof_sdus - 3, pdcp_tx->nof_discard_timers());
+    ASSERT_EQ(nof_sdus - 2, pdcp_tx->nof_pdus_in_window());
 
     // Notify delivery of remaining SDUs
     pdcp_tx->handle_delivery_notification(pdcp_compute_sn(st.tx_next + nof_sdus - 1, sn_size));
-    ASSERT_EQ(0, pdcp_tx->nof_discard_timers());
+    ASSERT_EQ(1, pdcp_tx->nof_pdus_in_window());
+
+    // Make sure that discard timer was correctly restarted.
+    for (int i = 0; i < 9; i++) {
+      timers.tick();
+      worker.run_pending_tasks();
+    }
+    ASSERT_EQ(0, pdcp_tx->nof_pdus_in_window());
   };
 
-  pdcp_tx_state st = {};
+  pdcp_tx_state st = {0, 0, 0};
   if (config.sn_size == pdcp_sn_size::size12bits) {
     // test the beginning
     st = {0, 0, 0};
@@ -306,15 +429,18 @@ TEST_P(pdcp_tx_test, pdu_stall_with_discard)
   init(GetParam(), pdcp_rb_type::drb, pdcp_rlc_mode::am);
 
   auto test_pdu_gen = [this](uint32_t tx_next) {
-    srsran::test_delimit_logger delimiter("TX PDU stall. SN_SIZE={} COUNT={}", sn_size, tx_next);
+    srsran::test_delimit_logger delimiter("TX PDU stall with discard. SN_SIZE={} COUNT={}", sn_size, tx_next);
     // Set state of PDCP entiy
-    pdcp_tx_state st = {tx_next, tx_next};
+    pdcp_tx_state st = {tx_next, tx_next, tx_next};
     pdcp_tx->set_state(st);
     pdcp_tx->configure_security(sec_cfg, security::integrity_enabled::on, security::ciphering_enabled::on);
 
-    uint32_t sdu_queue_size = 4096;
-    uint32_t window_size    = pdcp_window_size(sn_size);
-    uint32_t stall          = std::min(sdu_queue_size, window_size - 1); // nof SDUs before stalling
+    uint32_t pdu_size             = sn_size == pdcp_sn_size::size12bits ? pdu_size_snlen12 : pdu_size_snlen18;
+    uint32_t rlc_queue_size       = 16;
+    uint32_t rlc_queue_size_bytes = rlc_queue_size * pdu_size;
+    pdcp_tx->handle_desired_buffer_size_notification(rlc_queue_size_bytes);
+    uint32_t window_size = pdcp_window_size(sn_size);
+    uint32_t stall       = std::min(rlc_queue_size, window_size - 1); // nof SDUs before stalling
 
     // Write SDU
     for (uint32_t count = tx_next; count < tx_next + stall; ++count) {
@@ -360,8 +486,9 @@ TEST_P(pdcp_tx_test, pdu_stall_with_discard)
       ASSERT_EQ(test_frame.pdu_queue.size(), 0);
     }
     {
-      // Notify transmission of all PDUs
+      // Notify transmission and delivery of all PDUs
       pdcp_tx->handle_transmit_notification(pdcp_compute_sn(tx_next + 2 * stall - 1, sn_size));
+      pdcp_tx->handle_delivery_notification(pdcp_compute_sn(tx_next + 2 * stall - 1, sn_size));
 
       // Write an SDU that should not be dropped
       byte_buffer sdu = byte_buffer::create(sdu1).value();
@@ -403,7 +530,7 @@ TEST_P(pdcp_tx_test, count_wraparound)
 
   auto test_max_count = [this, n_sdus](uint32_t tx_next) {
     // Set state of PDCP entiy
-    pdcp_tx_state st = {tx_next, tx_next};
+    pdcp_tx_state st = {tx_next, tx_next, tx_next};
     pdcp_tx->set_state(st);
     pdcp_tx->configure_security(sec_cfg, security::integrity_enabled::on, security::ciphering_enabled::on);
 
@@ -428,43 +555,13 @@ TEST_P(pdcp_tx_test, count_wraparound)
   }
 }
 
-/// \brief Test correct discard when RLC SDU queue is full
-TEST_P(pdcp_tx_test_short_rlc_queue, discard_on_full_rlc_sdu_queue)
-{
-  init(GetParam());
-  pdcp_tx->configure_security(sec_cfg, security::integrity_enabled::on, security::ciphering_enabled::on);
-
-  byte_buffer sdu = byte_buffer::create(sdu1).value();
-
-  // Fill the RLC SDU queue
-  for (uint32_t i = 0; i < config.custom.rlc_sdu_queue; i++) {
-    pdcp_tx->handle_sdu(sdu.deep_copy().value());
-    ASSERT_EQ(test_frame.pdu_queue.size(), 1);
-    test_frame.pdu_queue.pop();
-  }
-
-  // Any further SDUs should be discarded and not forwarded to lower layers
-  pdcp_tx->handle_sdu(sdu.deep_copy().value());
-  ASSERT_TRUE(test_frame.pdu_queue.empty());
-
-  // Make room for one more SDU and check if one PDU will be passed to lower layers
-  pdcp_tx->handle_transmit_notification(0);
-  pdcp_tx->handle_sdu(sdu.deep_copy().value());
-  ASSERT_EQ(test_frame.pdu_queue.size(), 1);
-  test_frame.pdu_queue.pop();
-
-  // Any further SDUs should be discarded and not forwarded to lower layers
-  pdcp_tx->handle_sdu(sdu.deep_copy().value());
-  ASSERT_TRUE(test_frame.pdu_queue.empty());
-}
-
 ///////////////////////////////////////////////////////////////////
 // Finally, instantiate all testcases for each supported SN size //
 ///////////////////////////////////////////////////////////////////
 std::string test_param_info_to_string(const ::testing::TestParamInfo<std::tuple<pdcp_sn_size, unsigned>>& info)
 {
   fmt::memory_buffer buffer;
-  fmt::format_to(buffer,
+  fmt::format_to(std::back_inserter(buffer),
                  "{}bit_nia{}_nea{}",
                  pdcp_sn_size_to_uint(std::get<pdcp_sn_size>(info.param)),
                  std::get<unsigned>(info.param),
@@ -474,12 +571,6 @@ std::string test_param_info_to_string(const ::testing::TestParamInfo<std::tuple<
 
 INSTANTIATE_TEST_SUITE_P(pdcp_tx_test_all_sn_sizes,
                          pdcp_tx_test,
-                         ::testing::Combine(::testing::Values(pdcp_sn_size::size12bits, pdcp_sn_size::size18bits),
-                                            ::testing::Values(1, 2, 3)),
-                         test_param_info_to_string);
-
-INSTANTIATE_TEST_SUITE_P(pdcp_tx_test_all_sn_sizes,
-                         pdcp_tx_test_short_rlc_queue,
                          ::testing::Combine(::testing::Values(pdcp_sn_size::size12bits, pdcp_sn_size::size18bits),
                                             ::testing::Values(1, 2, 3)),
                          test_param_info_to_string);

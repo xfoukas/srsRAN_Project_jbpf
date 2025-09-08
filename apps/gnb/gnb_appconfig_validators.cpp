@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -21,9 +21,10 @@
  */
 
 #include "gnb_appconfig_validators.h"
-#include "apps/services/logger/logger_appconfig_validator.h"
-#include "apps/units/cu_cp/cu_cp_unit_config.h"
-#include "apps/units/flexible_du/du_high/du_high_config.h"
+#include "apps/helpers/logger/logger_appconfig_validator.h"
+#include "apps/services/worker_manager/worker_manager_appconfig_validator.h"
+#include "apps/units/flexible_o_du/o_du_high/du_high/du_high_config.h"
+#include "apps/units/o_cu_cp/cu_cp/cu_cp_unit_config.h"
 
 using namespace srsran;
 
@@ -34,11 +35,6 @@ static bool validate_hal_config(const std::optional<hal_appconfig>& config)
     fmt::print("It is mandatory to fill the EAL configuration arguments to initialize DPDK correctly\n");
     return false;
   }
-#else
-  if (config) {
-    fmt::print("Unable to use DPDK as the application was not compiled with DPDK support\n");
-    return false;
-  }
 #endif
   return true;
 }
@@ -46,6 +42,10 @@ static bool validate_hal_config(const std::optional<hal_appconfig>& config)
 bool srsran::validate_appconfig(const gnb_appconfig& config)
 {
   if (!validate_logger_appconfig(config.log_cfg)) {
+    return false;
+  }
+
+  if (!validate_expert_execution_appconfig(config.expert_execution_cfg)) {
     return false;
   }
 

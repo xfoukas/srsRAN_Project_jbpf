@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -78,10 +78,10 @@ public:
   }
 
   /// Returns the type 1 parameters.
-  const cplane_section_type1_parameters& get_type1_param() const { return type1_params; };
+  const cplane_section_type1_parameters& get_type1_param() const { return type1_params; }
 
   /// Returns the type 3 parameters.
-  const cplane_section_type3_parameters& get_type3_param() const { return type3_params; };
+  const cplane_section_type3_parameters& get_type3_param() const { return type3_params; }
 };
 
 } // namespace
@@ -93,10 +93,18 @@ protected:
   ether::vlan_frame_params                          vlan_params     = {{0, 0, 0, 0, 0, 1}, {0, 0, 0, 0, 0, 2}, 4, 8896};
   ru_compression_params                             dl_compr_params = {compression_type::none, 16};
   ru_compression_params                             ul_compr_params = {compression_type::BFP, 9};
-  ru_compression_params                             prach_compr_params = {compression_type::BFP, 8};
+  ru_compression_params                             prach_compr_params    = {compression_type::BFP, 8};
+  cplane_fft_size                                   c_plane_prach_fft_len = cplane_fft_size::fft_4096;
   std::shared_ptr<uplink_cplane_context_repository> ul_cplane_context_repo =
       std::make_shared<uplink_cplane_context_repository>(58);
-  std::shared_ptr<ether::eth_frame_pool>    frame_pool = std::make_shared<ether::eth_frame_pool>(units::bytes(9000), 2);
+  std::shared_ptr<uplink_cplane_context_repository> prach_cplane_context_repo =
+      std::make_shared<uplink_cplane_context_repository>(58);
+  std::shared_ptr<ether::eth_frame_pool> frame_pool =
+      std::make_shared<ether::eth_frame_pool>(srslog::fetch_basic_logger("TEST"),
+                                              units::bytes(9000),
+                                              2,
+                                              ofh::message_type::control_plane,
+                                              ofh::data_direction::downlink);
   ether::testing::vlan_frame_builder_spy*   vlan_builder;
   ecpri::testing::packet_builder_spy*       ecpri_builder;
   cplane_message_builder_spy*               cplane_builder;
@@ -113,10 +121,11 @@ private:
   {
     data_flow_cplane_scheduling_commands_impl_config config;
 
-    config.ru_nof_prbs        = ru_nof_prbs;
-    config.dl_compr_params    = dl_compr_params;
-    config.ul_compr_params    = ul_compr_params;
-    config.prach_compr_params = prach_compr_params;
+    config.ru_nof_prbs           = ru_nof_prbs;
+    config.dl_compr_params       = dl_compr_params;
+    config.ul_compr_params       = ul_compr_params;
+    config.prach_compr_params    = prach_compr_params;
+    config.c_plane_prach_fft_len = c_plane_prach_fft_len;
 
     return config;
   }
@@ -125,9 +134,10 @@ private:
   {
     data_flow_cplane_scheduling_commands_impl_dependencies dependencies;
 
-    dependencies.ul_cplane_context_repo = ul_cplane_context_repo;
-    dependencies.frame_pool             = frame_pool;
-    dependencies.logger                 = &srslog::fetch_basic_logger("TEST");
+    dependencies.ul_cplane_context_repo    = ul_cplane_context_repo;
+    dependencies.prach_cplane_context_repo = prach_cplane_context_repo;
+    dependencies.frame_pool                = frame_pool;
+    dependencies.logger                    = &srslog::fetch_basic_logger("TEST");
     {
       auto temp               = std::make_unique<cplane_message_builder_spy>();
       cplane_builder          = temp.get();
@@ -274,26 +284,21 @@ TEST_F(data_flow_cplane_scheduling_commands_impl_fixture,
   data_flow.enqueue_section_type_1_message(context);
 
   // Assert that an entry was created for the uplink Control-Plane message.
-  auto repo_context = ul_cplane_context_repo->get(context.slot, 0, context.filter_type, context.eaxc);
-  ASSERT_TRUE(repo_context.has_value());
+  auto repo_context = ul_cplane_context_repo->get(context.slot, context.eaxc);
 
   // Check radio header.
-  const cplane_radio_application_header& radio_hdr = repo_context.value().radio_hdr;
-  ASSERT_EQ(radio_hdr.direction, context.direction);
-  ASSERT_EQ(radio_hdr.slot, context.slot);
-  ASSERT_EQ(radio_hdr.filter_index, context.filter_type);
+  ASSERT_EQ(repo_context.filter_index, context.filter_type);
   // Always start in symbol 0.
-  ASSERT_EQ(radio_hdr.start_symbol, 0);
+  ASSERT_EQ(repo_context.start_symbol, 0);
 
-  ASSERT_EQ(repo_context.value().nof_symbols, context.symbol_range.length());
-  ASSERT_EQ(repo_context.value().nof_prb, ru_nof_prbs);
-  ASSERT_EQ(repo_context.value().prb_start, 0);
+  ASSERT_EQ(repo_context.nof_symbols, context.symbol_range.length());
+  ASSERT_EQ(repo_context.nof_prb, ru_nof_prbs);
+  ASSERT_EQ(repo_context.prb_start, 0);
 
-  // Check that the context can be found for all the configured symbols.
+  // Check that the context is valid for all the configured symbols.
+  auto up_repo_context = ul_cplane_context_repo->get(context.slot, context.eaxc);
   for (unsigned i = 0, e = context.symbol_range.length(); i != e; ++i) {
-    auto up_repo_context = ul_cplane_context_repo->get(context.slot, i, context.filter_type, context.eaxc);
-
-    ASSERT_TRUE(up_repo_context.has_value());
+    ASSERT_TRUE(i < up_repo_context.start_symbol + up_repo_context.nof_symbols);
   }
 }
 
@@ -406,25 +411,21 @@ TEST_F(data_flow_cplane_scheduling_commands_impl_fixture,
   data_flow.enqueue_section_type_3_prach_message(context);
 
   // Assert that an entry was created for the uplink Control-Plane message.
-  auto repo_context = ul_cplane_context_repo->get(context.slot, 0, context.filter_type, context.eaxc);
-  ASSERT_TRUE(repo_context.has_value());
+  auto repo_context = prach_cplane_context_repo->get(context.slot, context.eaxc);
 
   // Check radio header.
-  const cplane_radio_application_header& radio_hdr = repo_context.value().radio_hdr;
-  ASSERT_EQ(radio_hdr.direction, data_direction::uplink);
-  ASSERT_EQ(radio_hdr.slot, context.slot);
-  ASSERT_EQ(radio_hdr.filter_index, context.filter_type);
+  ASSERT_EQ(repo_context.filter_index, context.filter_type);
   // Always start in symbol 0.
-  ASSERT_EQ(radio_hdr.start_symbol, context.start_symbol);
+  ASSERT_EQ(repo_context.start_symbol, context.start_symbol);
 
-  ASSERT_EQ(repo_context.value().nof_symbols, context.nof_repetitions);
-  ASSERT_EQ(repo_context.value().nof_prb, context.prach_nof_rb);
-  ASSERT_EQ(repo_context.value().prb_start, 0);
+  ASSERT_EQ(repo_context.nof_symbols, context.nof_repetitions);
+  ASSERT_EQ(repo_context.nof_prb, context.prach_nof_rb);
+  ASSERT_EQ(repo_context.prb_start, 0);
 
   // Check that the context can be found for all the configured symbols.
   for (unsigned i = 0, e = context.nof_repetitions; i != e; ++i) {
-    auto ctxt = ul_cplane_context_repo->get(context.slot, i, context.filter_type, context.eaxc);
+    auto ctxt = prach_cplane_context_repo->get(context.slot, context.eaxc);
 
-    ASSERT_TRUE(ctxt.has_value());
+    ASSERT_TRUE(i < ctxt.start_symbol + ctxt.nof_symbols);
   }
 }

@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -24,6 +24,7 @@
 #include "../support/dmrs_helpers.h"
 #include "../support/pdsch/pdsch_default_time_allocation.h"
 #include "../support/prbs_calculator.h"
+#include "srsran/ran/band_helper.h"
 #include "srsran/ran/duplex_mode.h"
 #include "srsran/ran/prach/prach_configuration.h"
 #include "srsran/ran/prach/prach_frequency_mapping.h"
@@ -58,8 +59,8 @@ static error_type<std::string> validate_pdcch_cfg_common(const sched_cell_config
         msg.dl_cfg_common.init_dl_bwp.pdcch_common.coreset0.has_value() ? ss.get_coreset_id() == 0 : false;
     VERIFY(cset_id_exits_in_common or cset_id_exits_in_cset0,
            "Coreset Id. {} indexed by SearchSpace Id. {} not found within the configured Common Coresets",
-           ss.get_coreset_id(),
-           ss.get_id());
+           fmt::underlying(ss.get_coreset_id()),
+           fmt::underlying(ss.get_id()));
   }
 
   return {};
@@ -78,18 +79,18 @@ static error_type<std::string> validate_rach_cfg_common(const sched_cell_configu
   VERIFY((unsigned)mcs_descr.modulation < (unsigned)modulation_scheme::QAM64,
          "Modulation order for PDSCH scheduled with RA-RNTI cannot be > 2");
 
-  duplex_mode dplx_mode = band_helper::get_duplex_mode(msg.dl_carrier.band);
+  frequency_range freq_range = band_helper::get_freq_range(msg.dl_carrier.band);
+  duplex_mode     dplx_mode  = band_helper::get_duplex_mode(msg.dl_carrier.band);
 
   // Check PRACH config index.
-  auto code = prach_helper::prach_config_index_is_valid(rach_cfg_cmn.rach_cfg_generic.prach_config_index, dplx_mode);
+  auto code = prach_helper::prach_config_index_is_valid(
+      rach_cfg_cmn.rach_cfg_generic.prach_config_index, freq_range, dplx_mode);
   if (not code.has_value()) {
     return code;
   }
 
   const prach_configuration prach_cfg =
-      prach_configuration_get(frequency_range::FR1,
-                              msg.tdd_ul_dl_cfg_common.has_value() ? duplex_mode::TDD : duplex_mode::FDD,
-                              rach_cfg_cmn.rach_cfg_generic.prach_config_index);
+      prach_configuration_get(freq_range, dplx_mode, rach_cfg_cmn.rach_cfg_generic.prach_config_index);
   VERIFY(prach_cfg.format < prach_format_type::invalid, "Invalid PRACH format");
 
   subcarrier_spacing pusch_scs = msg.ul_cfg_common.init_ul_bwp.generic_params.scs;
@@ -113,36 +114,63 @@ static error_type<std::string> validate_rach_cfg_common(const sched_cell_configu
   // Check zero correlation zone validity.
   code = prach_helper::zero_correlation_zone_is_valid(rach_cfg_cmn.rach_cfg_generic.zero_correlation_zone_config,
                                                       rach_cfg_cmn.rach_cfg_generic.prach_config_index,
+                                                      freq_range,
                                                       dplx_mode);
   if (not code.has_value()) {
     return code;
   }
 
-  prach_subcarrier_spacing prach_scs      = is_long_preamble(prach_cfg.format)
-                                                ? get_prach_preamble_long_info(prach_cfg.format).scs
-                                                : to_ra_subcarrier_spacing(pusch_scs);
-  const unsigned           prach_nof_prbs = prach_frequency_mapping_get(prach_scs, pusch_scs).nof_rb_ra;
-  for (unsigned id_fd_ra = 0; id_fd_ra != rach_cfg_cmn.rach_cfg_generic.msg1_fdm; ++id_fd_ra) {
-    uint8_t      prb_start  = rach_cfg_cmn.rach_cfg_generic.msg1_frequency_start + id_fd_ra * prach_nof_prbs;
-    prb_interval prach_prbs = {prb_start, prb_start + prach_nof_prbs};
+  return {};
+}
 
-    for (const auto& pucch_region : msg.pucch_guardbands) {
-      if (pucch_region.prbs.overlaps(prach_prbs))
-        fmt::print("Warning: Configured PRACH occasion collides with PUCCH RBs ({} intersects {}). Some interference "
-                   "between PUCCH and PRACH is expected.\n",
-                   pucch_region.prbs,
-                   prach_prbs);
-      break;
-    }
+static error_type<std::string> validate_pusch_cfg_common(const sched_cell_configuration_request_message& msg)
+{
+  using res_t = pusch_time_domain_resource_allocation;
+
+  if (not msg.ul_cfg_common.init_ul_bwp.pusch_cfg_common.has_value()) {
+    return {};
   }
 
+  const auto& pusch_lst = msg.ul_cfg_common.init_ul_bwp.pusch_cfg_common.value().pusch_td_alloc_list;
+
+  // Verify that PUSCH TD resource list is sorted by k2.
+  bool sorted = std::is_sorted(pusch_lst.begin(), pusch_lst.end(), [](const res_t& l, const res_t& r) {
+    return l.k2 < r.k2 or (l.k2 == r.k2 and l.symbols.length() >= r.symbols.length());
+  });
+  VERIFY(sorted, "List of PUSCH TD resources should be sorted by k2 values");
+
+  for (const auto& pusch : pusch_lst) {
+    VERIFY(pusch.k2 <= SCHEDULER_MAX_K2, "k2={} value exceeds maximum supported k2", pusch.k2);
+  }
+
+  if (msg.tdd_ul_dl_cfg_common.has_value()) {
+    const auto&    tdd          = msg.tdd_ul_dl_cfg_common.value();
+    const unsigned period_slots = nof_slots_per_tdd_period(tdd);
+
+    // For each PUSCH slot, verify that there is a valid k2.
+    unsigned                next_slot = 0;
+    std::optional<unsigned> ul_slot   = find_next_tdd_full_ul_slot(tdd, next_slot);
+    while (ul_slot.has_value()) {
+      if (std::none_of(pusch_lst.begin(), pusch_lst.end(), [&tdd, period_slots, sl = ul_slot.value()](const auto& p) {
+            unsigned slot_idx = period_slots + sl - p.k2;
+            return has_active_tdd_dl_symbols(tdd, slot_idx);
+          })) {
+        return make_unexpected(fmt::format("Failed to find valid k2 candidate for slot={}", ul_slot.value()));
+      }
+      next_slot = ul_slot.value() + 1;
+      ul_slot   = find_next_tdd_full_ul_slot(tdd, next_slot);
+    }
+  }
   return {};
 }
 
 static error_type<std::string> validate_pucch_cfg_common(const sched_cell_configuration_request_message& msg)
 {
+  VERIFY(msg.ul_cfg_common.init_ul_bwp.pucch_cfg_common.has_value(),
+         "Cells without PUCCH-ConfigCommon are not supported");
   for (const auto& pucch_guard : msg.pucch_guardbands) {
-    VERIFY(msg.ul_cfg_common.init_ul_bwp.generic_params.crbs.contains(pucch_guard.prbs),
+    const auto bwp_crbs = msg.ul_cfg_common.init_ul_bwp.generic_params.crbs;
+    VERIFY(bwp_crbs.contains(prb_to_crb(bwp_crbs, pucch_guard.prbs)),
            "PUCCH guardbands={} fall outside of the initial BWP RBs={}",
            pucch_guard.prbs,
            msg.ul_cfg_common.init_ul_bwp.generic_params.crbs);
@@ -169,7 +197,7 @@ static error_type<std::string> validate_sib1_cfg(const sched_cell_configuration_
   // See TS 38.214, 5.1.3.1, Modulation order and target code rate determination.
   VERIFY((unsigned)mcs_descr.modulation < (unsigned)modulation_scheme::QAM64,
          "Modulation order for PDSCH scheduled with SI-RNTI cannot be > 2");
-  const sch_prbs_tbs sib1_prbs_tbs = get_nof_prbs(prbs_calculator_sch_config{msg.sib1_payload_size,
+  const sch_prbs_tbs sib1_prbs_tbs = get_nof_prbs(prbs_calculator_sch_config{msg.sib1_payload_size.value(),
                                                                              (unsigned)sib1_symbols.length(),
                                                                              calculate_nof_dmrs_per_rb(dmrs_info),
                                                                              nof_oh_prb,
@@ -205,23 +233,18 @@ error_type<std::string> srsran::config_validators::validate_sched_cell_configura
     const sched_cell_configuration_request_message& msg,
     const scheduler_expert_config&                  expert_cfg)
 {
-  VERIFY(msg.cell_index < MAX_NOF_DU_CELLS, "cell index={} is not valid", msg.cell_index);
+  VERIFY(msg.cell_index < MAX_NOF_DU_CELLS, "cell index={} is not valid", fmt::underlying(msg.cell_index));
 
   const auto& dl_lst = msg.dl_cfg_common.init_dl_bwp.pdsch_common.pdsch_td_alloc_list;
   for (const auto& pdsch : dl_lst) {
     VERIFY(pdsch.k0 <= SCHEDULER_MAX_K0, "k0={} value exceeds maximum supported k0", pdsch.k0);
   }
 
-  if (msg.ul_cfg_common.init_ul_bwp.pusch_cfg_common.has_value()) {
-    const auto& ul_lst = msg.ul_cfg_common.init_ul_bwp.pusch_cfg_common.value().pusch_td_alloc_list;
-    for (const auto& pusch : ul_lst) {
-      VERIFY(pusch.k2 <= SCHEDULER_MAX_K2, "k2={} value exceeds maximum supported k2", pusch.k2);
-    }
-  }
-
   HANDLE_CODE(validate_pdcch_cfg_common(msg));
 
   HANDLE_CODE(validate_rach_cfg_common(msg, expert_cfg));
+
+  HANDLE_CODE(validate_pusch_cfg_common(msg));
 
   HANDLE_CODE(validate_pucch_cfg_common(msg));
 

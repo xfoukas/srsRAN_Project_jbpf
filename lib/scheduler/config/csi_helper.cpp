@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -49,15 +49,25 @@ csi_resource_periodicity srsran::csi_helper::get_max_csi_rs_period(subcarrier_sp
   return max_csi_period;
 }
 
-SRSRAN_NODISCARD bool srsran::csi_helper::is_csi_rs_period_valid(csi_resource_periodicity       csi_rs_period,
-                                                                 const tdd_ul_dl_config_common& tdd_cfg)
+bool srsran::csi_helper::is_csi_rs_period_valid(csi_resource_periodicity       csi_rs_period,
+                                                const tdd_ul_dl_config_common& tdd_cfg)
 {
+  // The CSI-RS period must be multiple of the TDD period.
   const unsigned tdd_period = nof_slots_per_tdd_period(tdd_cfg);
   if (static_cast<unsigned>(csi_rs_period) % tdd_period != 0) {
     return false;
   }
-  span<const csi_resource_periodicity> csi_options = csi_resource_periodicity_options();
-  return std::find(csi_options.begin(), csi_options.end(), csi_rs_period) != csi_options.end();
+
+  // According to TS38.214, Section 5.1.6.1.1, a UE expects periods of 10, 20, 40, or 80 milliseconds in CSI-RS for
+  // tracking.
+  unsigned                      nof_slots_per_subframe = get_nof_slots_per_subframe(tdd_cfg.ref_scs);
+  const std::array<unsigned, 4> csi_opt_msec           = {10 * nof_slots_per_subframe,
+                                                          20 * nof_slots_per_subframe,
+                                                          40 * nof_slots_per_subframe,
+                                                          80 * nof_slots_per_subframe};
+
+  return std::find(csi_opt_msec.begin(), csi_opt_msec.end(), csi_resource_periodicity_to_uint(csi_rs_period)) !=
+         csi_opt_msec.end();
 }
 
 std::optional<csi_resource_periodicity>
@@ -81,46 +91,58 @@ srsran::csi_helper::find_valid_csi_rs_period(const tdd_ul_dl_config_common& tdd_
   return *rit;
 }
 
-// Verifies wether a CSI-RS slot offset falls in an UL slot and does not collide with SIB1 and SSB.
-static bool is_csi_slot_offset_valid(unsigned slot_offset, const tdd_ul_dl_config_common& tdd_cfg)
+// Verifies whether a CSI-RS slot offset falls in an UL slot and does not collide with SIB1 and SSB.
+static bool is_csi_slot_offset_valid(unsigned                       slot_offset,
+                                     const tdd_ul_dl_config_common& tdd_cfg,
+                                     unsigned                       max_csi_symbol_index,
+                                     unsigned                       ssb_period_ms)
 {
-  static const unsigned SSB_PERIOD = 10, SIB1_PERIOD = 160, SIB1_OFFSET = 1, MIN_NOF_DL_SYMBOLS = 8;
+  // TODO: this is true for SSB pattern 1000 or 10000000.
+  static constexpr unsigned SSB_SLOT = 0U;
+  // TODO: import sib1_period from expert config and SIB1_OFFSET from SIB1 config.
+  static constexpr unsigned SIB1_PERIOD_MS = 160, SIB1_OFFSET = 1;
+
+  const unsigned ssb_period_slots  = ssb_period_ms * get_nof_slots_per_subframe(tdd_cfg.ref_scs);
+  const unsigned sib1_period_slots = SIB1_PERIOD_MS * get_nof_slots_per_subframe(tdd_cfg.ref_scs);
+
   // TODO: Use non-hard coded values.
-  if ((slot_offset % SSB_PERIOD == 0) or (slot_offset % SIB1_PERIOD == SIB1_OFFSET)) {
+  if ((slot_offset % ssb_period_slots == SSB_SLOT) or (slot_offset % sib1_period_slots == SIB1_OFFSET)) {
     return false;
   }
 
   const unsigned slot_index = slot_offset % (get_nof_slots_per_subframe(tdd_cfg.ref_scs) * NOF_SUBFRAMES_PER_FRAME);
-  return get_active_tdd_dl_symbols(tdd_cfg, slot_index, cyclic_prefix::NORMAL).length() > MIN_NOF_DL_SYMBOLS;
+  return get_active_tdd_dl_symbols(tdd_cfg, slot_index, cyclic_prefix::NORMAL).length() > max_csi_symbol_index;
 }
 
 bool srsran::csi_helper::derive_valid_csi_rs_slot_offsets(csi_builder_params&            csi_params,
                                                           const std::optional<unsigned>& meas_csi_slot_offset,
                                                           const std::optional<unsigned>& tracking_csi_slot_offset,
                                                           const std::optional<unsigned>& zp_csi_slot_offset,
-                                                          const tdd_ul_dl_config_common& tdd_cfg)
+                                                          const tdd_ul_dl_config_common& tdd_cfg,
+                                                          unsigned                       max_csi_symbol_index,
+                                                          unsigned                       ssb_period_ms)
 {
   srsran_assert(is_csi_rs_period_valid(csi_params.csi_rs_period, tdd_cfg),
                 "Invalid CSI-RS period {} for provided TDD pattern",
-                csi_params.csi_rs_period);
+                fmt::underlying(csi_params.csi_rs_period));
 
   // Fill the pre-specified parameters and verify if valid.
   if (meas_csi_slot_offset.has_value()) {
-    if (not is_csi_slot_offset_valid(*meas_csi_slot_offset, tdd_cfg)) {
+    if (not is_csi_slot_offset_valid(*meas_csi_slot_offset, tdd_cfg, max_csi_symbol_index, ssb_period_ms)) {
       return false;
     }
     csi_params.meas_csi_slot_offset = *meas_csi_slot_offset;
   }
   if (tracking_csi_slot_offset.has_value()) {
     // Tracking CSI-RS uses two consecutive slots.
-    if (not is_csi_slot_offset_valid(*tracking_csi_slot_offset, tdd_cfg) or
-        not is_csi_slot_offset_valid(*tracking_csi_slot_offset + 1, tdd_cfg)) {
+    if (not is_csi_slot_offset_valid(*tracking_csi_slot_offset, tdd_cfg, max_csi_symbol_index, ssb_period_ms) or
+        not is_csi_slot_offset_valid(*tracking_csi_slot_offset + 1, tdd_cfg, max_csi_symbol_index, ssb_period_ms)) {
       return false;
     }
     csi_params.tracking_csi_slot_offset = *tracking_csi_slot_offset;
   }
   if (zp_csi_slot_offset.has_value()) {
-    if (not is_csi_slot_offset_valid(*zp_csi_slot_offset, tdd_cfg)) {
+    if (not is_csi_slot_offset_valid(*zp_csi_slot_offset, tdd_cfg, max_csi_symbol_index, ssb_period_ms)) {
       return false;
     }
     csi_params.zp_csi_slot_offset = *zp_csi_slot_offset;
@@ -138,11 +160,11 @@ bool srsran::csi_helper::derive_valid_csi_rs_slot_offsets(csi_builder_params&   
   bool meas_found     = meas_csi_slot_offset.has_value() or zp_csi_slot_offset.has_value();
   for (unsigned i = 0; i < static_cast<unsigned>(csi_params.csi_rs_period) and (not meas_found or not tracking_found);
        ++i) {
-    if (not is_csi_slot_offset_valid(i, tdd_cfg)) {
+    if (not is_csi_slot_offset_valid(i, tdd_cfg, max_csi_symbol_index, ssb_period_ms)) {
       continue;
     }
     // Note: Tracking CSI-RS occupies two consecutive slots.
-    if (not tracking_found and is_csi_slot_offset_valid(i + 1, tdd_cfg) and
+    if (not tracking_found and is_csi_slot_offset_valid(i + 1, tdd_cfg, max_csi_symbol_index, ssb_period_ms) and
         (not meas_found or (i != csi_params.meas_csi_slot_offset and (i + 1) != csi_params.meas_csi_slot_offset and
                             i != csi_params.zp_csi_slot_offset and (i + 1) != csi_params.zp_csi_slot_offset))) {
       tracking_found                      = true;
@@ -175,9 +197,9 @@ static zp_csi_rs_resource make_default_zp_csi_rs_resource(const csi_builder_para
   // Freq Alloc -> Row4.
   res.res_mapping.nof_ports = 4;
   res.res_mapping.fd_alloc.resize(3);
-  res.res_mapping.fd_alloc.set(2, true);
+  res.res_mapping.fd_alloc.set(params.pci % res.res_mapping.fd_alloc.size(), true);
   res.res_mapping.cdm                     = csi_rs_cdm_type::fd_CDM2;
-  res.res_mapping.first_ofdm_symbol_in_td = params.csi_ofdm_symbol_index;
+  res.res_mapping.first_ofdm_symbol_in_td = params.zp_csi_ofdm_symbol_index;
   res.res_mapping.freq_density            = csi_rs_freq_density_type::one;
   res.res_mapping.freq_band_rbs           = get_csi_freq_occupation_rbs(params.nof_rbs, params.nof_rbs);
   res.period                              = params.csi_rs_period;
@@ -285,33 +307,45 @@ static nzp_csi_rs_resource make_channel_measurement_nzp_csi_rs_resource(const cs
 
   res.res_id                              = static_cast<nzp_csi_rs_res_id_t>(0);
   res.csi_res_offset                      = params.meas_csi_slot_offset;
-  res.res_mapping.first_ofdm_symbol_in_td = 4;
+  res.res_mapping.first_ofdm_symbol_in_td = params.cm_csi_ofdm_symbol_index;
   res.res_mapping.nof_ports               = params.nof_ports;
   res.res_mapping.freq_density            = csi_rs_freq_density_type::one;
 
+  // Select the amount of frequency-domain resources and the CDM configuration depending on the number of transmit
+  // ports.
   if (params.nof_ports == 1) {
-    // Freq Alloc -> Row2 (size 12) = 000000000001
+    // Code multiplexing is not necessary when only one port is used. This makes it possible to have twelve possible
+    // frequency domain allocations.
     res.res_mapping.fd_alloc.resize(12);
-    res.res_mapping.fd_alloc.set(11, true);
     res.res_mapping.cdm = csi_rs_cdm_type::no_CDM;
   } else if (params.nof_ports == 2) {
-    // Freq Alloc -> Row Other (size 6) = 000001
+    // Code multiplexing of two resource elements is used when two transmitted ports are used. This allows six possible
+    // frequency domain locations.
     res.res_mapping.fd_alloc.resize(6);
-    res.res_mapping.fd_alloc.set(5, true);
     res.res_mapping.cdm = csi_rs_cdm_type::fd_CDM2;
   } else if (params.nof_ports == 4) {
-    // Freq Alloc -> Row 4 (size 3) = 001
+    // Code multiplexing of four resource elements is used when four transmitted ports are used. This allows three
+    // possible frequency domain locations.
     res.res_mapping.fd_alloc.resize(3);
-    res.res_mapping.fd_alloc.set(2, true);
     res.res_mapping.cdm = csi_rs_cdm_type::fd_CDM2;
   } else {
+    // Another number of ports is not currently supported.
     report_error("Number of ports {} not supported", params.nof_ports);
   }
+
+  // [Implementation-defined] Select the frequency domain allocation in function of the PCI to avoid that NZP-CSI-RS
+  // from neighbor cells overlap.
+  res.res_mapping.fd_alloc.set(params.pci % res.res_mapping.fd_alloc.size());
 
   return res;
 }
 
-/// \brief Generate Tracking NZP-CSI-RS resource.
+/// \brief Generate Tracking Reference Signal (TRS) resource set.
+///
+/// The TRS resource set contains four NZP-CSI-RS resources. The resources are mapped on two consecutive slots.
+///
+/// The NZP-CSI-RS resources selected for TRS are constrained by TS38.214 Section 5.1.6.1.1 which specifies the number
+/// of ports, multiplexing, OFDM symbols to use within the slot, periodicity, and density.
 static void
 fill_tracking_nzp_csi_rs_resource(span<nzp_csi_rs_resource> tracking_csi_rs,
                                   const csi_builder_params& params,
@@ -325,14 +359,18 @@ fill_tracking_nzp_csi_rs_resource(span<nzp_csi_rs_resource> tracking_csi_rs,
   nzp_csi_rs_resource res = make_common_nzp_csi_rs_resource(params);
 
   res.res_mapping.nof_ports    = 1;
-  res.res_mapping.fd_alloc     = {true, false, false, false};
   res.res_mapping.cdm          = csi_rs_cdm_type::no_CDM;
   res.res_mapping.freq_density = csi_rs_freq_density_type::three;
+  res.res_mapping.fd_alloc.resize(4);
+
+  // [Implementation-defined] Select the frequency domain allocation in function of the PCI to avoid that NZP-CSI-RS
+  // from neighbor cells overlap.
+  res.res_mapping.fd_alloc.set(params.pci % res.res_mapping.fd_alloc.size());
 
   static constexpr unsigned rel_slot_offset[] = {0, 0, 1, 1};
   for (unsigned i = 0; i != NOF_TRACKING_RESOURCES; ++i) {
     res.res_id                              = static_cast<nzp_csi_rs_res_id_t>(first_csi_res_id + i);
-    res.res_mapping.first_ofdm_symbol_in_td = params.tracking_csi_ofdm_symbol_indexes[i];
+    res.res_mapping.first_ofdm_symbol_in_td = params.tracking_csi_ofdm_symbol_indices[i];
     res.csi_res_offset                      = params.tracking_csi_slot_offset + rel_slot_offset[i];
     tracking_csi_rs[i]                      = res;
   }
@@ -515,11 +553,16 @@ static std::vector<csi_report_config> make_csi_report_configs(const csi_builder_
     } else {
       report_error("Unsupported number of antenna ports {}", params.nof_ports);
     }
-    // Enable all layer options for the given number of ports. As per TS 38.214, section 5.2.2.2.1, this can be done
-    // by setting the RI restriction bitmap to 0b11...11, where the number of 1s is set to be equal to the number of
-    // ports.
+
+    // Maximum number of layers must be in line with available number of ports.
+    srsran_assert(params.max_nof_layers <= params.nof_ports,
+                  "Maximum number of layers cannot be greater than number of ports");
+
+    // Limit the number of DL layers that can be requested by the UE via the Rank Indicator (RI).
+    // As per TS 38.214, section 5.2.2.2.1, this can be done by setting the RI restriction bitmap to 0b11...11,
+    // where the number of 1s is set to be equal to the number of desired layers.
     single_panel.typei_single_panel_ri_restriction.resize(8);
-    single_panel.typei_single_panel_ri_restriction.from_uint64((1U << params.nof_ports) - 1U);
+    single_panel.typei_single_panel_ri_restriction.from_uint64((1U << params.max_nof_layers) - 1U);
     type1.sub_type                      = single_panel;
     type1.codebook_mode                 = 1;
     reps[0].codebook_cfg->codebook_type = type1;

@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -29,15 +29,18 @@
 using namespace srsran;
 using namespace srs_cu_cp;
 
-ngap_repository::ngap_repository(ngap_repository_config cfg_) : cfg(cfg_), logger(cfg.logger)
+ngap_repository::ngap_repository(ngap_repository_config cfg_) :
+  cfg(cfg_),
+  logger(cfg.logger),
+  amf_task_sched(*cfg.cu_cp.services.timers, *cfg.cu_cp.services.cu_cp_executor, cfg.cu_cp.ngap.ngaps.size(), logger)
 {
-  for (uint16_t amf_idx = 0; amf_idx < cfg.cu_cp.ngaps.size(); amf_idx++) {
-    auto* ngap_entity = add_ngap(uint_to_amf_index(amf_idx), cfg.cu_cp.ngaps.at(amf_idx));
+  for (uint16_t amf_idx = 0; amf_idx < cfg.cu_cp.ngap.ngaps.size(); amf_idx++) {
+    auto* ngap_entity = add_ngap(uint_to_amf_index(amf_idx), cfg.cu_cp.ngap.ngaps.at(amf_idx));
     srsran_assert(ngap_entity != nullptr, "Failed to add NGAP for gateway");
   }
 }
 
-ngap_interface* ngap_repository::add_ngap(amf_index_t amf_index, const cu_cp_configuration::ngap_params& config)
+ngap_interface* ngap_repository::add_ngap(amf_index_t amf_index, const cu_cp_configuration::ngap_config& config)
 {
   // Create NGAP object
   auto it = ngap_db.insert(std::make_pair(amf_index, ngap_context{}));
@@ -47,8 +50,9 @@ ngap_interface* ngap_repository::add_ngap(amf_index_t amf_index, const cu_cp_con
 
   ngap_configuration              ngap_cfg    = {cfg.cu_cp.node.gnb_id,
                                                  cfg.cu_cp.node.ran_node_name,
+                                                 amf_index,
                                                  config.supported_tas,
-                                                 cfg.cu_cp.ue.pdu_session_setup_timeout};
+                                                 cfg.cu_cp.ue.request_pdu_session_timeout};
   std::unique_ptr<ngap_interface> ngap_entity = create_ngap(ngap_cfg,
                                                             ngap_ctxt.ngap_to_cu_cp_notifier,
                                                             *config.n2_gw,
@@ -69,7 +73,7 @@ void ngap_repository::update_plmn_lookup(amf_index_t amf_index)
 {
   auto ngap = ngap_db.find(amf_index);
   if (ngap == ngap_db.end()) {
-    logger.error("NGAP not found for AMF index {}", amf_index);
+    logger.error("NGAP not found for AMF index {}", fmt::underlying(amf_index));
     return;
   }
 
@@ -88,6 +92,15 @@ ngap_interface* ngap_repository::find_ngap(const plmn_identity& plmn)
   return ngap_db.at(plmn_to_amf_index.at(plmn)).ngap.get();
 }
 
+ngap_interface* ngap_repository::find_ngap(const amf_index_t& amf_index)
+{
+  if (ngap_db.find(amf_index) == ngap_db.end()) {
+    return nullptr;
+  }
+
+  return ngap_db.at(amf_index).ngap.get();
+}
+
 std::map<amf_index_t, ngap_interface*> ngap_repository::get_ngaps()
 {
   std::map<amf_index_t, ngap_interface*> ngaps;
@@ -95,6 +108,16 @@ std::map<amf_index_t, ngap_interface*> ngap_repository::get_ngaps()
     ngaps.emplace(amf.first, amf.second.ngap.get());
   }
   return ngaps;
+}
+
+std::vector<ngap_info> ngap_repository::handle_ngap_metrics_report_request() const
+{
+  std::vector<ngap_info> ngap_reports;
+  ngap_reports.reserve(ngap_db.size());
+  for (const auto& ngap : ngap_db) {
+    ngap_reports.emplace_back(ngap.second.ngap->get_metrics_handler().handle_ngap_metrics_report_request());
+  }
+  return ngap_reports;
 }
 
 size_t ngap_repository::get_nof_ngap_ues()

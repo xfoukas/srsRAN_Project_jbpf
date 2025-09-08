@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -28,7 +28,7 @@
 #include "srsran/phy/upper/upper_phy_timing_handler.h"
 #include "srsran/ran/cyclic_prefix.h"
 #include "srsran/ran/pci.h"
-#include "srsran/ran/ssb_mapping.h"
+#include "srsran/ran/ssb/ssb_mapping.h"
 #include "srsran/srslog/logger.h"
 #include <memory>
 #include <string>

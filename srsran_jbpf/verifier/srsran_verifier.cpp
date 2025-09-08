@@ -1,4 +1,7 @@
 
+#include <iostream>
+#include <chrono>
+
 #include "srsran_verifier.hpp"
 #include "jbpf_helper_api_defs_ext.h"
 #include "context_descriptors.hpp"
@@ -66,6 +69,10 @@ srsran_verify(const char* objfile, const char* section, const char* asmfile)
         jbpf_verifier_register_program_type(JBPF_PROG_TYPE_RAN_GENERIC, new_program_type);
     }
     
-    // Load the object file
-    return jbpf_verify(objfile, section, asmfile);
+    auto t1 = std::chrono::high_resolution_clock::now();
+    auto ret = jbpf_verify(objfile, section, asmfile);
+    auto t2 = std::chrono::high_resolution_clock::now();
+    std::chrono::duration<double> t1_t2_secs = t2 - t1;
+    std::cout << "srsRAN Jbpf Verifier: file: " << objfile << ", verification time = " << t1_t2_secs.count() << " secs" << std::endl;
+    return ret;
 }

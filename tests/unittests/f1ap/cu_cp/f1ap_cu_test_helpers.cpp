@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -21,10 +21,12 @@
  */
 
 #include "f1ap_cu_test_helpers.h"
+#include "tests/test_doubles/f1ap/f1ap_test_messages.h"
 #include "srsran/asn1/f1ap/f1ap_pdu_contents_ue.h"
 #include "srsran/asn1/rrc_nr/dl_ccch_msg.h"
 #include "srsran/asn1/rrc_nr/dl_ccch_msg_ies.h"
 #include "srsran/cu_cp/cu_cp_types.h"
+#include "srsran/f1ap/cu_cp/f1ap_cu_configuration_update.h"
 #include "srsran/f1ap/cu_cp/f1ap_cu_factory.h"
 #include "srsran/ran/nr_cgi.h"
 #include "srsran/ran/qos/five_qi.h"
@@ -61,7 +63,7 @@ f1ap_cu_test::~f1ap_cu_test()
 
 f1ap_cu_test::test_ue& f1ap_cu_test::create_ue(gnb_du_ue_f1ap_id_t du_ue_id)
 {
-  f1ap_message msg = generate_init_ul_rrc_message_transfer(
+  f1ap_message msg = test_helpers::generate_init_ul_rrc_message_transfer(
       du_ue_id, to_rnti(0x4601), byte_buffer::create({0x1, 0x2, 0x3, 0x4}).value());
   f1ap->handle_message(msg);
   ue_index_t ue_index = *du_processor_notifier.last_created_ue_index;
@@ -87,7 +89,7 @@ f1ap_cu_test::test_ue& f1ap_cu_test::run_ue_context_setup()
   gnb_du_ue_f1ap_id_t du_ue_id = int_to_gnb_du_ue_f1ap_id(test_rgen::uniform_int<uint32_t>());
 
   // Handle response from DU.
-  f1ap_message response = generate_ue_context_setup_response(cu_ue_id, du_ue_id);
+  f1ap_message response = test_helpers::generate_ue_context_setup_response(cu_ue_id, du_ue_id);
   f1ap->handle_message(response);
 
   srsran_assert(t.ready(), "The procedure should have completed by now");
@@ -159,11 +161,27 @@ srsran::srs_cu_cp::create_ue_context_setup_request(const std::initializer_list<d
     f1ap_drb_to_setup drb_item;
     drb_item.drb_id                                               = drb;
     drb_item.qos_info.drb_qos.alloc_retention_prio.prio_level_arp = 1;
-    drb_item.qos_info.s_nssai.sst                                 = 1;
+    drb_item.qos_info.s_nssai.sst                                 = slice_service_type{1};
     drb_item.mode                                                 = rlc_mode::am;
     drb_item.pdcp_sn_len                                          = pdcp_sn_size::size12bits;
 
     req.drbs_to_be_setup_list.push_back(drb_item);
   }
+  return req;
+}
+
+f1ap_gnb_cu_configuration_update srsran::srs_cu_cp::create_gnb_cu_configuration_update()
+{
+  f1ap_gnb_cu_configuration_update req;
+
+  req.cells_to_be_activated_list = {
+      {nr_cell_global_id_t{plmn_identity::test_value(), nr_cell_identity::create(0).value()}, MIN_PCI},
+      {nr_cell_global_id_t{plmn_identity::test_value(), nr_cell_identity::create(1).value()}, MIN_PCI + 1}};
+
+  req.cells_to_be_deactivated_list = {
+      {nr_cell_global_id_t{plmn_identity::test_value(), nr_cell_identity::create(2).value()}}};
+
+  req.gnb_cu_name = "srs_cu_cp";
+
   return req;
 }

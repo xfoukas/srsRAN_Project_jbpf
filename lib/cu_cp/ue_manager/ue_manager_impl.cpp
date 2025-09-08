@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -21,6 +21,7 @@
  */
 
 #include "ue_manager_impl.h"
+#include "srsran/cu_cp/cu_cp_configuration.h"
 #include "srsran/cu_cp/security_manager_config.h"
 
 #ifdef JBPF_ENABLED
@@ -39,6 +40,7 @@ void cu_cp_ue::stop()
 }
 
 ue_manager::ue_manager(const cu_cp_configuration& cu_cp_cfg) :
+  cu_cp_config(cu_cp_cfg),
   ue_config(cu_cp_cfg.ue),
   up_config(up_resource_manager_cfg{cu_cp_cfg.bearers.drb_config, cu_cp_cfg.admission.max_nof_drbs_per_ue}),
   sec_config(security_manager_config{cu_cp_cfg.security.int_algo_pref_list, cu_cp_cfg.security.enc_algo_pref_list}),
@@ -59,13 +61,18 @@ ue_index_t ue_manager::add_ue(du_index_t                     du_index,
                               std::optional<rnti_t>          rnti,
                               std::optional<du_cell_index_t> pcell_index)
 {
+  if (blocked_plmns.find(plmn) != blocked_plmns.end()) {
+    logger.warning("CU-CP UE creation Failed. Cause: UE connections for PLMN {} are currently not allowed", plmn);
+    return ue_index_t::invalid;
+  }
+
   if (du_index == du_index_t::invalid) {
     logger.warning("CU-CP UE creation Failed. Cause: Invalid DU index={}", du_index);
     return ue_index_t::invalid;
   }
 
   if (du_id.has_value() && du_id.value() == gnb_du_id_t::invalid) {
-    logger.warning("CU-CP UE creation Failed. Cause: Invalid gNB-DU ID={}", du_id.value());
+    logger.warning("CU-CP UE creation Failed. Cause: Invalid gNB-DU ID={}", fmt::underlying(du_id.value()));
     return ue_index_t::invalid;
   }
 
@@ -105,11 +112,20 @@ ue_index_t ue_manager::add_ue(du_index_t                     du_index,
   ue_task_scheduler_impl ue_sched = ue_task_scheds.create_ue_task_sched(new_ue_index);
 
   // Create UE object
-  ues.emplace(
-      std::piecewise_construct,
-      std::forward_as_tuple(new_ue_index),
-      std::forward_as_tuple(
-          new_ue_index, du_index, up_config, sec_config, std::move(ue_sched), plmn, du_id, pci, rnti, pcell_index));
+  ues.emplace(std::piecewise_construct,
+              std::forward_as_tuple(new_ue_index),
+              std::forward_as_tuple(new_ue_index,
+                                    du_index,
+                                    *cu_cp_config.services.timers,
+                                    *cu_cp_config.services.cu_cp_executor,
+                                    up_config,
+                                    sec_config,
+                                    std::move(ue_sched),
+                                    plmn,
+                                    du_id,
+                                    pci,
+                                    rnti,
+                                    pcell_index));
 
   // Add PCI and RNTI to lookup.
   if (pci.has_value() && rnti.has_value()) {
@@ -120,7 +136,7 @@ ue_index_t ue_manager::add_ue(du_index_t                     du_index,
               new_ue_index,
               du_index,
               plmn,
-              du_id.has_value() ? fmt::format(" gnb_du_id={}", du_id.value()) : "",
+              du_id.has_value() ? fmt::format(" gnb_du_id={}", fmt::underlying(du_id.value())) : "",
               pci.has_value() ? fmt::format(" pci={}", pci.value()) : "",
               rnti.has_value() ? fmt::format(" rnti={}", rnti.value()) : "",
               pcell_index.has_value() ? fmt::format(" pcell_index={}", pcell_index.value()) : "");
@@ -171,6 +187,36 @@ void ue_manager::remove_ue(ue_index_t ue_index)
   ues.erase(ue_index);
 
   logger.debug("ue={}: Removed", ue_index);
+}
+
+void ue_manager::add_blocked_plmns(const std::vector<plmn_identity>& plmns)
+{
+  for (const auto& plmn : plmns) {
+    if (blocked_plmns.insert(plmn).second) {
+      logger.info("Blocking new UE connections for PLMN {}", plmn);
+    }
+  }
+}
+
+void ue_manager::remove_blocked_plmns(const std::vector<plmn_identity>& plmns)
+{
+  for (const auto& plmn : plmns) {
+    if (blocked_plmns.erase(plmn)) {
+      logger.info("Re-allowing new UE connections for PLMN {}", plmn);
+    }
+  }
+}
+
+std::vector<cu_cp_ue*> ue_manager::find_ues(plmn_identity plmn)
+{
+  std::vector<cu_cp_ue*> found_ues;
+  for (auto& ue : ues) {
+    if (ue.second.get_ue_context().plmn == plmn) {
+      found_ues.push_back(&ue.second);
+    }
+  }
+
+  return found_ues;
 }
 
 ue_index_t ue_manager::get_ue_index(pci_t pci, rnti_t rnti)
@@ -238,8 +284,12 @@ cu_cp_ue* ue_manager::set_ue_du_context(ue_index_t      ue_index,
   // Add PCI and RNTI to lookup.
   pci_rnti_to_ue_index.emplace(std::make_tuple(pci, rnti), ue_index);
 
-  logger.debug(
-      "ue={}: Updated UE with gnb_du_id={} pci={} rnti={} pcell_index={}", ue_index, du_id, pci, rnti, pcell_index);
+  logger.debug("ue={}: Updated UE with gnb_du_id={} pci={} rnti={} pcell_index={}",
+               fmt::underlying(ue_index),
+               fmt::underlying(du_id),
+               pci,
+               rnti,
+               fmt::underlying(pcell_index));
 
   return &ue;
 }
@@ -277,6 +327,12 @@ std::vector<metrics_report::ue_info> ue_manager::handle_ue_metrics_report_reques
     ue_report.rnti  = ue.second.get_c_rnti();
     ue_report.du_id = ue.second.get_du_id();
     ue_report.pci   = ue.second.get_pci();
+
+    if (ue.second.get_rrc_ue() == nullptr) {
+      ue_report.rrc_connection_state = rrc_state::idle;
+    } else {
+      ue_report.rrc_connection_state = ue.second.get_rrc_ue()->get_rrc_ue_control_message_handler().get_rrc_state();
+    }
   }
 
   return report;

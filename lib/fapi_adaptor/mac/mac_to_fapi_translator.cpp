@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -31,6 +31,9 @@
 #include "srsran/fapi_adaptor/mac/messages/pusch.h"
 #include "srsran/fapi_adaptor/mac/messages/srs.h"
 #include "srsran/fapi_adaptor/mac/messages/ssb.h"
+#include "srsran/mac/mac_cell_timing_context.h"
+#include "srsran/ran/bwp/bwp_configuration.h"
+#include "srsran/scheduler/result/sched_result.h"
 
 #ifdef JBPF_ENABLED
 #include "jbpf_srsran_hooks.h"
@@ -64,7 +67,39 @@ struct pdcch_group {
   }
 };
 
+/// Dummy MAC cell slot handler.
+class mac_cell_slot_handler_dummy : public mac_cell_slot_handler
+{
+public:
+  void handle_slot_indication(const mac_cell_timing_context& context) override
+  {
+    report_error("Dummy MAC cell slot handler cannot handle slot indication");
+  }
+
+  void handle_error_indication(slot_point sl_tx, error_event event) override
+  {
+    report_error("Dummy MAC cell slot handler cannot handle error indication");
+  }
+};
+
 } // namespace
+
+static mac_cell_slot_handler_dummy dummy_cell_handler;
+
+mac_to_fapi_translator::mac_to_fapi_translator(const mac_to_fapi_translator_config&  config,
+                                               mac_to_fapi_translator_dependencies&& dependencies) :
+  sector_id(config.sector_id),
+  cell_nof_prbs(config.cell_nof_prbs),
+  logger(dependencies.logger),
+  msg_gw(dependencies.msg_gw),
+  last_msg_notifier(dependencies.last_msg_notifier),
+  pm_mapper(std::move(dependencies.pm_mapper)),
+  part2_mapper(std::move(dependencies.part2_mapper)),
+  mac_slot_handler(&dummy_cell_handler)
+{
+  srsran_assert(pm_mapper, "Invalid precoding matrix mapper");
+  srsran_assert(part2_mapper, "Invalid Part2 mapper");
+}
 
 template <typename builder_type, typename pdu_type>
 static void add_pdcch_pdus_to_builder(builder_type&                  builder,
@@ -105,11 +140,13 @@ static void add_pdcch_pdus_to_builder(builder_type&                  builder,
   }
 }
 
-static void add_ssb_pdus_to_dl_request(fapi::dl_tti_request_message_builder& builder, span<const dl_ssb_pdu> ssb_pdus)
+static void add_ssb_pdus_to_dl_request(fapi::dl_tti_request_message_builder& builder,
+                                       span<const dl_ssb_pdu>                ssb_pdus,
+                                       slot_point                            slot)
 {
   for (const auto& pdu : ssb_pdus) {
     fapi::dl_ssb_pdu_builder ssb_builder = builder.add_ssb_pdu();
-    convert_ssb_mac_to_fapi(ssb_builder, pdu);
+    convert_ssb_mac_to_fapi(ssb_builder, pdu, slot);
   }
 }
 
@@ -129,6 +166,7 @@ static void add_csi_rs_pdus_to_dl_request(fapi::dl_tti_request_message_builder& 
                                                                      pdu.scrambling_id);
 
     csi_builder.set_bwp_parameters(pdu.bwp_cfg->scs, pdu.bwp_cfg->cp);
+    csi_builder.set_vendor_specific_bwp_parameters(pdu.bwp_cfg->crbs.length(), pdu.bwp_cfg->crbs.start());
 
     csi_builder.set_tx_power_info_parameters(pdu.power_ctrl_offset,
                                              fapi::to_power_control_offset_ss(pdu.power_ctrl_offset_ss));
@@ -189,7 +227,7 @@ void mac_to_fapi_translator::on_new_downlink_scheduler_results(const mac_dl_sche
                             cell_nof_prbs);
 
   // Add SSB PDUs to the DL_TTI.request message.
-  add_ssb_pdus_to_dl_request(builder, dl_res.ssb_pdus);
+  add_ssb_pdus_to_dl_request(builder, dl_res.ssb_pdus, dl_res.slot);
 
   // Add CSI-RS PDUs to the DL_TTI.request message.
   add_csi_rs_pdus_to_dl_request(builder, dl_res.dl_res->csi_rs);
@@ -204,20 +242,20 @@ void mac_to_fapi_translator::on_new_downlink_scheduler_results(const mac_dl_sche
                                *pm_mapper,
                                cell_nof_prbs);
 
-  bool is_pdsch_pdu_present_in_dl_tti = msg.num_pdus_of_each_type[static_cast<size_t>(fapi::dl_pdu_type::PDSCH)] != 0;
-  bool is_ul_dci_present              = dl_res.dl_res->ul_pdcchs.size() != 0;
-
-  if (!is_pdsch_pdu_present_in_dl_tti && !is_ul_dci_present) {
-    builder.set_last_message_in_slot_flag();
-  }
-
   // Validate the DL_TTI.request message.
   error_type<fapi::validator_report> result = validate_dl_tti_request(msg);
 
   if (!result) {
-    log_validator_report(result.error(), logger);
+    log_validator_report(result.error(), logger, sector_id);
 
     clear_dl_tti_pdus(msg);
+
+    mac_cell_slot_handler::error_event error;
+    error.pdcch_discarded           = true;
+    error.pdsch_discarded           = true;
+    error.pusch_and_pucch_discarded = false;
+
+    mac_slot_handler->handle_error_indication(dl_res.slot, error);
   }
 
 #ifdef JBPF_ENABLED
@@ -227,9 +265,7 @@ void mac_to_fapi_translator::on_new_downlink_scheduler_results(const mac_dl_sche
   // Send the message.
   msg_gw.dl_tti_request(msg);
 
-  bool is_ul_dci_last_message_in_slot = !is_pdsch_pdu_present_in_dl_tti && is_ul_dci_present;
-
-  handle_ul_dci_request(dl_res.dl_res->ul_pdcchs, dl_res.ul_pdcch_pdus, dl_res.slot, is_ul_dci_last_message_in_slot);
+  handle_ul_dci_request(dl_res.dl_res->ul_pdcchs, dl_res.ul_pdcch_pdus, dl_res.slot);
 }
 
 void mac_to_fapi_translator::on_new_downlink_data(const mac_dl_data_result& dl_data)
@@ -248,7 +284,7 @@ void mac_to_fapi_translator::on_new_downlink_data(const mac_dl_data_result& dl_d
 
   // Add SIB1 PDUs to the Tx_Data.request message.
   for (const auto& pdu : dl_data.si_pdus) {
-    builder.add_pdu_custom_payload(fapi_index, pdu.cw_index, {pdu.pdu.data(), pdu.pdu.size()});
+    builder.add_pdu(fapi_index, pdu.cw_index, pdu.pdu);
     if (pdu.cw_index == 0) {
       ++fapi_index;
     }
@@ -256,7 +292,7 @@ void mac_to_fapi_translator::on_new_downlink_data(const mac_dl_data_result& dl_d
 
   // Add RAR PDUs to the Tx_Data.request message.
   for (const auto& pdu : dl_data.rar_pdus) {
-    builder.add_pdu_custom_payload(fapi_index, pdu.cw_index, {pdu.pdu.data(), pdu.pdu.size()});
+    builder.add_pdu(fapi_index, pdu.cw_index, pdu.pdu);
     if (pdu.cw_index == 0) {
       ++fapi_index;
     }
@@ -264,7 +300,7 @@ void mac_to_fapi_translator::on_new_downlink_data(const mac_dl_data_result& dl_d
 
   // Add UE specific PDUs to the Tx_Data.request message.
   for (const auto& pdu : dl_data.ue_pdus) {
-    builder.add_pdu_custom_payload(fapi_index, pdu.cw_index, {pdu.pdu.data(), pdu.pdu.size()});
+    builder.add_pdu(fapi_index, pdu.cw_index, pdu.pdu);
     if (pdu.cw_index == 0) {
       ++fapi_index;
     }
@@ -272,10 +308,27 @@ void mac_to_fapi_translator::on_new_downlink_data(const mac_dl_data_result& dl_d
 
   // Add Paging PDU to the Tx_Data.request message.
   for (const auto& pdu : dl_data.paging_pdus) {
-    builder.add_pdu_custom_payload(fapi_index, pdu.cw_index, {pdu.pdu.data(), pdu.pdu.size()});
+    builder.add_pdu(fapi_index, pdu.cw_index, pdu.pdu);
     if (pdu.cw_index == 0) {
       ++fapi_index;
     }
+  }
+
+  // Validate the Tx_Data.request message.
+  error_type<fapi::validator_report> result = fapi::validate_tx_data_request(msg);
+
+  if (!result) {
+    log_validator_report(result.error(), logger, sector_id);
+
+    // Clear the PDUs on validation failure.
+    msg.pdus.clear();
+
+    mac_cell_slot_handler::error_event error;
+    error.pdcch_discarded           = false;
+    error.pdsch_discarded           = true;
+    error.pusch_and_pucch_discarded = false;
+
+    mac_slot_handler->handle_error_indication(dl_data.slot, error);
   }
 
 #ifdef JBPF_ENABLED
@@ -314,7 +367,7 @@ void mac_to_fapi_translator::on_new_uplink_scheduler_results(const mac_ul_sched_
   }
 
   for (const auto& pdu : ul_res.ul_res->pucchs) {
-    fapi::ul_pucch_pdu_builder pdu_builder = builder.add_pucch_pdu(pdu.format);
+    fapi::ul_pucch_pdu_builder pdu_builder = builder.add_pucch_pdu(pdu.format());
     convert_pucch_mac_to_fapi(pdu_builder, pdu);
   }
 
@@ -327,9 +380,16 @@ void mac_to_fapi_translator::on_new_uplink_scheduler_results(const mac_ul_sched_
   error_type<fapi::validator_report> result = validate_ul_tti_request(msg);
 
   if (!result) {
-    log_validator_report(result.error(), logger);
+    log_validator_report(result.error(), logger, sector_id);
 
     clear_ul_tti_pdus(msg);
+
+    mac_cell_slot_handler::error_event error;
+    error.pdcch_discarded           = false;
+    error.pdsch_discarded           = false;
+    error.pusch_and_pucch_discarded = true;
+
+    mac_slot_handler->handle_error_indication(ul_res.slot, error);
   }
 
 #ifdef JBPF_ENABLED
@@ -342,8 +402,7 @@ void mac_to_fapi_translator::on_new_uplink_scheduler_results(const mac_ul_sched_
 
 void mac_to_fapi_translator::handle_ul_dci_request(span<const pdcch_ul_information> pdcch_info,
                                                    span<const dci_payload>          payloads,
-                                                   slot_point                       slot,
-                                                   bool                             is_last_message_in_slot)
+                                                   slot_point                       slot)
 {
   // This message is optional, do not send it empty.
   if (pdcch_info.empty()) {
@@ -356,14 +415,17 @@ void mac_to_fapi_translator::handle_ul_dci_request(span<const pdcch_ul_informati
   builder.set_basic_parameters(slot.sfn(), slot.slot_index());
   add_pdcch_pdus_to_builder(builder, pdcch_info, payloads, *pm_mapper, cell_nof_prbs);
 
-  if (is_last_message_in_slot) {
-    builder.set_last_message_in_slot_flag();
-  }
-
   // Validate the UL_DCI.request message.
   error_type<fapi::validator_report> result = validate_ul_dci_request(msg);
   if (!result) {
-    log_validator_report(result.error(), logger);
+    log_validator_report(result.error(), logger, sector_id);
+
+    mac_cell_slot_handler::error_event error;
+    error.pdcch_discarded           = true;
+    error.pdsch_discarded           = false;
+    error.pusch_and_pucch_discarded = false;
+
+    mac_slot_handler->handle_error_indication(slot, error);
 
     return;
   }

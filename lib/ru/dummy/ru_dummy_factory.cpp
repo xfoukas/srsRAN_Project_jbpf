@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -20,7 +20,7 @@
  *
  */
 
-#include "srsran/ru/ru_dummy_factory.h"
+#include "srsran/ru/dummy/ru_dummy_factory.h"
 #include "ru_dummy_impl.h"
 #include "srsran/ru/ru.h"
 #include <memory>

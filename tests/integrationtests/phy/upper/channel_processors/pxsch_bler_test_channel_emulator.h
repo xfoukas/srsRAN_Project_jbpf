@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -26,10 +26,11 @@
 #include "srsran/adt/tensor.h"
 #include "srsran/phy/support/resource_grid_reader.h"
 #include "srsran/phy/support/resource_grid_writer.h"
+#include "srsran/ran/cyclic_prefix.h"
 #include "srsran/ran/subcarrier_spacing.h"
-#include "srsran/support/complex_normal_random.h"
 #include "srsran/support/executors/task_executor.h"
-#include "srsran/support/memory_pool/concurrent_thread_local_object_pool.h"
+#include "srsran/support/math/complex_normal_random.h"
+#include "srsran/support/memory_pool/bounded_object_pool.h"
 #include <random>
 #include <string>
 
@@ -54,7 +55,9 @@ public:
   /// \param[in] fading_distribution         Fading distribution - The valid distributions are rayleigh and
   ///                                        uniform-phase.
   /// \param[in] sinr_dB                     Signal-to-Interference-plus-Noise Ratio.
+  /// \param[in] cfo_Hz                      Carrier frequency offset in Herz.
   /// \param[in] nof_corrupted_re_per_symbol Number of corrupted RE per OFDM symbol. Set to zero for no corrupted RE.
+  /// \param[in] nof_tx_ports                Number of transmit ports.
   /// \param[in] nof_rx_ports                Number of receive ports.
   /// \param[in] nof_subc                    Number of resource grid subcarriers.
   /// \param[in] nof_symbols                 Number of OFDM symbols per slot.
@@ -64,7 +67,9 @@ public:
   channel_emulator(std::string        delay_profile,
                    std::string        fading_distribution,
                    float              sinr_dB,
+                   float              cfo_Hz,
                    unsigned           nof_corrupted_re_per_symbol,
+                   unsigned           nof_tx_ports,
                    unsigned           nof_rx_ports,
                    unsigned           nof_subc,
                    unsigned           nof_symbols,
@@ -89,7 +94,7 @@ private:
       dist_corrupted_re(0, nof_subc - 1),
       nof_corrupted_re(nof_corrupted_re_),
       temp_ofdm_symbol(nof_subc),
-      temp_awgn(nof_subc)
+      temp_single_ofdm_symbol(nof_subc)
     {
     }
 
@@ -97,11 +102,13 @@ private:
     /// \param[out] rx_grid       Received resource grid.
     /// \param[in]  tx_grid       Transmit resource grid.
     /// \param[in]  freq_response Frequency domain response.
+    /// \param[in]  time_coeff    Time domain coefficient.
     /// \param[in]  i_port        Receive port index.
     /// \param[in]  i_symbol      OFDM symbol index within the slot.
     void run(resource_grid_writer&       rx_grid,
              const resource_grid_reader& tx_grid,
-             span<const cf_t>            freq_response,
+             const tensor<3, cf_t>&      freq_response,
+             cf_t                        time_coeff,
              unsigned                    i_port,
              unsigned                    i_symbol);
 
@@ -118,15 +125,11 @@ private:
     unsigned nof_corrupted_re;
     /// Temporary OFDM frequency domain symbol.
     std::vector<cf_t> temp_ofdm_symbol;
-    /// Temporary generated noise for adding to an OFDM symbol.
-    std::vector<cf_t> temp_awgn;
+    /// Temporary single OFDM frequency domain symbol.
+    std::vector<cf_t> temp_single_ofdm_symbol;
   };
 
-  enum {
-    invalid_distribution,
-    rayleigh,
-    uniform_phase,
-  } fading_distribution = invalid_distribution;
+  enum { invalid_distribution, rayleigh, uniform_phase, butler } fading_distribution = invalid_distribution;
   /// Number of OFDM symbols per slot.
   unsigned nof_ofdm_symbols;
   /// Random generator for taps phase and power.
@@ -135,14 +138,16 @@ private:
   complex_normal_distribution<cf_t> dist_rayleigh;
   /// Uniform real distribution for phase.
   std::uniform_real_distribution<float> dist_uniform_phase = std::uniform_real_distribution<float>(-M_PI, M_PI);
+  /// CFO coefficients.
+  std::array<cf_t, MAX_NSYMB_PER_SLOT> cfo_coeffs;
   /// Temporary channel sum.
-  dynamic_tensor<2, cf_t> freq_domain_channel;
+  dynamic_tensor<3, cf_t> freq_domain_channel;
   /// Temporary channel.
   std::vector<cf_t> temp_channel;
   /// Frequency response of each of the channel taps.
   dynamic_tensor<2, cf_t> taps_channel_response;
   /// Concurrent channel emulators.
-  concurrent_thread_local_object_pool<concurrent_channel_emulator> emulators;
+  bounded_object_pool<concurrent_channel_emulator> emulators;
   /// Asynchronous executor.
   task_executor& executor;
 };

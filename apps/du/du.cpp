@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -20,58 +20,50 @@
  *
  */
 
-#include "srsran/gtpu/gtpu_config.h"
-#include "srsran/support/cpu_features.h"
-#include "srsran/support/event_tracing.h"
-#include "srsran/support/signal_handling.h"
-#include "srsran/support/versioning/build_info.h"
-#include "srsran/support/versioning/version.h"
-
-#include "srsran/f1u/du/split_connector/f1u_split_connector_factory.h"
-#include "srsran/gtpu/gtpu_demux_factory.h"
-
-#include "srsran/support/io/io_broker_factory.h"
-
 #include "adapters/f1_gateways.h"
-#include "srsran/support/backtrace.h"
-#include "srsran/support/config_parsers.h"
-
+#include "apps/helpers/metrics/metrics_helpers.h"
+#include "apps/services/app_resource_usage/app_resource_usage.h"
+#include "apps/services/application_message_banners.h"
+#include "apps/services/application_tracer.h"
+#include "apps/services/buffer_pool/buffer_pool_manager.h"
+#include "apps/services/cmdline/cmdline_command_dispatcher.h"
+#include "apps/services/core_isolation_manager.h"
+#include "apps/services/metrics/metrics_manager.h"
+#include "apps/services/metrics/metrics_notifier_proxy.h"
+#include "apps/services/remote_control/remote_server.h"
+#include "apps/services/worker_manager/worker_manager.h"
+#include "apps/units/flexible_o_du/flexible_o_du_application_unit.h"
+#include "apps/units/flexible_o_du/o_du_high/du_high/du_high_config.h"
+#include "apps/units/flexible_o_du/o_du_high/o_du_high_unit_pcap_factory.h"
 #include "du_appconfig.h"
 #include "du_appconfig_cli11_schema.h"
 #include "du_appconfig_translators.h"
 #include "du_appconfig_validators.h"
-
-#include "apps/services/worker_manager.h"
-#include "apps/units/flexible_du/split_dynamic/dynamic_du_factory.h"
-
-#include "apps/du/adapters/e2_gateways.h"
-#include "apps/services/e2/e2_metric_connector_manager.h"
-#include "srsran/e2/gateways/e2_connection_client.h"
-
-// Include ThreadSanitizer (TSAN) options if thread sanitization is enabled.
-// This include is not unused - it helps prevent false alarms from the thread sanitizer.
 #include "du_appconfig_yaml_writer.h"
-
-#include "srsran/support/tsan_options.h"
-
+#include "srsran/du/du_operation_controller.h"
+#include "srsran/e2/e2ap_config_translators.h"
+#include "srsran/e2/gateways/e2_connection_client.h"
+#include "srsran/e2/gateways/e2_network_client_factory.h"
+#include "srsran/f1u/du/split_connector/f1u_split_connector_factory.h"
+#include "srsran/f1u/split_connector/f1u_five_qi_gw_maps.h"
+#include "srsran/gtpu/gtpu_config.h"
+#include "srsran/gtpu/gtpu_demux_factory.h"
+#include "srsran/support/backtrace.h"
+#include "srsran/support/config_parsers.h"
+#include "srsran/support/cpu_features.h"
+#include "srsran/support/io/io_broker_factory.h"
+#include "srsran/support/signal_handling.h"
+#include "srsran/support/signal_observer.h"
+#include "srsran/support/tracing/event_tracing.h"
+#include "srsran/support/versioning/build_info.h"
+#include "srsran/support/versioning/version.h"
 #include <atomic>
-
-#include "apps/services/application_message_banners.h"
-#include "apps/services/application_tracer.h"
-#include "apps/services/buffer_pool/buffer_pool_manager.h"
-#include "apps/services/core_isolation_manager.h"
-#include "apps/services/metrics/metrics_manager.h"
-#include "apps/services/metrics/metrics_notifier_proxy.h"
-#include "apps/services/stdin_command_dispatcher.h"
-#include "apps/units/flexible_du/du_high/du_high_config.h"
-#include "apps/units/flexible_du/du_high/pcap_factory.h"
-#include "apps/units/flexible_du/flexible_du_application_unit.h"
-
-#include "srsran/du/du_power_controller.h"
-
 #ifdef DPDK_FOUND
 #include "srsran/hal/dpdk/dpdk_eal_factory.h"
 #endif
+// Include ThreadSanitizer (TSAN) options if thread sanitization is enabled.
+// This include is not unused - it helps prevent false alarms from the thread sanitizer.
+#include "srsran/support/tsan_options.h"
 
 using namespace srsran;
 
@@ -88,26 +80,31 @@ static constexpr unsigned MAX_CONFIG_FILES = 10;
 static void populate_cli11_generic_args(CLI::App& app)
 {
   fmt::memory_buffer buffer;
-  format_to(buffer, "srsRAN 5G DU version {} ({})", get_version(), get_build_hash());
+  format_to(std::back_inserter(buffer), "srsRAN 5G DU version {} ({})", get_version(), get_build_hash());
   app.set_version_flag("-v,--version", srsran::to_c_str(buffer));
   app.set_config("-c,", config_file, "Read config from file", false)->expected(1, MAX_CONFIG_FILES);
 }
 
 /// Function to call when the application is interrupted.
-static void interrupt_signal_handler()
+static void interrupt_signal_handler(int signal)
 {
   is_app_running = false;
 }
 
+static signal_dispatcher cleanup_signal_dispatcher;
+
 /// Function to call when the application is going to be forcefully shutdown.
-static void cleanup_signal_handler()
+static void cleanup_signal_handler(int signal)
 {
+  cleanup_signal_dispatcher.notify_signal(signal);
+  srslog::fetch_basic_logger("APP").error("Emergency flush of the logger");
   srslog::flush();
 }
 
 /// Function to call when an error is reported by the application.
 static void app_error_report_handler()
 {
+  srslog::fetch_basic_logger("APP").error("Emergency flush of the logger");
   srslog::flush();
 }
 
@@ -121,10 +118,11 @@ static void initialize_log(const std::string& filename)
   srslog::init();
 }
 
-static void register_app_logs(const logger_appconfig& log_cfg, flexible_du_application_unit& du_app_unit)
+static void register_app_logs(const du_appconfig& du_cfg, flexible_o_du_application_unit& du_app_unit)
 {
+  const logger_appconfig& log_cfg = du_cfg.log_cfg;
   // Set log-level of app and all non-layer specific components to app level.
-  for (const auto& id : {"ALL", "SCTP-GW", "IO-EPOLL", "UDP-GW", "PCAP"}) {
+  for (const auto& id : {"ALL", "SCTP-GW", "IO-EPOLL", "UDP-GW", "PCAP", "ASN1"}) {
     auto& logger = srslog::fetch_basic_logger(id, false);
     logger.set_level(log_cfg.lib_level);
     logger.set_hex_dump_max_size(log_cfg.hex_max_size);
@@ -133,16 +131,22 @@ static void register_app_logs(const logger_appconfig& log_cfg, flexible_du_appli
   auto& app_logger = srslog::fetch_basic_logger("GNB", false);
   app_logger.set_level(srslog::basic_levels::info);
   app_services::application_message_banners::log_build_info(app_logger);
-  app_logger.set_level(log_cfg.config_level);
+  app_logger.set_level(log_cfg.all_level);
   app_logger.set_hex_dump_max_size(log_cfg.hex_max_size);
+
+  {
+    auto& logger = srslog::fetch_basic_logger("APP", false);
+    logger.set_level(log_cfg.all_level);
+    logger.set_hex_dump_max_size(log_cfg.hex_max_size);
+  }
 
   auto& config_logger = srslog::fetch_basic_logger("CONFIG", false);
   config_logger.set_level(log_cfg.config_level);
   config_logger.set_hex_dump_max_size(log_cfg.hex_max_size);
 
-  auto& metrics_logger = srslog::fetch_basic_logger("METRICS", false);
-  metrics_logger.set_level(log_cfg.metrics_level);
-  metrics_logger.set_hex_dump_max_size(log_cfg.hex_max_size);
+  // Metrics log channels.
+  const app_helpers::metrics_config& metrics_cfg = du_cfg.metrics_cfg.rusage_config.metrics_consumers_cfg;
+  app_helpers::initialize_metrics_log_channels(metrics_cfg, log_cfg.hex_max_size);
 
   auto& e2ap_logger = srslog::fetch_basic_logger("E2AP", false);
   e2ap_logger.set_level(log_cfg.e2ap_level);
@@ -178,36 +182,50 @@ int main(int argc, char** argv)
   // Configure CLI11 with the DU application configuration schema.
   configure_cli11_with_du_appconfig_schema(app, du_cfg);
 
-  auto du_app_unit = create_flexible_du_application_unit("du");
-  du_app_unit->on_parsing_configuration_registration(app);
+  auto o_du_app_unit = create_flexible_o_du_application_unit("du");
+  o_du_app_unit->on_parsing_configuration_registration(app);
 
   // Set the callback for the app calling all the autoderivation functions.
-  app.callback([&app, &du_cfg, &du_app_unit]() {
+  app.callback([&app, &du_cfg, &o_du_app_unit]() {
     autoderive_du_parameters_after_parsing(app, du_cfg);
-    du_app_unit->on_configuration_parameters_autoderivation(app);
+    o_du_app_unit->on_configuration_parameters_autoderivation(app);
   });
 
   // Parse arguments.
   CLI11_PARSE(app, argc, argv);
 
+  // Dry run mode, exit.
+  if (du_cfg.enable_dryrun) {
+    return 0;
+  }
+
   // Check the modified configuration.
   if (!validate_appconfig(du_cfg) ||
-      !du_app_unit->on_configuration_validation((du_cfg.expert_execution_cfg.affinities.isolated_cpus)
-                                                    ? du_cfg.expert_execution_cfg.affinities.isolated_cpus.value()
-                                                    : os_sched_affinity_bitmask::available_cpus())) {
+      !o_du_app_unit->on_configuration_validation((du_cfg.expert_execution_cfg.affinities.isolated_cpus)
+                                                      ? du_cfg.expert_execution_cfg.affinities.isolated_cpus.value()
+                                                      : os_sched_affinity_bitmask::available_cpus())) {
     report_error("Invalid configuration detected.\n");
   }
 
   // Set up logging.
   initialize_log(du_cfg.log_cfg.filename);
-  register_app_logs(du_cfg.log_cfg, *du_app_unit);
+  register_app_logs(du_cfg, *o_du_app_unit);
+
+  // Check the metrics and metrics consumers.
+  srslog::basic_logger& gnb_logger = srslog::fetch_basic_logger("GNB");
+  bool metrics_enabled = o_du_app_unit->are_metrics_enabled() || du_cfg.metrics_cfg.rusage_config.enable_app_usage;
+
+  if (!metrics_enabled && du_cfg.metrics_cfg.rusage_config.metrics_consumers_cfg.enabled()) {
+    gnb_logger.warning("Logger or JSON metrics output enabled but no metrics will be reported as no layer was enabled");
+    fmt::println("Logger or JSON metrics output enabled but no metrics will be reported as no layer was enabled");
+  }
 
   // Log input configuration.
   srslog::basic_logger& config_logger = srslog::fetch_basic_logger("CONFIG");
   if (config_logger.debug.enabled()) {
     YAML::Node node;
     fill_du_appconfig_in_yaml_schema(node, du_cfg);
-    du_app_unit->dump_config(node);
+    o_du_app_unit->dump_config(node);
     config_logger.debug("Input configuration (all values): \n{}", YAML::Dump(node));
   } else {
     config_logger.info("Input configuration (only non-default values): \n{}", app.config_to_str(false, false));
@@ -256,10 +274,14 @@ int main(int argc, char** argv)
   check_cpu_governor(du_logger);
   check_drm_kms_polling(du_logger);
 
+  // Create manager of timers for DU, which will be driven by the PHY slot ticks.
+  timer_manager app_timers{256};
+
   // Instantiate worker manager.
   worker_manager_config worker_manager_cfg;
-  du_app_unit->fill_worker_manager_config(worker_manager_cfg);
+  o_du_app_unit->fill_worker_manager_config(worker_manager_cfg);
   fill_du_worker_manager_config(worker_manager_cfg, du_cfg);
+  worker_manager_cfg.app_timers = &app_timers;
 
   worker_manager workers{worker_manager_cfg};
 
@@ -270,43 +292,68 @@ int main(int argc, char** argv)
   io_broker_config           io_broker_cfg(low_prio_cpu_mask);
   std::unique_ptr<io_broker> epoll_broker = create_io_broker(io_broker_type::epoll, io_broker_cfg);
 
-  flexible_du_pcaps du_pcaps = create_du_pcaps(du_app_unit->get_du_high_unit_config().pcaps, workers);
+  flexible_o_du_pcaps du_pcaps =
+      create_o_du_pcaps(o_du_app_unit->get_o_du_high_unit_config(), workers, cleanup_signal_dispatcher);
 
   // Instantiate F1-C client gateway.
-  std::unique_ptr<srs_du::f1c_connection_client> f1c_gw = create_f1c_client_gateway(
-      du_cfg.f1ap_cfg.cu_cp_address, du_cfg.f1ap_cfg.bind_address, *epoll_broker, *du_pcaps.f1ap);
+  std::unique_ptr<srs_du::f1c_connection_client> f1c_gw = create_f1c_client_gateway(du_cfg.f1ap_cfg.cu_cp_address,
+                                                                                    du_cfg.f1ap_cfg.bind_address,
+                                                                                    *epoll_broker,
+                                                                                    *workers.non_rt_hi_prio_exec,
+                                                                                    *du_pcaps.f1ap);
 
-  // Create manager of timers for DU, which will be driven by the PHY slot ticks.
-  timer_manager app_timers{256};
+  // Create F1-U GW.
+  // > Create GTP-U Demux.
+  gtpu_demux_creation_request du_f1u_gtpu_msg   = {};
+  du_f1u_gtpu_msg.cfg.warn_on_drop              = true;
+  du_f1u_gtpu_msg.cfg.queue_size                = du_cfg.f1u_cfg.pdu_queue_size;
+  du_f1u_gtpu_msg.gtpu_pcap                     = du_pcaps.f1u.get();
+  std::unique_ptr<gtpu_demux> du_f1u_gtpu_demux = create_gtpu_demux(du_f1u_gtpu_msg);
 
-  // Create F1-U connector
-  // TODO: Simplify this and use factory.
-  gtpu_demux_creation_request du_f1u_gtpu_msg       = {};
-  du_f1u_gtpu_msg.cfg.warn_on_drop                  = true;
-  du_f1u_gtpu_msg.gtpu_pcap                         = du_pcaps.f1u.get();
-  std::unique_ptr<gtpu_demux> du_f1u_gtpu_demux     = create_gtpu_demux(du_f1u_gtpu_msg);
-  udp_network_gateway_config  du_f1u_gw_config      = {};
-  du_f1u_gw_config.bind_address                     = du_cfg.nru_cfg.bind_address;
-  du_f1u_gw_config.bind_port                        = GTPU_PORT;
-  du_f1u_gw_config.reuse_addr                       = false;
-  du_f1u_gw_config.pool_occupancy_threshold         = du_cfg.nru_cfg.pool_threshold;
-  std::unique_ptr<srs_cu_up::ngu_gateway> du_f1u_gw = srs_cu_up::create_udp_ngu_gateway(
-      du_f1u_gw_config,
-      *epoll_broker,
-      workers.get_du_high_executor_mapper(0).ue_mapper().mac_ul_pdu_executor(to_du_ue_index(0)));
-  std::unique_ptr<srs_du::f1u_du_udp_gateway> du_f1u_conn = srs_du::create_split_f1u_gw(
-      {du_f1u_gw.get(), du_f1u_gtpu_demux.get(), *du_pcaps.f1u, GTPU_PORT, du_cfg.nru_cfg.ext_addr});
+  // > Create UDP gateway(s).
+  gtpu_gateway_maps f1u_gw_maps;
+  for (const f1u_socket_appconfig& sock_cfg : du_cfg.f1u_cfg.f1u_sockets.f1u_socket_cfg) {
+    udp_network_gateway_config f1u_gw_config = {};
+    f1u_gw_config.bind_address               = sock_cfg.bind_addr;
+    f1u_gw_config.ext_bind_addr              = sock_cfg.udp_config.ext_addr;
+    f1u_gw_config.bind_port                  = GTPU_PORT;
+    f1u_gw_config.reuse_addr                 = false;
+    f1u_gw_config.pool_occupancy_threshold   = sock_cfg.udp_config.pool_threshold;
+    f1u_gw_config.rx_max_mmsg                = sock_cfg.udp_config.rx_max_msgs;
+    f1u_gw_config.dscp                       = sock_cfg.udp_config.dscp;
+    std::unique_ptr<gtpu_gateway> f1u_gw     = create_udp_gtpu_gateway(
+        f1u_gw_config,
+        *epoll_broker,
+        workers.get_du_high_executor_mapper().ue_mapper().mac_ul_pdu_executor(to_du_ue_index(0)),
+        *workers.non_rt_medium_prio_exec);
+    if (not sock_cfg.five_qi.has_value()) {
+      f1u_gw_maps.default_gws.push_back(std::move(f1u_gw));
+    } else {
+      f1u_gw_maps.five_qi_gws[sock_cfg.five_qi.value()].push_back(std::move(f1u_gw));
+    }
+  }
 
-  // Set up the JSON log channel used by metrics.
-  srslog::sink& json_sink =
-      srslog::fetch_udp_sink(du_cfg.metrics_cfg.addr, du_cfg.metrics_cfg.port, srslog::create_json_formatter());
+  // > Create F1-U split connector.
+  std::unique_ptr<srs_du::f1u_du_udp_gateway> du_f1u_conn =
+      srs_du::create_split_f1u_gw({f1u_gw_maps, du_f1u_gtpu_demux.get(), *du_pcaps.f1u, GTPU_PORT});
 
   // Instantiate E2AP client gateway.
-  std::unique_ptr<e2_connection_client> e2_gw =
-      create_du_e2_client_gateway(du_cfg.e2_cfg, *epoll_broker, *du_pcaps.e2ap);
+  std::unique_ptr<e2_connection_client> e2_gw = create_e2_gateway_client(
+      generate_e2_client_gateway_config(o_du_app_unit->get_o_du_high_unit_config().e2_cfg.base_cfg,
+                                        *epoll_broker,
+                                        *workers.non_rt_hi_prio_exec,
+                                        *du_pcaps.e2ap,
+                                        E2_DU_PPID));
 
   app_services::metrics_notifier_proxy_impl metrics_notifier_forwarder;
-  du_unit_dependencies                      du_dependencies;
+
+  // Create app-level resource usage service and metrics.
+  auto app_resource_usage_service = app_services::build_app_resource_usage_service(
+      metrics_notifier_forwarder, du_cfg.metrics_cfg.rusage_config, srslog::fetch_basic_logger("GNB"));
+
+  std::vector<app_services::metrics_config> app_metrics = std::move(app_resource_usage_service.metrics);
+
+  o_du_unit_dependencies du_dependencies;
   du_dependencies.workers            = &workers;
   du_dependencies.f1c_client_handler = f1c_gw.get();
   du_dependencies.f1u_gw             = du_f1u_conn.get();
@@ -314,36 +361,62 @@ int main(int argc, char** argv)
   du_dependencies.mac_p              = du_pcaps.mac.get();
   du_dependencies.rlc_p              = du_pcaps.rlc.get();
   du_dependencies.e2_client_handler  = e2_gw.get();
-  du_dependencies.json_sink          = &json_sink;
   du_dependencies.metrics_notifier   = &metrics_notifier_forwarder;
 
-  auto du_inst_and_cmds = du_app_unit->create_flexible_du_unit(du_dependencies);
+  auto du_inst_and_cmds = o_du_app_unit->create_flexible_o_du_unit(du_dependencies);
+
+  // Move app-units metrics to the application metrics.
+  std::move(du_inst_and_cmds.metrics.begin(), du_inst_and_cmds.metrics.end(), std::back_inserter(app_metrics));
+
   // Only DU has metrics now.
   app_services::metrics_manager metrics_mngr(
-      srslog::fetch_basic_logger("GNB"), *workers.metrics_hub_exec, du_inst_and_cmds.metrics);
+      srslog::fetch_basic_logger("GNB"),
+      *workers.metrics_exec,
+      app_metrics,
+      app_timers,
+      std::chrono::milliseconds(du_cfg.metrics_cfg.metrics_service_cfg.app_usage_report_period));
+
   // Connect the forwarder to the metrics manager.
   metrics_notifier_forwarder.connect(metrics_mngr);
 
   srs_du::du& du_inst = *du_inst_and_cmds.unit;
 
+  // Add the metrics STDOUT command.
+  if (std::unique_ptr<app_services::cmdline_command> cmd = app_services::create_stdout_metrics_app_command(
+          {{du_inst_and_cmds.commands.cmdline.metrics_subcommands}}, du_cfg.metrics_cfg.autostart_stdout_metrics)) {
+    du_inst_and_cmds.commands.cmdline.commands.push_back(std::move(cmd));
+  }
+
   // Register the commands.
-  app_services::stdin_command_dispatcher command_parser(*epoll_broker, du_inst_and_cmds.commands);
+  app_services::cmdline_command_dispatcher command_parser(
+      *epoll_broker, *workers.non_rt_medium_prio_exec, du_inst_and_cmds.commands.cmdline.commands);
 
   // Start processing.
-  du_inst.get_power_controller().start();
+  du_inst.get_operation_controller().start();
+
+  std::unique_ptr<app_services::remote_server> remote_control_server =
+      app_services::create_remote_server(du_cfg.remote_control_config, du_inst_and_cmds.commands.remote);
+
+  metrics_mngr.start();
   {
-    app_services::application_message_banners app_banner(app_name);
+    app_services::application_message_banners app_banner(
+        app_name, du_cfg.log_cfg.filename == "stdout" ? std::string_view() : du_cfg.log_cfg.filename);
 
     while (is_app_running) {
       std::this_thread::sleep_for(std::chrono::milliseconds(250));
     }
   }
+  metrics_mngr.stop();
+
+  if (remote_control_server) {
+    remote_control_server->stop();
+  }
 
   // Stop DU activity.
-  du_inst.get_power_controller().stop();
+  du_inst.get_operation_controller().stop();
 
   du_logger.info("Closing PCAP files...");
-  du_pcaps.close();
+  du_pcaps.reset();
   du_logger.info("PCAP files successfully closed.");
 
   du_logger.info("Stopping executors...");

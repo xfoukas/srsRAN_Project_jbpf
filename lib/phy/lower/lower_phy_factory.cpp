@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -80,10 +80,7 @@ public:
   {
     srsran_assert((config.dft_window_offset >= 0.0) && (config.dft_window_offset < 1.0F),
                   "DFT window offset if out-of-range");
-    srsran_assert(config.sectors.size() == 1, "Only one sector is currently supported.");
     srsran_assert(config.srate.to_Hz() > 0, "Invalid sampling rate.");
-
-    const lower_phy_sector_description& sector = config.sectors.front();
 
     srsran_assert((config.scs == subcarrier_spacing::kHz15) || (config.scs == subcarrier_spacing::kHz30) ||
                       (config.scs == subcarrier_spacing::kHz120),
@@ -140,9 +137,9 @@ public:
     dl_proc_config.scs                     = config.scs;
     dl_proc_config.cp                      = config.cp;
     dl_proc_config.rate                    = config.srate;
-    dl_proc_config.bandwidth_prb           = sector.bandwidth_rb;
-    dl_proc_config.center_frequency_Hz     = sector.dl_freq_hz;
-    dl_proc_config.nof_tx_ports            = sector.nof_tx_ports;
+    dl_proc_config.bandwidth_prb           = config.bandwidth_rb;
+    dl_proc_config.center_frequency_Hz     = config.dl_freq_hz;
+    dl_proc_config.nof_tx_ports            = config.nof_tx_ports;
     dl_proc_config.nof_slot_tti_in_advance = config.max_processing_delay_slots;
 
     // Create downlink processor.
@@ -155,9 +152,9 @@ public:
     ul_proc_config.scs                 = config.scs;
     ul_proc_config.cp                  = config.cp;
     ul_proc_config.rate                = config.srate;
-    ul_proc_config.bandwidth_prb       = sector.bandwidth_rb;
-    ul_proc_config.center_frequency_Hz = sector.ul_freq_hz;
-    ul_proc_config.nof_rx_ports        = sector.nof_rx_ports;
+    ul_proc_config.bandwidth_prb       = config.bandwidth_rb;
+    ul_proc_config.center_frequency_Hz = config.ul_freq_hz;
+    ul_proc_config.nof_rx_ports        = config.nof_rx_ports;
 
     // Create uplink processor.
     std::unique_ptr<lower_phy_uplink_processor> ul_proc = uplink_proc_factory->create(ul_proc_config);
@@ -174,8 +171,8 @@ public:
     proc_bb_adaptor_config.transmitter            = &config.bb_gateway->get_transmitter();
     proc_bb_adaptor_config.ul_bb_proc             = &ul_proc->get_baseband();
     proc_bb_adaptor_config.dl_bb_proc             = &dl_proc->get_baseband();
-    proc_bb_adaptor_config.nof_tx_ports           = config.sectors.back().nof_tx_ports;
-    proc_bb_adaptor_config.nof_rx_ports           = config.sectors.back().nof_rx_ports;
+    proc_bb_adaptor_config.nof_tx_ports           = config.nof_tx_ports;
+    proc_bb_adaptor_config.nof_rx_ports           = config.nof_rx_ports;
     proc_bb_adaptor_config.tx_time_offset         = tx_time_offset;
     proc_bb_adaptor_config.rx_to_tx_max_delay     = config.srate.to_kHz() + proc_bb_adaptor_config.tx_time_offset;
     proc_bb_adaptor_config.rx_buffer_size         = rx_buffer_size;
@@ -183,6 +180,7 @@ public:
     proc_bb_adaptor_config.tx_buffer_size         = tx_buffer_size;
     proc_bb_adaptor_config.nof_tx_buffers         = std::max(4U, rx_to_tx_max_delay / tx_buffer_size);
     proc_bb_adaptor_config.system_time_throttling = config.system_time_throttling;
+    proc_bb_adaptor_config.stop_nof_slots         = 2 * config.max_processing_delay_slots;
 
     // Create lower PHY controller from the processor baseband adaptor.
     std::unique_ptr<lower_phy_controller> controller =
@@ -190,7 +188,7 @@ public:
     srsran_assert(controller, "Failed to create the lower PHY controller.");
 
     // Prepare lower PHY configuration.
-    lower_phy_impl::configuration lower_phy_config;
+    ue_lower_phy_impl::configuration lower_phy_config;
     lower_phy_config.downlink_proc      = std::move(dl_proc);
     lower_phy_config.uplink_proc        = std::move(ul_proc);
     lower_phy_config.controller         = std::move(controller);
@@ -199,7 +197,7 @@ public:
     lower_phy_config.error_notifier     = config.error_notifier;
     lower_phy_config.metrics_notifier   = config.metric_notifier;
 
-    return std::make_unique<lower_phy_impl>(lower_phy_config);
+    return std::make_unique<ue_lower_phy_impl>(lower_phy_config);
   }
 
 private:

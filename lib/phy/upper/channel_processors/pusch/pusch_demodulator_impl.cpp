@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -26,6 +26,7 @@
 #include "pusch_demodulator_impl.h"
 #include "srsran/phy/upper/channel_processors/pusch/pusch_codeword_buffer.h"
 #include "srsran/phy/upper/channel_processors/pusch/pusch_demodulator_notifier.h"
+#include "srsran/srsvec/simd.h"
 
 #if defined(__SSE3__)
 #include <immintrin.h>
@@ -46,12 +47,107 @@ revert_scrambling(span<log_likelihood_ratio> out, span<const log_likelihood_rati
   unsigned i      = 0;
   unsigned length = in.size();
 
-#ifdef __SSE3__
-  // Number of bits that can be processed with a SIMD register.
-  static constexpr unsigned nof_bits_per_simd = 16;
+#if defined(__AVX512F__) && defined(__AVX512BW__)
+  // Number of bits that can be processed with an AVX512 register.
+  static constexpr unsigned nof_bits_per_avx512 = 64;
 
-  for (unsigned i_byte = 0, i_end = (length / nof_bits_per_simd) * nof_bits_per_simd; i != i_end;
-       i_byte += 2, i += nof_bits_per_simd) {
+  const __mmask64* avx512_sequence_ptr = reinterpret_cast<const __mmask64*>(sequence.get_buffer().data());
+  for (unsigned i_end = (length / nof_bits_per_avx512) * nof_bits_per_avx512; i != i_end; i += nof_bits_per_avx512) {
+    // Load 64 bits in a go as a mask.
+    __mmask64 xor_mask = *(avx512_sequence_ptr++);
+
+    // Convert XOR mask to 0xff (for 1s) and 0x00 (for 0s).
+    __m512i mask = _mm512_movm_epi8(xor_mask);
+
+    // Reverses bits within bytes.
+    __m512i shuffle_idx = _mm512_set_epi8(
+        // clang-format off
+        0x38, 0x39, 0x3a, 0x3b, 0x3c, 0x3d, 0x3e, 0x3f,
+        0x30, 0x31, 0x32, 0x33, 0x34, 0x35, 0x36, 0x37,
+        0x28, 0x29, 0x2a, 0x2b, 0x2c, 0x2d, 0x2e, 0x2f,
+        0x20, 0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27,
+        0x18, 0x19, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e, 0x1f,
+        0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17,
+        0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f,
+        0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07
+        // clang-format on
+    );
+    mask = _mm512_shuffle_epi8(mask, shuffle_idx);
+
+    // Load 64 soft bits.
+    __m512i data = _mm512_loadu_si512(reinterpret_cast<const __m512i*>(in.data() + i));
+
+    // Negate.
+    data = _mm512_xor_si512(mask, data);
+
+    // Add one.
+    mask = _mm512_and_si512(mask, _mm512_set1_epi8(1));
+    data = _mm512_add_epi8(mask, data);
+
+    // Store register.
+    _mm512_storeu_si512(reinterpret_cast<__m512i*>(out.data() + i), data);
+  }
+#endif // defined(__AVX512F__) && defined(__AVX512BW__)
+
+#if defined(__AVX__) && defined(__AVX2__)
+  // Number of bits that can be processed with an AVX register.
+  static constexpr unsigned nof_bits_per_avx  = 32;
+  const uint8_t*            avx2_sequence_ptr = sequence.get_buffer().data();
+
+  for (unsigned i_byte = i / 8, i_end = (length / nof_bits_per_avx) * nof_bits_per_avx; i != i_end;
+       i_byte += nof_bits_per_avx / 8, i += nof_bits_per_avx) {
+    // Load sequence in different registers.
+    __m256i mask = _mm256_setzero_si256();
+    mask         = _mm256_insert_epi8(mask, avx2_sequence_ptr[i_byte + 0], 0);
+    mask         = _mm256_insert_epi8(mask, avx2_sequence_ptr[i_byte + 1], 8);
+    mask         = _mm256_insert_epi8(mask, avx2_sequence_ptr[i_byte + 2], 16);
+    mask         = _mm256_insert_epi8(mask, avx2_sequence_ptr[i_byte + 3], 24);
+
+    // Repeats each byte 8 times.
+    __m256i shuffle_mask = _mm256_setr_epi8(
+        // clang-format off
+        0, 0, 0, 0, 0, 0, 0, 0,
+        8, 8, 8, 8, 8, 8, 8, 8,
+        0, 0, 0, 0, 0, 0, 0, 0,
+        8, 8, 8, 8, 8, 8, 8, 8
+        // clang-format on
+    );
+    mask = _mm256_shuffle_epi8(mask, shuffle_mask);
+
+    // Selects each of the bits.
+    __m256i bit_mask = _mm256_set_epi8(
+        // clang-format off
+        1, 2, 4, 8, 16, 32, 64, -128,
+        1, 2, 4, 8, 16, 32, 64, -128,
+        1, 2, 4, 8, 16, 32, 64, -128,
+        1, 2, 4, 8, 16, 32, 64, -128
+        // clang-format on
+    );
+    mask = _mm256_and_si256(bit_mask, mask);
+
+    mask = ~_mm256_cmpeq_epi8(mask, _mm256_setzero_si256());
+
+    // Load 64 soft bits.
+    __m256i data = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(in.data() + i));
+
+    // Negate.
+    data = _mm256_xor_si256(mask, data);
+
+    // Add one.
+    mask = _mm256_and_si256(mask, _mm256_set1_epi8(1));
+    data = _mm256_add_epi8(mask, data);
+
+    // Store register.
+    _mm256_storeu_si256(reinterpret_cast<__m256i*>(out.data() + i), data);
+  }
+#endif // defined(__AVX__) && defined(__AVX2__)
+
+#if defined(__SSE2__) && defined(__SSE3__)
+  // Number of bits that can be processed with an SSE register.
+  static constexpr unsigned nof_bits_per_sse = 16;
+
+  for (unsigned i_byte = i / 8, i_end = (length / nof_bits_per_sse) * nof_bits_per_sse; i != i_end;
+       i_byte += 2, i += nof_bits_per_sse) {
     uint8_t byte0 = sequence.get_byte(i_byte);
     uint8_t byte1 = sequence.get_byte(i_byte + 1);
     int32_t c     = static_cast<int32_t>(byte0) + (static_cast<int32_t>(byte1) << 8);
@@ -78,7 +174,7 @@ revert_scrambling(span<log_likelihood_ratio> out, span<const log_likelihood_rati
 
     _mm_storeu_si128(reinterpret_cast<__m128i*>(out.data() + i), v);
   }
-#endif // __SSE3__
+#endif // defined(__SSE2__) && defined(__SSE3__)
 
 #ifdef __aarch64__
   // Number of bits that can be processed with a SIMD register.
@@ -126,6 +222,53 @@ revert_scrambling(span<log_likelihood_ratio> out, span<const log_likelihood_rati
   }
 }
 
+static float filter_infinite_and_accumulate(unsigned& count, span<const float> input)
+{
+  float    sum = 0;
+  unsigned i   = 0;
+
+#if SRSRAN_SIMD_F_SIZE
+  const simd_f_t simd_infinity     = srsran_simd_f_set1(std::numeric_limits<float>::infinity());
+  const simd_f_t simd_neg_infinity = srsran_simd_f_set1(-std::numeric_limits<float>::infinity());
+  const simd_i_t simd_one          = srsran_simd_i_set1(1);
+
+  if (input.size() > 2 * SRSRAN_SIMD_F_SIZE) {
+    simd_i_t simd_count = srsran_simd_i_set1(0);
+    simd_f_t simd_sum   = srsran_simd_f_set1(0.0);
+    for (unsigned i_end = (input.size() / SRSRAN_SIMD_F_SIZE) * SRSRAN_SIMD_F_SIZE; i != i_end;
+         i += SRSRAN_SIMD_F_SIZE) {
+      simd_f_t in = srsran_simd_f_loadu(&input[i]);
+
+      simd_sel_t isnormal_mask =
+          srsran_simd_sel_and(srsran_simd_f_max(simd_infinity, in), srsran_simd_f_min(simd_neg_infinity, in));
+
+      simd_sum   = srsran_simd_f_select(simd_sum, srsran_simd_f_add(simd_sum, in), isnormal_mask);
+      simd_count = srsran_simd_i_select(simd_count, srsran_simd_i_add(simd_count, simd_one), isnormal_mask);
+    }
+
+    std::array<float, SRSRAN_SIMD_F_SIZE> temp_sum;
+    srsran_simd_f_storeu(temp_sum.data(), simd_sum);
+    sum = std::accumulate(temp_sum.begin(), temp_sum.end(), 0.0F);
+    std::array<int, SRSRAN_SIMD_I_SIZE> temp_count;
+    srsran_simd_i_storeu(temp_count.data(), simd_count);
+    count += std::accumulate(temp_count.begin(), temp_count.end(), 0);
+  }
+#endif // SRSRAN_SIMD_F_SIZE
+
+  for (unsigned i_end = input.size(); i != i_end; ++i) {
+    // Exclude outliers with infinite variance. This makes sure that handling of the DC carrier does not skew
+    // the SINR results.
+    if (std::isinf(input[i])) {
+      continue;
+    }
+
+    sum += input[i];
+    ++count;
+  }
+
+  return sum;
+}
+
 void pusch_demodulator_impl::demodulate(pusch_codeword_buffer&      codeword_buffer,
                                         pusch_demodulator_notifier& notifier,
                                         const resource_grid_reader& grid,
@@ -135,7 +278,7 @@ void pusch_demodulator_impl::demodulate(pusch_codeword_buffer&      codeword_buf
   // Number of receive antenna ports.
   unsigned nof_rx_ports = static_cast<unsigned>(config.rx_ports.size());
 
-  // Initialise sequence.
+  // Initialize sequence.
   unsigned c_init = config.rnti * pow2(15) + config.n_id;
   descrambler->init(c_init);
 
@@ -155,20 +298,25 @@ void pusch_demodulator_impl::demodulate(pusch_codeword_buffer&      codeword_buf
                 to_string(config.modulation));
 
   // Stats accumulators.
-  pusch_demodulator_notifier::demodulation_stats stats;
-  unsigned                                       evm_symbol_count     = 0;
-  unsigned                                       sinr_softbit_count   = 0;
-  float                                          noise_var_accumulate = 0.0;
-  float                                          evm_accumulate       = 0.0;
+  unsigned total_evm_symbol_count     = 0;
+  unsigned total_sinr_softbit_count   = 0;
+  float    total_noise_var_accumulate = 0.0;
+  float    total_evm_accumulate       = 0.0;
 
   // Process each OFDM symbol.
   for (unsigned i_symbol = config.start_symbol_index, i_symbol_end = config.start_symbol_index + config.nof_symbols;
        i_symbol != i_symbol_end;
        ++i_symbol) {
+    // Stats accumulators for the OFDM symbol.
+    unsigned symbol_evm_symbol_count     = 0;
+    unsigned symbol_sinr_softbit_count   = 0;
+    float    symbol_noise_var_accumulate = 0.0;
+    float    symbol_evm_accumulate       = 0.0;
+
     // Select RE mask for the symbol.
     re_symbol_mask_type& symbol_re_mask = config.dmrs_symb_pos.test(i_symbol) ? re_mask_dmrs : re_mask;
 
-    // Count the number of active RE in the symbol.
+    // Count the amount of active RE in the symbol.
     unsigned nof_re_symbol = symbol_re_mask.count();
 
     // Skip symbol if it does not contain data.
@@ -187,7 +335,7 @@ void pusch_demodulator_impl::demodulate(pusch_codeword_buffer&      codeword_buf
 
     // Extract the Rx port noise variances from the channel estimation.
     for (unsigned i_port = 0; i_port != nof_rx_ports; ++i_port) {
-      noise_var_estimates[i_port] = estimates.get_noise_variance(i_port, 0);
+      noise_var_estimates[i_port] = estimates.get_noise_variance(i_port);
     }
 
     // Equalize channels and, for each Tx layer, combine contribution from all Rx antenna ports.
@@ -200,21 +348,12 @@ void pusch_demodulator_impl::demodulate(pusch_codeword_buffer&      codeword_buf
                     "Transform precoding is only possible with one layer (i.e. {}).",
                     config.nof_tx_layers);
       precoder->deprecode_ofdm_symbol(eq_re, eq_re);
+      precoder->deprecode_ofdm_symbol_noise(eq_noise_vars, eq_noise_vars);
     }
 
     // Estimate post equalization Signal-to-Interference-plus-Noise Ratio.
     if (compute_post_eq_sinr) {
-      noise_var_accumulate +=
-          std::accumulate(eq_noise_vars.begin(), eq_noise_vars.end(), 0.0F, [&sinr_softbit_count](float sum, float in) {
-            // Exclude outliers with infinite variance. This makes sure that handling of the DC carrier does not skew
-            // the SINR results.
-            if (std::isinf(in)) {
-              return sum;
-            }
-
-            ++sinr_softbit_count;
-            return sum + in;
-          });
+      symbol_noise_var_accumulate += filter_infinite_and_accumulate(symbol_sinr_softbit_count, eq_noise_vars);
     }
 
     // Counts the number of processed RE for the OFDM symbol.
@@ -246,9 +385,9 @@ void pusch_demodulator_impl::demodulate(pusch_codeword_buffer&      codeword_buf
 
       // Calculate EVM only if it is available.
       if (evm_calc) {
-        evm_accumulate +=
+        symbol_evm_accumulate +=
             static_cast<float>(codeword_block_size) * evm_calc->calculate(codeword, eq_re_block, config.modulation);
-        evm_symbol_count += codeword_block_size;
+        symbol_evm_symbol_count += codeword_block_size;
       }
 
       // Generate scrambling sequence.
@@ -265,21 +404,40 @@ void pusch_demodulator_impl::demodulate(pusch_codeword_buffer&      codeword_buf
       // be notified earlier than the new processed block to ensure the stats are available upon the notification of the
       // results.
       if (count_re_symbol == nof_re_symbol) {
-        if ((sinr_softbit_count != 0) && (noise_var_accumulate > 0.0)) {
-          float mean_noise_var = noise_var_accumulate / static_cast<float>(sinr_softbit_count);
+        // Prepare OFDM symbol stats and report.
+        pusch_demodulator_notifier::demodulation_stats stats;
+        if ((symbol_sinr_softbit_count != 0) && (symbol_noise_var_accumulate > 0.0)) {
+          float mean_noise_var = symbol_noise_var_accumulate / static_cast<float>(symbol_sinr_softbit_count);
           stats.sinr_dB.emplace(-convert_power_to_dB(mean_noise_var));
         } else {
           stats.sinr_dB.emplace(std::numeric_limits<float>::infinity());
         }
-        if (evm_symbol_count != 0) {
-          stats.evm.emplace(evm_accumulate / static_cast<float>(evm_symbol_count));
+        if (symbol_evm_symbol_count != 0) {
+          stats.evm.emplace(symbol_evm_accumulate / static_cast<float>(symbol_evm_symbol_count));
         }
-        notifier.on_provisional_stats(stats);
+        notifier.on_provisional_stats(i_symbol, stats);
+
+        // Prepare final stats.
+        total_evm_symbol_count += symbol_evm_symbol_count;
+        total_sinr_softbit_count += symbol_sinr_softbit_count;
+        total_noise_var_accumulate += symbol_noise_var_accumulate;
+        total_evm_accumulate += symbol_evm_accumulate;
       }
 
       // Notify a new processed block.
       codeword_buffer.on_new_block(codeword, scrambling_seq);
     }
+  }
+
+  pusch_demodulator_notifier::demodulation_stats stats;
+  if ((total_sinr_softbit_count != 0) && (total_noise_var_accumulate > 0.0)) {
+    float mean_noise_var = total_noise_var_accumulate / static_cast<float>(total_sinr_softbit_count);
+    stats.sinr_dB.emplace(-convert_power_to_dB(mean_noise_var));
+  } else {
+    stats.sinr_dB.emplace(std::numeric_limits<float>::infinity());
+  }
+  if (total_evm_symbol_count != 0) {
+    stats.evm.emplace(total_evm_accumulate / static_cast<float>(total_evm_symbol_count));
   }
 
   notifier.on_end_stats(stats);

@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -41,6 +41,7 @@ public:
               rrc_ue_context_update_notifier&        cu_cp_notifier_,
               rrc_ue_measurement_notifier&           measurement_notifier_,
               rrc_ue_cu_cp_ue_notifier&              cu_cp_ue_notifier_,
+              rrc_ue_event_notifier&                 metrics_notifier_,
               const ue_index_t                       ue_index_,
               const rnti_t                           c_rnti_,
               const rrc_cell_context                 cell_,
@@ -72,17 +73,24 @@ public:
   async_task<bool> handle_rrc_reconfiguration_request(const rrc_reconfiguration_procedure_request& msg) override;
   rrc_ue_handover_reconfiguration_context
   get_rrc_ue_handover_reconfiguration_context(const rrc_reconfiguration_procedure_request& request) override;
-  async_task<bool> handle_handover_reconfiguration_complete_expected(uint8_t transaction_id) override;
+  async_task<bool> handle_handover_reconfiguration_complete_expected(uint8_t                   transaction_id,
+                                                                     std::chrono::milliseconds timeout_ms) override;
   bool             store_ue_capabilities(byte_buffer ue_capabilities) override;
   async_task<bool> handle_rrc_ue_capability_transfer_request(const rrc_ue_capability_transfer_request& msg) override;
-  rrc_ue_release_context                get_rrc_ue_release_context(bool requires_rrc_message) override;
+  rrc_ue_release_context
+                                        get_rrc_ue_release_context(bool                                requires_rrc_message,
+                                                                   std::optional<std::chrono::seconds> release_wait_time = std::nullopt) override;
   rrc_ue_transfer_context               get_transfer_context() override;
   std::optional<rrc_meas_cfg>           generate_meas_config(std::optional<rrc_meas_cfg> current_meas_config) override;
+  byte_buffer                           get_packed_meas_config() override;
   byte_buffer                           get_rrc_handover_command(const rrc_reconfiguration_procedure_request& request,
                                                                  unsigned                                     transaction_id) override;
   byte_buffer                           handle_rrc_handover_command(byte_buffer cmd) override;
+  bool                                  handle_rrc_handover_preparation_info(byte_buffer pdu) override;
   void                                  create_srb(const srb_creation_message& msg) override;
   static_vector<srb_id_t, MAX_NOF_SRBS> get_srbs() override;
+  rrc_state                             get_rrc_state() const override;
+  void                                  cancel_handover_reconfiguration_transaction(uint8_t transaction_id) override;
 
   // rrc_ue_context_handler
   rrc_ue_reestablishment_context_response get_context() override;
@@ -118,6 +126,7 @@ private:
   rrc_ue_context_update_notifier& cu_cp_notifier;       // notifier to the CU-CP
   rrc_ue_measurement_notifier&    measurement_notifier; // cell measurement notifier
   rrc_ue_cu_cp_ue_notifier&       cu_cp_ue_notifier;    // cu-cp ue notifier
+  rrc_ue_event_notifier&          metrics_notifier;     // metrics notifier
   byte_buffer                     du_to_cu_container;   // initial RRC message from DU to CU
   rrc_ue_logger                   logger;
 

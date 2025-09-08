@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -28,7 +28,7 @@ namespace srsran {
 namespace csi_helper {
 
 /// \brief Helpers that checks if the slot is a candidate for CSI reporting for a given user.
-bool is_csi_reporting_slot(const serving_cell_config& ue_cfg, slot_point sl_tx);
+bool is_csi_reporting_slot(const csi_meas_config& csi_meas, slot_point sl_tx);
 
 } // namespace csi_helper
 } // namespace srsran

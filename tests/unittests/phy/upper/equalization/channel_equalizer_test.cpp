@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -28,22 +28,22 @@
 #include "srsran/srsvec/zero.h"
 #include "fmt/ostream.h"
 #include <gtest/gtest.h>
-#include <srsran/phy/constants.h>
 
 using namespace srsran;
 
-static constexpr float max_abs_eq_symbol_error = 1e-2;
-static constexpr float max_abs_eq_nvar_error   = 1e-2;
+static constexpr float max_abs_eq_symbol_error = 1.0F / 16.0F;
+static constexpr float max_abs_eq_nvar_error   = 1.0F / 64.0F;
 
 namespace srsran {
 
 std::ostream& operator<<(std::ostream& os, const test_case_t& test_case)
 {
   fmt::print(os,
-             "{}_{}Tx_{}Rx_{}_{}",
+             "{}_{}Tx_{}Rx_{}REs_{}beta_{}nvar",
              test_case.context.equalizer_type,
              test_case.context.nof_layers,
              test_case.context.nof_rx_ports,
+             test_case.context.nof_re,
              static_cast<unsigned>(test_case.context.scaling * 1000),
              static_cast<unsigned>(test_case.context.noise_var * 1000));
   return os;
@@ -116,12 +116,6 @@ protected:
     const test_case_t& t_case         = GetParam();
     const std::string& equalizer_type = t_case.context.equalizer_type;
 
-    // For now, check only Zero Forcing equalizer or MMSE equalizer with one layer - multi-layer MMSE not implemented
-    // yet.
-    if ((t_case.context.equalizer_type == "MMSE") && (t_case.context.nof_layers > 1)) {
-      GTEST_SKIP();
-    }
-
     // Read test case data.
     ReadData(t_case);
 
@@ -135,13 +129,13 @@ protected:
     ASSERT_NE(equalizer_factory, nullptr) << "Cannot create equalizer factory";
 
     // Create channel equalizer.
-    if (!test_equalizer) {
-      test_equalizer = equalizer_factory->create();
-      ASSERT_NE(test_equalizer, nullptr) << "Cannot create channel equalizer";
-    }
-
-    ASSERT_NE(equalizer_factory, nullptr) << "Cannot create equalizer factory";
+    test_equalizer = equalizer_factory->create();
     ASSERT_NE(test_equalizer, nullptr) << "Cannot create channel equalizer";
+
+    // Verify if the channel equalizer supports the channel topology and algorithm.
+    if (!test_equalizer->is_supported(t_case.context.nof_rx_ports, t_case.context.nof_layers)) {
+      GTEST_SKIP();
+    }
   }
 
   void ReadData(const ChannelEqualizerParams& t_case)

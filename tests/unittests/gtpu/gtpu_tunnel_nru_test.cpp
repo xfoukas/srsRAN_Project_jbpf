@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -175,6 +175,7 @@ TEST_F(gtpu_tunnel_nru_test, entity_creation)
 {
   // init GTP-U entity
   gtpu_tunnel_nru_creation_message msg = {};
+  msg.cfg.rx.node                      = nru_node::cu_up;
   msg.cfg.rx.local_teid                = gtpu_teid_t{0x1};
   msg.cfg.tx.peer_teid                 = gtpu_teid_t{0x2};
   msg.cfg.tx.peer_addr                 = "127.0.0.1";
@@ -184,13 +185,14 @@ TEST_F(gtpu_tunnel_nru_test, entity_creation)
   gtpu                                 = create_gtpu_tunnel_nru(msg);
 
   ASSERT_NE(gtpu, nullptr);
-};
+}
 
 /// \brief Test correct reception and transmission of a NR-U DL message
 TEST_F(gtpu_tunnel_nru_test, rx_tx_nru_dl_msg)
 {
   // init GTP-U entity
   gtpu_tunnel_nru_creation_message msg = {};
+  msg.cfg.rx.node                      = nru_node::du;
   msg.cfg.rx.local_teid                = gtpu_teid_t{0x1};
   msg.cfg.tx.peer_teid                 = gtpu_teid_t{0x2};
   msg.cfg.tx.peer_addr                 = "127.0.0.1";
@@ -207,7 +209,6 @@ TEST_F(gtpu_tunnel_nru_test, rx_tx_nru_dl_msg)
   pcap_helper.get_pcap().push_pdu(orig_pdu.deep_copy().value());
 
   // RX
-
   gtpu_tunnel_common_rx_upper_layer_interface* rx = gtpu->get_rx_upper_layer_interface();
   rx->handle_pdu(orig_pdu.deep_copy().value(), orig_addr);
 
@@ -217,18 +218,18 @@ TEST_F(gtpu_tunnel_nru_test, rx_tx_nru_dl_msg)
   ASSERT_EQ(gtpu_rx.last_dl_msg, exp_msg);
 
   // TX
-
   gtpu_tunnel_nru_tx_lower_layer_interface* tx = gtpu->get_tx_lower_layer_interface();
   tx->handle_sdu(std::move(gtpu_rx.last_dl_msg));
 
   ASSERT_EQ(gtpu_tx.last_tx, orig_pdu);
-};
+}
 
 /// \brief Test correct transmission and reception of a NR-U DL message (with T-PDU)
 TEST_F(gtpu_tunnel_nru_test, tx_rx_nru_dl_msg_with_t_pdu)
 {
   // init GTP-U entity
   gtpu_tunnel_nru_creation_message msg = {};
+  msg.cfg.rx.node                      = nru_node::du;
   msg.cfg.rx.local_teid                = gtpu_teid_t{0x1};
   msg.cfg.tx.peer_teid                 = gtpu_teid_t{0x2};
   msg.cfg.tx.peer_addr                 = "127.0.0.1";
@@ -244,7 +245,6 @@ TEST_F(gtpu_tunnel_nru_test, tx_rx_nru_dl_msg_with_t_pdu)
   tx_msg.t_pdu                       = byte_buffer::create(pdcp_pdu1_algo1_count0_snlen12).value();
 
   // TX
-
   gtpu_tunnel_nru_tx_lower_layer_interface* tx          = gtpu->get_tx_lower_layer_interface();
   auto                                      tx_msg_copy = tx_msg.deep_copy();
   ASSERT_TRUE(tx_msg_copy.has_value());
@@ -255,17 +255,17 @@ TEST_F(gtpu_tunnel_nru_test, tx_rx_nru_dl_msg_with_t_pdu)
   ASSERT_EQ(exp_pdu, gtpu_tx.last_tx);
 
   // RX
-
   gtpu_tunnel_common_rx_upper_layer_interface* rx = gtpu->get_rx_upper_layer_interface();
   rx->handle_pdu(std::move(gtpu_tx.last_tx), orig_addr);
   ASSERT_EQ(gtpu_rx.last_dl_msg, tx_msg);
-};
+}
 
 /// \brief Test correct transmission and reception of a NR-U UL message (no T-PDU)
 TEST_F(gtpu_tunnel_nru_test, tx_rx_nru_ul_msg)
 {
   // init GTP-U entity
   gtpu_tunnel_nru_creation_message msg = {};
+  msg.cfg.rx.node                      = nru_node::cu_up;
   msg.cfg.rx.local_teid                = gtpu_teid_t{0x1};
   msg.cfg.tx.peer_teid                 = gtpu_teid_t{0x2};
   msg.cfg.tx.peer_addr                 = "127.0.0.1";
@@ -281,7 +281,6 @@ TEST_F(gtpu_tunnel_nru_test, tx_rx_nru_ul_msg)
   tx_status.lost_nru_sn_ranges          = nru_lost_nru_sn_ranges{{2000001, 2000009}, {5000100, 5000321}};
 
   // TX
-
   gtpu_tunnel_nru_tx_lower_layer_interface* tx          = gtpu->get_tx_lower_layer_interface();
   auto                                      tx_msg_copy = tx_msg.deep_copy();
   ASSERT_TRUE(tx_msg_copy.has_value());
@@ -292,17 +291,17 @@ TEST_F(gtpu_tunnel_nru_test, tx_rx_nru_ul_msg)
   ASSERT_EQ(exp_pdu, gtpu_tx.last_tx);
 
   // RX
-
   gtpu_tunnel_common_rx_upper_layer_interface* rx = gtpu->get_rx_upper_layer_interface();
   rx->handle_pdu(std::move(gtpu_tx.last_tx), orig_addr);
   ASSERT_EQ(gtpu_rx.last_ul_msg, tx_msg);
-};
+}
 
 /// \brief Test correct transmission and reception of a NR-U UL message (with T-PDU)
 TEST_F(gtpu_tunnel_nru_test, tx_rx_nru_ul_msg_with_t_pdu)
 {
   // init GTP-U entity
   gtpu_tunnel_nru_creation_message msg = {};
+  msg.cfg.rx.node                      = nru_node::cu_up;
   msg.cfg.rx.local_teid                = gtpu_teid_t{0x1};
   msg.cfg.tx.peer_teid                 = gtpu_teid_t{0x2};
   msg.cfg.tx.peer_addr                 = "127.0.0.1";
@@ -319,7 +318,6 @@ TEST_F(gtpu_tunnel_nru_test, tx_rx_nru_ul_msg_with_t_pdu)
   tx_msg.t_pdu = byte_buffer_chain::create(byte_buffer::create(pdcp_pdu1_algo1_count0_snlen12).value()).value();
 
   // TX
-
   gtpu_tunnel_nru_tx_lower_layer_interface* tx          = gtpu->get_tx_lower_layer_interface();
   auto                                      tx_msg_copy = tx_msg.deep_copy();
   ASSERT_TRUE(tx_msg_copy.has_value());
@@ -330,11 +328,10 @@ TEST_F(gtpu_tunnel_nru_test, tx_rx_nru_ul_msg_with_t_pdu)
   ASSERT_EQ(exp_pdu, gtpu_tx.last_tx);
 
   // RX
-
   gtpu_tunnel_common_rx_upper_layer_interface* rx = gtpu->get_rx_upper_layer_interface();
   rx->handle_pdu(std::move(gtpu_tx.last_tx), orig_addr);
   ASSERT_EQ(gtpu_rx.last_ul_msg, tx_msg);
-};
+}
 
 void usage(const char* prog)
 {

@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -28,6 +28,13 @@
 namespace srsran {
 
 struct mac_cell_creation_request;
+class scheduler_cell_metrics_notifier;
+
+struct mac_scheduler_cell_creation_request {
+  const mac_cell_creation_request& cell_params;
+  std::chrono::milliseconds        metric_report_period;
+  scheduler_cell_metrics_notifier* metric_notifier;
+};
 
 /// \brief Adapter interface between MAC and scheduler that allows the srsGNB MAC to configure different scheduler
 /// implementations.
@@ -40,7 +47,7 @@ public:
   /// \brief Adds a new cell configuration to the scheduler and activates it.
   ///
   /// \param msg New cell configuration.
-  virtual void add_cell(const mac_cell_creation_request& msg) = 0;
+  virtual void add_cell(const mac_scheduler_cell_creation_request& msg) = 0;
 
   /// \brief Removes an existing cell from the scheduler.
   ///

@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -34,7 +34,9 @@ using namespace srsran;
 using namespace srs_cu_cp;
 
 du_processor_repository::du_processor_repository(du_repository_config cfg_) :
-  cfg(cfg_), logger(cfg.logger), du_cfg_mng(cfg.cu_cp.node.gnb_id, config_helpers::get_supported_plmns(cfg.cu_cp.ngaps))
+  cfg(cfg_),
+  logger(cfg.logger),
+  du_cfg_mng(cfg.cu_cp.node.gnb_id, config_helpers::get_supported_plmns(cfg.cu_cp.ngap.ngaps))
 {
 }
 
@@ -145,6 +147,17 @@ du_processor& du_processor_repository::get_du_processor(du_index_t du_index)
   srsran_assert(du_index != du_index_t::invalid, "Invalid du_index={}", du_index);
   srsran_assert(du_db.find(du_index) != du_db.end(), "DU not found du_index={}", du_index);
   return *du_db.at(du_index).processor;
+}
+
+std::vector<du_index_t> du_processor_repository::get_du_processor_indexes() const
+{
+  std::vector<du_index_t> du_indexes;
+  du_indexes.reserve(du_db.size());
+  for (const auto& du : du_db) {
+    du_indexes.push_back(du.first);
+  }
+
+  return du_indexes;
 }
 
 std::vector<metrics_report::du_info> du_processor_repository::handle_du_metrics_report_request() const

@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -23,6 +23,7 @@
 #include "../../support/resource_grid_test_doubles.h"
 #include "dmrs_pusch_estimator_test_data.h"
 #include "srsran/phy/support/support_factories.h"
+#include "srsran/phy/upper/channel_processors/pusch/pusch_processor_phy_capabilities.h"
 #include "srsran/phy/upper/signal_processors/signal_processor_factories.h"
 #include "srsran/srsvec/zero.h"
 #include "fmt/ostream.h"
@@ -50,23 +51,16 @@ std::ostream& operator<<(std::ostream& os, dmrs_pusch_estimator::configuration c
   return os;
 }
 
-std::ostream& operator<<(std::ostream& os, test_label label)
-{
-  std::string text = "DM-RS creation";
-  if (label == test_label::ch_estimation) {
-    text = "CH estimation";
-  }
-  fmt::print(os, text);
-  return os;
-}
-
 std::ostream& operator<<(std::ostream& os, test_case_t test_case)
 {
-  fmt::print(os, "{} - config={} symbols={};", test_case.label, test_case.config, test_case.rx_symbols.get_file_name());
+  fmt::print(os, "config={} symbols={};", test_case.config, test_case.rx_symbols.get_file_name());
   return os;
 }
 
 } // namespace srsran
+
+template <>
+struct fmt::formatter<srsran::dmrs_pusch_estimator::configuration> : ostream_formatter {};
 
 namespace {
 
@@ -75,6 +69,11 @@ class DmrsPuschEstimatorFixture : public ::testing::TestWithParam<test_case_t>
 protected:
   std::unique_ptr<dmrs_pusch_estimator> estimator;
   resource_grid_reader_spy              grid;
+
+  // Default constructor - initializes the resource grid with the maximum size possible.
+  DmrsPuschEstimatorFixture() : ::testing::TestWithParam<ParamType>(), grid(MAX_PORTS, MAX_NSYMB_PER_SLOT, MAX_NOF_PRBS)
+  {
+  }
 
   void SetUp() override
   {
@@ -105,8 +104,13 @@ protected:
     ASSERT_TRUE(port_estimator_factory);
 
     // Create estimator factory.
-    std::shared_ptr<dmrs_pusch_estimator_factory> estimator_factory = create_dmrs_pusch_estimator_factory_sw(
-        prg_factory, low_papr_sequence_gen_factory_factory, port_estimator_factory);
+    std::shared_ptr<dmrs_pusch_estimator_factory> estimator_factory =
+        create_dmrs_pusch_estimator_factory_sw(prg_factory,
+                                               low_papr_sequence_gen_factory_factory,
+                                               port_estimator_factory,
+                                               port_channel_estimator_fd_smoothing_strategy::filter,
+                                               port_channel_estimator_td_interpolation_strategy::average,
+                                               true);
     ASSERT_TRUE(estimator_factory);
 
     // Create actual channel estimator.
@@ -131,14 +135,10 @@ TEST_P(DmrsPuschEstimatorFixture, Creation)
 
   dmrs_pusch_estimator::configuration config = GetParam().config;
 
-  // This is a 'dmrs-position' test.
-  if (GetParam().label != test_label::dmrs_creation) {
-    GTEST_SKIP() << "Not a DM-RS creation test, skipping.";
-  }
-
   // The current estimator does not support Type2 DM-RS.
-  // As well, the MIMO case must be double-checked.
-  if ((config.get_dmrs_type() == dmrs_type::TYPE2) || (config.get_nof_tx_layers() > 1)) {
+  // As well, the MIMO case only works with at most two layers.
+  if ((config.get_dmrs_type() == dmrs_type::TYPE2) ||
+      (config.get_nof_tx_layers() > get_pusch_processor_phy_capabilities().max_nof_layers)) {
     GTEST_SKIP() << "Configuration not supported yet, skipping.";
   }
 
@@ -200,68 +200,6 @@ TEST_P(DmrsPuschEstimatorFixture, Creation)
       }
     }
   }
-}
-
-static bool are_estimates_ok(span<const resource_grid_reader_spy::expected_entry_t> expected,
-                             const channel_estimate&                                computed)
-{
-  unsigned            old_symbol = 15;
-  span<const cbf16_t> computed_symbol;
-
-  for (const auto& this_expected : expected) {
-    unsigned i_symbol = this_expected.symbol;
-    unsigned i_sc     = this_expected.subcarrier;
-    cf_t     value    = this_expected.value;
-
-    if (i_symbol != old_symbol) {
-      old_symbol      = i_symbol;
-      computed_symbol = computed.get_symbol_ch_estimate(i_symbol, 0, 0);
-    }
-
-    if (std::abs(to_cf(computed_symbol[i_sc]) - value) > tolerance * std::abs(value)) {
-      return false;
-    }
-  }
-  return true;
-}
-
-TEST_P(DmrsPuschEstimatorFixture, Average)
-{
-  dmrs_pusch_estimator::configuration config = GetParam().config;
-
-  // This is a 'dmrs-position' test.
-  if (GetParam().label != test_label::ch_estimation) {
-    GTEST_SKIP() << "Not a channel estimation test, skipping.";
-  }
-
-  // The current estimator does not support Type2 DM-RS.
-  // As well, the MIMO case must be double-checked.
-  if ((config.get_dmrs_type() == dmrs_type::TYPE2) || (config.get_nof_tx_layers() > 1)) {
-    GTEST_SKIP() << "Configuration not supported yet, skipping.";
-  }
-
-  unsigned nof_allocated_res = config.rb_mask.count() * NRE * config.nof_symbols;
-
-  // Read expected channel estimates.
-  std::vector<resource_grid_reader_spy::expected_entry_t> expected_estimates = GetParam().ch_estimates.read();
-  ASSERT_EQ(expected_estimates.size(), nof_allocated_res) << fmt::format(
-      "Number of channel estimates mismatch: configured {}, provided {}", nof_allocated_res, expected_estimates.size());
-
-  channel_estimate ch_est;
-
-  // Estimate.
-  estimator->estimate(ch_est, grid, config);
-
-  // First, assert the channel estimate gets the proper dimensions.
-  channel_estimate::channel_estimate_dimensions ch_estimate_dims = ch_est.size();
-  ASSERT_EQ(ch_estimate_dims.nof_prb, config.rb_mask.size()) << "Wrong number of PRBs.";
-  ASSERT_EQ(ch_estimate_dims.nof_symbols, config.nof_symbols + config.first_symbol) << "Wrong number of symbols.";
-  ASSERT_EQ(ch_estimate_dims.nof_rx_ports, config.rx_ports.size()) << "Wrong number of Rx ports.";
-  ASSERT_EQ(ch_estimate_dims.nof_tx_layers, config.get_nof_tx_layers()) << "Wrong number of Tx layers.";
-
-  // Assert that the channel estimates are correct.
-  ASSERT_TRUE(are_estimates_ok(expected_estimates, ch_est));
-  ASSERT_NEAR(ch_est.get_rsrp(0, 0), GetParam().est_rsrp, tolerance);
 }
 
 // Creates test suite with all the test cases.

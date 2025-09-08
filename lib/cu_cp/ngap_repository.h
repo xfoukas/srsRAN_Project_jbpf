@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -23,6 +23,7 @@
 #pragma once
 
 #include "adapters/ngap_adapters.h"
+#include "task_schedulers/ngap_task_scheduler.h"
 #include "srsran/cu_cp/cu_cp_configuration.h"
 #include "srsran/cu_cp/cu_cp_types.h"
 #include "srsran/ngap/gateways/n2_connection_client.h"
@@ -31,6 +32,16 @@
 
 namespace srsran {
 namespace srs_cu_cp {
+
+/// Interface used to capture the NGAP metrics from all the connected AMFs to the CU-CP.
+class ngap_repository_metrics_handler
+{
+public:
+  virtual ~ngap_repository_metrics_handler() = default;
+
+  /// \brief Handle new metrics request for all the AMF nodes connected to the CU-CP.
+  virtual std::vector<ngap_info> handle_ngap_metrics_report_request() const = 0;
+};
 
 struct cu_cp_configuration;
 
@@ -41,14 +52,14 @@ struct ngap_repository_config {
   srslog::basic_logger&      logger;
 };
 
-class ngap_repository
+class ngap_repository : public ngap_repository_metrics_handler
 {
 public:
   explicit ngap_repository(ngap_repository_config cfg_);
 
   /// \brief Adds a NGAP object to the CU-CP.
   /// \return A pointer to the interface of the added NGAP object if it was successfully created, a nullptr otherwise.
-  ngap_interface* add_ngap(amf_index_t amf_index, const cu_cp_configuration::ngap_params& config);
+  ngap_interface* add_ngap(amf_index_t amf_index, const cu_cp_configuration::ngap_config& config);
 
   /// \brief Updates the PLMN lookup table with the PLMNs supported by the connected NGAP.
   /// \param[in] amf_index The AMF index to identify the NGAP.
@@ -59,11 +70,20 @@ public:
   /// \return The interface of the NGAP for the given PLMN if it is found, nullptr if no NGAP for the PLMN is found.
   ngap_interface* find_ngap(const plmn_identity& plmn);
 
+  /// \brief Checks whether a AMF with the specified AMF index is in the connected NGAPs.
+  /// \param[in] amf_index The AMF index to identify the NGAP.
+  /// \return The interface of the NGAP for the given AMF index if it is found, nullptr not.
+  ngap_interface* find_ngap(const amf_index_t& amf_index);
+
   /// \brief Get the all NGAP interfaces.
   std::map<amf_index_t, ngap_interface*> get_ngaps();
 
+  ngap_task_scheduler& get_ngap_task_scheduler() { return amf_task_sched; }
+
   /// Number of NGAPs managed by the CU-CP.
   size_t get_nof_ngaps() const { return ngap_db.size(); }
+
+  std::vector<ngap_info> handle_ngap_metrics_report_request() const override;
 
   /// Number of UEs managed by the CU-CP.
   size_t get_nof_ngap_ues();
@@ -81,6 +101,8 @@ private:
 
   ngap_repository_config cfg;
   srslog::basic_logger&  logger;
+
+  ngap_task_scheduler amf_task_sched;
 
   std::unordered_map<plmn_identity, amf_index_t> plmn_to_amf_index;
   std::map<amf_index_t, ngap_context>            ngap_db;

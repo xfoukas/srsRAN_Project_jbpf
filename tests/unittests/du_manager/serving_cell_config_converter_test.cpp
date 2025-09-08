@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -106,9 +106,9 @@ srs_config make_initial_srs_config()
       .id                    = srs_config::srs_res_id_t{0U, static_cast<srs_config::srs_res_id>(0)},
       .nof_ports             = srs_config::srs_resource::nof_srs_ports::port1,
       .tx_comb               = tx_comb,
-      .res_mapping           = srs_config::srs_resource::resource_mapping{.start_pos   = 2,
-                                                                          .nof_symb    = srs_nof_symbols::n1,
-                                                                          .rept_factor = srs_nof_symbols::n1},
+      .res_mapping           = srs_config::resource_mapping{.start_pos   = 2,
+                                                            .nof_symb    = srs_nof_symbols::n1,
+                                                            .rept_factor = srs_nof_symbols::n1},
       .freq_domain_pos       = 0,
       .freq_domain_shift     = 0,
       .freq_hop              = srs_config::srs_resource::frequency_hopping{.c_srs = 0, .b_srs = 0, .b_hop = 0},
@@ -760,13 +760,13 @@ TEST(serving_cell_config_converter_test, test_ue_custom_srs_cfg_conversion)
       .id                    = srs_config::srs_res_id_t{0U, static_cast<srs_config::srs_res_id>(1)},
       .nof_ports             = srs_config::srs_resource::nof_srs_ports::port1,
       .tx_comb               = tx_comb,
-      .res_mapping           = srs_config::srs_resource::resource_mapping{.start_pos   = 50,
-                                                                          .nof_symb    = srs_nof_symbols::n1,
-                                                                          .rept_factor = srs_nof_symbols::n1},
+      .res_mapping           = srs_config::resource_mapping{.start_pos   = 50,
+                                                            .nof_symb    = srs_nof_symbols::n1,
+                                                            .rept_factor = srs_nof_symbols::n1},
       .freq_domain_pos       = 0,
       .freq_domain_shift     = 0,
       .freq_hop              = srs_config::srs_resource::frequency_hopping{.c_srs = 0, .b_srs = 0, .b_hop = 0},
-      .grp_or_seq_hop        = srs_group_or_sequence_hopping::groupHopping,
+      .grp_or_seq_hop        = srs_group_or_sequence_hopping::group_hopping,
       .res_type              = srs_resource_type::semi_persistent,
       .sequence_id           = 41,
       .spatial_relation_info = srs_config::srs_resource::srs_spatial_relation_info{
@@ -1137,11 +1137,10 @@ TEST(serving_cell_config_converter_test, test_custom_csi_meas_cfg_conversion)
 
   dest_csi_meas_cfg.report_trigger_size = 2;
 
-  dest_csi_meas_cfg.aperiodic_trigger_state_list.emplace();
   auto associated_report_cfg_info_list =
       csi_associated_report_config_info{.report_cfg_id   = static_cast<csi_report_config_id_t>(1),
                                         .res_for_channel = csi_associated_report_config_info::csi_ssb_resource_set{1}};
-  dest_csi_meas_cfg.aperiodic_trigger_state_list.value().push_back(
+  dest_csi_meas_cfg.aperiodic_trigger_state_list.push_back(
       csi_aperiodic_trigger_state{.associated_report_cfg_info_list = {associated_report_cfg_info_list}});
 
   dest_csi_meas_cfg.semi_persistent_on_pusch_trigger_state_list.emplace();

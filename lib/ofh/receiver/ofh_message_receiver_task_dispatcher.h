@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -33,8 +33,11 @@ namespace ofh {
 class ofh_message_receiver_task_dispatcher : public message_receiver
 {
 public:
-  ofh_message_receiver_task_dispatcher(message_receiver& msg_receiver_, task_executor& executor_) :
-    msg_receiver(msg_receiver_), executor(executor_)
+  ofh_message_receiver_task_dispatcher(srslog::basic_logger& logger_,
+                                       message_receiver&     msg_receiver_,
+                                       task_executor&        executor_,
+                                       unsigned              sector_) :
+    logger(logger_), msg_receiver(msg_receiver_), executor(executor_), sector(sector_)
   {
   }
 
@@ -42,16 +45,21 @@ public:
   void on_new_frame(ether::unique_rx_buffer buffer) override
   {
     if (!executor.execute([this, buff = std::move(buffer)]() mutable { msg_receiver.on_new_frame(std::move(buff)); })) {
-      srslog::fetch_basic_logger("OFH").warning("Failed to dispatch receiver task");
+      logger.warning("Failed to dispatch receiver task for sector#{}", sector);
     }
   }
 
   // See interface for documentation.
   ether::receiver& get_ethernet_receiver() override { return msg_receiver.get_ethernet_receiver(); }
 
+  // See interface for the documentation.
+  message_receiver_metrics_collector* get_metrics_collector() override { return msg_receiver.get_metrics_collector(); }
+
 private:
-  message_receiver& msg_receiver;
-  task_executor&    executor;
+  srslog::basic_logger& logger;
+  message_receiver&     msg_receiver;
+  task_executor&        executor;
+  const unsigned        sector;
 };
 
 } // namespace ofh

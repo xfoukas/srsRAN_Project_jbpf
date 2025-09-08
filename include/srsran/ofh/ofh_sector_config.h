@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -26,6 +26,7 @@
 #include "srsran/ofh/compression/compression_params.h"
 #include "srsran/ofh/ethernet/ethernet_mac_address.h"
 #include "srsran/ofh/ethernet/ethernet_receiver.h"
+#include "srsran/ofh/ethernet/ethernet_transmitter.h"
 #include "srsran/ofh/ofh_constants.h"
 #include "srsran/ofh/ofh_uplane_rx_symbol_notifier.h"
 #include "srsran/ofh/receiver/ofh_receiver_configuration.h"
@@ -41,6 +42,8 @@ class task_executor;
 
 namespace ofh {
 
+class error_notifier;
+
 /// Open Fronthaul sector configuration.
 struct sector_configuration {
   /// Radio sector identifier.
@@ -49,6 +52,8 @@ struct sector_configuration {
   std::string interface;
   /// Promiscuous mode flag.
   bool is_promiscuous_mode_enabled;
+  /// Ethernet link status checking flag.
+  bool is_link_status_check_enabled;
   /// MTU size.
   units::bytes mtu_size;
   /// Destination MAC address, corresponds to the Radio Unit MAC address.
@@ -77,42 +82,46 @@ struct sector_configuration {
   bs_channel_bandwidth ru_operating_bw;
 
   /// PRACH eAxC.
-  static_vector<unsigned, ofh::MAX_NOF_SUPPORTED_EAXC> prach_eaxc;
+  static_vector<unsigned, MAX_NOF_SUPPORTED_EAXC> prach_eaxc;
   /// Downlink eAxC.
-  static_vector<unsigned, ofh::MAX_NOF_SUPPORTED_EAXC> dl_eaxc;
+  static_vector<unsigned, MAX_NOF_SUPPORTED_EAXC> dl_eaxc;
   /// Uplink eAxC.
-  static_vector<unsigned, ofh::MAX_NOF_SUPPORTED_EAXC> ul_eaxc;
+  static_vector<unsigned, MAX_NOF_SUPPORTED_EAXC> ul_eaxc;
 
   /// Enables the Control-Plane PRACH message signalling.
   bool is_prach_control_plane_enabled = false;
-  /// \brief Downlink broadcast flag.
-  ///
-  /// If enabled, broadcasts the contents of a single antenna port to all downlink RU eAxCs.
-  bool is_downlink_broadcast_enabled = false;
+  /// Ignore the start symbol value received in the PRACH U-Plane packets.
+  bool ignore_prach_start_symbol = false;
   /// If set to true, the payload size encoded in a eCPRI header is ignored.
   bool ignore_ecpri_payload_size_field = false;
   /// If set to true, the sequence id encoded in a eCPRI packet is ignored.
   bool ignore_ecpri_seq_id_field = false;
-  /// If set to true, warn of unreceived Radio Unit frames.
-  bool warn_unreceived_ru_frames = true;
+  /// If set to true, metrics are enabled in the sector.
+  bool are_metrics_enabled = false;
+  /// Warn of unreceived Radio Unit frames status.
+  warn_unreceived_ru_frames log_unreceived_ru_frames = warn_unreceived_ru_frames::after_traffic_detection;
   /// Uplink compression parameters.
-  ofh::ru_compression_params ul_compression_params;
+  ru_compression_params ul_compression_params;
   /// Downlink compression parameters.
-  ofh::ru_compression_params dl_compression_params;
+  ru_compression_params dl_compression_params;
   /// PRACH compression parameters.
-  ofh::ru_compression_params prach_compression_params;
+  ru_compression_params prach_compression_params;
   /// Downlink static compression header flag.
   bool is_downlink_static_compr_hdr_enabled = true;
   /// Uplink static compression header flag.
   bool is_uplink_static_compr_hdr_enabled = true;
   /// IQ data scaling to be applied prior to Downlink data compression.
   float iq_scaling;
+  /// C-Plane PRACH FFT size (to be used in Type 3 messages).
+  ofh::cplane_fft_size c_plane_prach_fft_len = ofh::cplane_fft_size::fft_4096;
   /// \brief Number of slots the timing handler is notified in advance of the transmission time.
   ///
   /// Sets the maximum allowed processing delay in slots.
   unsigned max_processing_delay_slots;
   /// Downlink processing time in microseconds.
   std::chrono::microseconds dl_processing_time;
+  /// Uplink request processing time in microseconds.
+  std::chrono::microseconds ul_processing_time;
   /// Number of reception antennas.
   unsigned nof_antennas_ul;
 
@@ -126,16 +135,18 @@ struct sector_configuration {
 struct sector_dependencies {
   /// Logger.
   srslog::basic_logger* logger = nullptr;
+  /// Error notifier.
+  error_notifier* err_notifier = nullptr;
   /// Downlink task executor.
-  task_executor* downlink_executor;
+  task_executor* downlink_executor = nullptr;
   /// Message transmitter and receiver task executor.
   task_executor* txrx_executor = nullptr;
   /// Uplink task executor.
   task_executor* uplink_executor = nullptr;
   /// User-Plane received symbol notifier.
-  std::shared_ptr<ofh::uplane_rx_symbol_notifier> notifier;
-  /// Optional Ethernet gateway.
-  std::optional<std::unique_ptr<ether::gateway>> eth_gateway;
+  uplane_rx_symbol_notifier* notifier = nullptr;
+  /// Optional Ethernet transmitter.
+  std::optional<std::unique_ptr<ether::transmitter>> eth_transmitter;
   /// Optional Ethernet receiver.
   std::optional<std::unique_ptr<ether::receiver>> eth_receiver;
 };

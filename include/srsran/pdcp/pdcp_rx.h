@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -47,6 +47,7 @@
  *    inherit or if a notifier that the PDCP will keep as a member.
  *
  */
+
 namespace srsran {
 
 /// This interface represents the data entry point of the receiving side of a PDCP entity.
@@ -117,5 +118,15 @@ public:
 
   /// Trigger re-establishment
   virtual void reestablish(security::sec_128_as_config sec_cfg) = 0;
+
+  /// Tell the PDCP entity to notify when it is finished with processing
+  /// the currently in-flight PDUs. No further PDUs should be push after calling
+  /// this function until after calling `restart_pdu_processing()`.
+  virtual void notify_pdu_processing_stopped() = 0;
+
+  /// Tell the PDCP entity that reconfiguration is finished, and it is safe to
+  /// have in-flight PDUs again. Should not be called without previously calling
+  /// `notify_pdu_processing_stopped()`
+  virtual void restart_pdu_processing() = 0;
 };
 } // namespace srsran

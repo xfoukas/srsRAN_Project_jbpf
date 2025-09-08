@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -22,18 +22,22 @@
 
 #pragma once
 
-#include "srsran/adt/byte_buffer.h"
 #include "srsran/pdcp/pdcp_rx.h"
 #include "srsran/pdcp/pdcp_rx_metrics.h"
 #include "srsran/pdcp/pdcp_tx.h"
 #include "srsran/pdcp/pdcp_tx_metrics.h"
-#include "srsran/security/security.h"
+#include "srsran/ran/rb_id.h"
+#include "srsran/support/async/manual_event.h"
+#include "srsran/support/timers.h"
 
 namespace srsran {
 
 struct pdcp_metrics_container {
+  uint32_t                  ue_index;
+  rb_id_t                   rb_id;
   pdcp_tx_metrics_container tx;
   pdcp_rx_metrics_container rx;
+  timer_duration            metrics_period;
 };
 
 /// Interface for the PDCP bearer.
@@ -49,7 +53,30 @@ public:
   virtual pdcp_tx_upper_data_interface&    get_tx_upper_data_interface()    = 0;
   virtual pdcp_rx_upper_control_interface& get_rx_upper_control_interface() = 0;
   virtual pdcp_rx_lower_interface&         get_rx_lower_interface()         = 0;
-  virtual pdcp_metrics_container           get_metrics()                    = 0;
+  virtual void                             stop()                           = 0;
+  virtual manual_event_flag&               rx_crypto_awaitable()            = 0;
 };
 
 } // namespace srsran
+
+namespace fmt {
+template <>
+struct formatter<srsran::pdcp_metrics_container> {
+  template <typename ParseContext>
+  auto parse(ParseContext& ctx)
+  {
+    return ctx.begin();
+  }
+
+  template <typename FormatContext>
+  auto format(srsran::pdcp_metrics_container m, FormatContext& ctx) const
+  {
+    return format_to(ctx.out(),
+                     "ue={} rb={} tx=[{}] rx=[{}]",
+                     m.ue_index,
+                     m.rb_id,
+                     format_pdcp_tx_metrics(m.metrics_period, m.tx),
+                     format_pdcp_rx_metrics(m.metrics_period, m.rx));
+  }
+};
+} // namespace fmt

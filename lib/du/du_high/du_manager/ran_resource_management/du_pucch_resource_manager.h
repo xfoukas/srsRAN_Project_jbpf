@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -23,7 +23,7 @@
 #pragma once
 
 #include "du_ue_resource_config.h"
-#include "pucch_resource_generator.h"
+#include "srsran/scheduler/config/pucch_resource_generator.h"
 #include <set>
 
 namespace srsran {
@@ -47,6 +47,18 @@ public:
 
   /// \brief Deallocate PUCCH resources previously given to a UE. The resources are returned back to a pool.
   void dealloc_resources(cell_group_config& cell_grp_cfg);
+
+  /// Gets the current number of free PUCCH SR resource ID and offset pairs.
+  unsigned get_nof_sr_free_res_offsets(du_cell_index_t cell_idx) const
+  {
+    return cells[cell_idx].sr_res_offset_free_list.size();
+  }
+
+  /// Gets the current number of free PUCCH CSI resource ID and offset pairs.
+  unsigned get_nof_csi_free_res_offsets(du_cell_index_t cell_idx) const
+  {
+    return cells[cell_idx].csi_res_offset_free_list.size();
+  }
 
 private:
   unsigned sr_du_res_idx_to_pucch_res_idx(unsigned sr_du_res_idx) const;

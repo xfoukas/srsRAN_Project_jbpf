@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -24,9 +24,7 @@
 
 #include "cell_scheduler.h"
 #include "config/sched_config_manager.h"
-#include "logging/scheduler_event_logger.h"
 #include "logging/scheduler_metrics_handler.h"
-#include "logging/scheduler_result_logger.h"
 #include "ue_scheduling/ue_scheduler.h"
 #include "srsran/scheduler/config/scheduler_expert_config.h"
 #include "srsran/scheduler/mac_scheduler.h"
@@ -39,9 +37,17 @@ public:
   explicit scheduler_impl(const scheduler_config& sched_cfg);
 
   bool handle_cell_configuration_request(const sched_cell_configuration_request_message& msg) override;
+  void handle_cell_removal_request(du_cell_index_t cell_index) override;
+
+  // Cell activity.
+  void handle_cell_activation_request(du_cell_index_t cell_index) override;
+  void handle_cell_deactivation_request(du_cell_index_t cell_index) override;
+
+  // Sys Info handling.
+  void handle_si_update_request(const si_scheduling_update_request& req) override;
 
   // scheduler_slot_handler interface methods.
-  const sched_result& slot_indication(slot_point sl_tx, du_cell_index_t cell_index) override;
+  const sched_result& slot_indication(slot_point sl_tx, du_cell_index_t cell_index) noexcept override;
   void handle_error_indication(slot_point sl_tx, du_cell_index_t cell_index, error_outcome event) override;
 
   // DU manager events.
@@ -67,6 +73,10 @@ public:
   void handle_uci_indication(const uci_indication& uci) override;
   void handle_srs_indication(const srs_indication& srs) override;
 
+  // Positioning events.
+  void handle_positioning_measurement_request(const positioning_measurement_request& req) override;
+  void handle_positioning_measurement_stop(du_cell_index_t cell_index, rnti_t pos_rnti) override;
+
 private:
   const scheduler_expert_config expert_params;
 
@@ -78,11 +88,11 @@ private:
   // Manager of configurations forwarded to the scheduler.
   sched_config_manager cfg_mng;
 
-  /// Container of DU Cell-specific resources.
-  slotted_id_table<du_cell_index_t, std::unique_ptr<cell_scheduler>, MAX_NOF_DU_CELLS> cells;
-
   /// Container of DU Cell Group-specific resources.
   slotted_id_table<du_cell_group_index_t, std::unique_ptr<ue_scheduler>, MAX_DU_CELL_GROUPS> groups;
+
+  /// Container of DU Cell-specific resources.
+  slotted_id_table<du_cell_index_t, std::unique_ptr<cell_scheduler>, MAX_NOF_DU_CELLS> cells;
 };
 
 } // namespace srsran

@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -22,10 +22,10 @@
 
 #pragma once
 
-#include "srsran/adt/bounded_bitset.h"
-#include "srsran/phy/constants.h"
 #include "srsran/phy/support/precoding_configuration.h"
+#include "srsran/phy/support/resource_grid_writer.h"
 #include "srsran/ran/cyclic_prefix.h"
+#include "srsran/ran/resource_allocation/rb_bitmap.h"
 #include "srsran/ran/slot_point.h"
 
 namespace srsran {
@@ -45,7 +45,7 @@ public:
     /// Reference point for PDCCH DMRS \e k in RBs.
     unsigned reference_point_k_rb;
     /// Indicates the PRB used for the PDCCH transmission. The bit at position zero corresponds to CRB0.
-    bounded_bitset<MAX_RB> rb_mask;
+    crb_bitmap rb_mask;
     /// CORESET start symbol index.
     unsigned start_symbol_index;
     /// CORESET duration in symbols.
@@ -61,11 +61,11 @@ public:
   /// Default destructor.
   virtual ~dmrs_pdcch_processor() = default;
 
-  /// \brief Generates and maps DMRS for PDCCH according to TS 38.211 section 7.4.1.3.
+  /// \brief Generates and maps DMRS for PDCCH according to TS38.211 Section 7.4.1.3.
   ///
-  /// \param[out] mapper Resource grid mapper interface.
+  /// \param[out] grid   Resource grid writer interface.
   /// \param[in] config  Required configuration to generate and map the signal.
-  virtual void map(resource_grid_mapper& mapper, const config_t& config) = 0;
+  virtual void map(resource_grid_writer& grid, const config_t& config) = 0;
 };
 
 } // namespace srsran

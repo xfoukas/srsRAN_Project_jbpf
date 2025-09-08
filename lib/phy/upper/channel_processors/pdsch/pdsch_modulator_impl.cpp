@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -23,7 +23,7 @@
 #include "pdsch_modulator_impl.h"
 #include "srsran/phy/support/resource_grid_mapper.h"
 #include "srsran/srsvec/bit.h"
-#include "srsran/support/math_utils.h"
+#include "srsran/support/math/math_utils.h"
 
 using namespace srsran;
 
@@ -49,49 +49,28 @@ float pdsch_modulator_impl::modulate(span<ci8_t> d_pdsch, const bit_buffer& b_ha
   return modulator->modulate(d_pdsch, b_hat, modulation);
 }
 
-void pdsch_modulator_impl::map(resource_grid_mapper& mapper,
+void pdsch_modulator_impl::map(resource_grid_writer& grid,
                                span<const ci8_t>     data_re,
                                float                 scaling,
                                const config_t&       config)
 {
-  // Get the PRB allocation mask.
-  const bounded_bitset<MAX_RB> prb_allocation_mask =
-      config.freq_allocation.get_prb_mask(config.bwp_start_rb, config.bwp_size_rb);
-
-  // First symbol used in this transmission.
-  unsigned start_symbol_index = config.start_symbol_index;
-
-  // Calculate the end symbol index (excluded) and assert it does not exceed the slot boundary.
-  unsigned end_symbol_index = config.start_symbol_index + config.nof_symbols;
-
-  srsran_assert(end_symbol_index <= MAX_NSYMB_PER_SLOT,
-                "The time allocation of the transmission [{}, {}) exceeds the slot boundary.",
-                start_symbol_index,
-                end_symbol_index);
+  srsran_assert(config.time_alloc.stop() <= MAX_NSYMB_PER_SLOT,
+                "The time allocation of the transmission {} exceeds the slot boundary.",
+                config.time_alloc);
 
   // PDSCH OFDM symbol mask.
   symbol_slot_mask symbols;
-  symbols.fill(start_symbol_index, end_symbol_index);
-
-  // Allocation pattern for the mapper.
-  re_pattern_list allocation;
-  re_pattern      pdsch_pattern;
+  symbols.fill(config.time_alloc.start(), config.time_alloc.stop());
 
   // Reserved REs, including DM-RS and CSI-RS.
   re_pattern_list reserved(config.reserved);
 
   // Get DM-RS RE pattern.
   re_pattern dmrs_pattern = config.dmrs_config_type.get_dmrs_pattern(
-      config.bwp_start_rb, config.bwp_size_rb, config.nof_cdm_groups_without_data, config.dmrs_symb_pos);
+      config.bwp.start(), config.bwp.length(), config.nof_cdm_groups_without_data, config.dmrs_symb_pos);
 
   // Merge DM-RS RE pattern into the reserved RE patterns.
   reserved.merge(dmrs_pattern);
-
-  // Set PDSCH allocation pattern.
-  pdsch_pattern.prb_mask = prb_allocation_mask;
-  pdsch_pattern.re_mask  = ~re_prb_mask();
-  pdsch_pattern.symbols  = symbols;
-  allocation.merge(pdsch_pattern);
 
   if (std::isnormal(config.scaling)) {
     scaling *= config.scaling;
@@ -101,11 +80,15 @@ void pdsch_modulator_impl::map(resource_grid_mapper& mapper,
 
   resource_grid_mapper::symbol_buffer_adapter buffer_adapter(data_re);
 
+  // Prepare resource grid mapper allocation.
+  resource_grid_mapper::allocation_configuration allocation = {
+      .bwp = config.bwp, .freq_alloc = config.freq_allocation, .time_alloc = config.time_alloc};
+
   // Map into the resource grid.
-  mapper.map(buffer_adapter, allocation, reserved, precoding2);
+  mapper->map(grid, buffer_adapter, allocation, reserved, precoding2);
 }
 
-void pdsch_modulator_impl::modulate(resource_grid_mapper&            mapper,
+void pdsch_modulator_impl::modulate(resource_grid_writer&            grid,
                                     span<const bit_buffer>           codewords,
                                     const pdsch_modulator::config_t& config)
 {
@@ -128,5 +111,5 @@ void pdsch_modulator_impl::modulate(resource_grid_mapper&            mapper,
   float scaling = modulate(pdsch_symbols, b_hat, mod);
 
   // Map resource elements.
-  map(mapper, pdsch_symbols, scaling, config);
+  map(grid, pdsch_symbols, scaling, config);
 }

@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -22,6 +22,7 @@
 
 #pragma once
 
+#include "mac_dl/mac_dl_configurator.h"
 #include "srsran/mac/mac.h"
 #include "srsran/support/async/async_task.h"
 
@@ -42,7 +43,7 @@ public:
   virtual void handle_ue_config_applied(du_ue_index_t ue_index) = 0;
 };
 
-class mac_dl_configurator : public mac_cell_manager
+class mac_dl_configurator : public mac_dl_cell_manager
 {
 public:
   virtual ~mac_dl_configurator() = default;
@@ -51,9 +52,10 @@ public:
   virtual async_task<bool> add_ue(const mac_ue_create_request& msg) = 0;
 
   /// \brief Update the bearers of an existing UE in the MAC DL processor.
-  virtual async_task<bool> addmod_bearers(du_ue_index_t                                  ue_index,
-                                          du_cell_index_t                                pcell_index,
-                                          const std::vector<mac_logical_channel_config>& logical_channels) = 0;
+  /// Note: logical_channels must outlive the returned async_task until its completion.
+  virtual async_task<bool> addmod_bearers(du_ue_index_t                          ue_index,
+                                          du_cell_index_t                        pcell_index,
+                                          span<const mac_logical_channel_config> logical_channels) = 0;
 
   /// \brief Remove the bearers of an existing UE in the MAC DL processor.
   virtual async_task<bool>
@@ -61,6 +63,9 @@ public:
 
   /// \brief Remove an existing UE in the MAC DL processor.
   virtual async_task<void> remove_ue(const mac_ue_delete_request& msg) = 0;
+
+  /// Fetch MAC cell time-slot mapper.
+  virtual mac_cell_time_mapper& get_time_mapper(du_cell_index_t cell_index) = 0;
 };
 
 class mac_ctrl_configurator

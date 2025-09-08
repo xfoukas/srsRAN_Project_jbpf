@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -22,8 +22,6 @@
 
 #pragma once
 
-#include "unique_thread.h"
-#include "srsran/adt/concurrent_queue.h"
 #include "srsran/adt/mpmc_queue.h"
 #include "srsran/adt/mutexed_mpmc_queue.h"
 #include "srsran/adt/mutexed_mpsc_queue.h"
@@ -32,6 +30,7 @@
 #include "srsran/srslog/srslog.h"
 #include "srsran/support/compiler.h"
 #include "srsran/support/executors/task_executor.h"
+#include "srsran/support/executors/unique_thread.h"
 
 namespace srsran {
 
@@ -87,7 +86,7 @@ public:
 
   /// \brief Push a new task to FIFO to be processed by the task worker. If the task FIFO is full, enqueueing fails.
   /// \return true if task was successfully enqueued. False if task FIFO was full.
-  SRSRAN_NODISCARD bool push_task(task_t&& task) { return pending_tasks.try_push(std::move(task)); }
+  [[nodiscard]] bool push_task(task_t&& task) { return pending_tasks.try_push(std::move(task)); }
 
   /// \brief Push a new task to FIFO to be processed by the task worker. If the task FIFO is full, this call blocks,
   /// until the FIFO has space to enqueue the task.
@@ -145,7 +144,7 @@ public:
 
   general_task_worker_executor(general_task_worker<QueuePolicy, WaitPolicy>& worker_) : worker(&worker_) {}
 
-  SRSRAN_NODISCARD bool execute(unique_task task) override
+  [[nodiscard]] bool execute(unique_task task) override
   {
     if (can_run_task_inline()) {
       // Same thread. Run task right away.
@@ -155,7 +154,7 @@ public:
     return defer(std::move(task));
   }
 
-  SRSRAN_NODISCARD bool defer(unique_task task) override { return worker->push_task(std::move(task)); }
+  [[nodiscard]] bool defer(unique_task task) override { return worker->push_task(std::move(task)); }
 
   /// Determine whether the caller is in the same thread as the worker this executor adapts.
   bool can_run_task_inline() const { return worker->get_id() == std::this_thread::get_id(); }
@@ -167,14 +166,14 @@ private:
 using task_worker_executor = general_task_worker_executor<>;
 
 template <concurrent_queue_policy QueuePolicy, concurrent_queue_wait_policy WaitPolicy>
-inline general_task_worker_executor<QueuePolicy, WaitPolicy>
+general_task_worker_executor<QueuePolicy, WaitPolicy>
 make_task_executor(general_task_worker<QueuePolicy, WaitPolicy>& w)
 {
   return general_task_worker_executor<QueuePolicy, WaitPolicy>(w);
 }
 
 template <concurrent_queue_policy QueuePolicy, concurrent_queue_wait_policy WaitPolicy>
-inline std::unique_ptr<task_executor> make_task_executor_ptr(general_task_worker<QueuePolicy, WaitPolicy>& w)
+std::unique_ptr<task_executor> make_task_executor_ptr(general_task_worker<QueuePolicy, WaitPolicy>& w)
 {
   return std::make_unique<general_task_worker_executor<QueuePolicy, WaitPolicy>>(w);
 }

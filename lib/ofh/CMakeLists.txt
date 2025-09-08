@@ -1,5 +1,5 @@
 #
-# Copyright 2021-2024 Software Radio Systems Limited
+# Copyright 2021-2025 Software Radio Systems Limited
 #
 # This file is part of srsRAN
 #
@@ -26,7 +26,7 @@ add_subdirectory(serdes)
 add_subdirectory(timing)
 add_subdirectory(transmitter)
 
-add_library(srsran_ofh ofh_factories.cpp ofh_sector_impl.cpp ofh_sector_controller.cpp)
+add_library(srsran_ofh ofh_factories.cpp ofh_metrics_collector_impl.cpp ofh_sector_impl.cpp ofh_sector_controller.cpp)
 target_link_libraries(srsran_ofh srsran_ofh_receiver srsran_ofh_timing srsran_ofh_transmitter srsran_ofh_message_serdes)
 
 if (DPDK_FOUND)

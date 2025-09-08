@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -44,7 +44,7 @@ TEST(fapi_phy_ul_pusch_adaptor_test, valid_pdu_pass)
   unsigned                                nof_antenna_ports = nof_antenna_ports_dist(rgen);
   auto                                    uci_part2_tools   = fapi_adaptor::generate_uci_part2_correspondence(1);
 
-  uplink_processor::pusch_pdu pdu;
+  uplink_pdu_slot_repository::pusch_pdu pdu;
   convert_pusch_fapi_to_phy(pdu,
                             fapi_pdu,
                             sfn,
@@ -91,7 +91,7 @@ TEST(fapi_phy_ul_pusch_adaptor_test, valid_pdu_pass)
   ASSERT_EQ(fapi_pdu.pusch_maintenance_v3.tb_size_lbrm_bytes, phy_pdu.tbs_lbrm);
 
   // RB allocation.
-  bounded_bitset<MAX_RB> vrb_bitmap(fapi_pdu.bwp_size);
+  vrb_bitmap vrb_bitmap(fapi_pdu.bwp_size);
   for (unsigned vrb_index = 0, vrb_index_end = fapi_pdu.bwp_size; vrb_index != vrb_index_end; ++vrb_index) {
     unsigned byte = vrb_index / 8;
     unsigned bit  = vrb_index % 8;

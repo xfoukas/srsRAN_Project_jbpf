@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -24,7 +24,6 @@
 #include "lib/e1ap/cu_cp/e1ap_cu_cp_asn1_helpers.h"
 #include "lib/f1ap/cu_cp/f1ap_asn1_helpers.h"
 #include "tests/unittests/e1ap/common/e1ap_cu_cp_test_messages.h"
-#include "tests/unittests/f1ap/common/f1ap_cu_test_messages.h"
 #include "srsran/e1ap/common/e1ap_message.h"
 #include "srsran/f1ap/f1ap_message.h"
 
@@ -49,22 +48,22 @@ srsran::srs_cu_cp::generate_pdu_session_resource_setup(ue_index_t ue_index,
   req.ue_index = ue_index;
 
   req.ue_aggregate_maximum_bit_rate_dl = 1000;
+  req.ue_aggregate_maximum_bit_rate_ul = 1000;
 
   for (unsigned i = 0; i < num_pdu_sessions; ++i) {
     pdu_session_id_t pdu_session_id = uint_to_pdu_session_id(i + 1);
 
     cu_cp_pdu_session_res_setup_item item;
     item.pdu_session_id = pdu_session_id;
-    bool ret            = item.pdu_session_nas_pdu.resize(2);
-    (void)ret;
+    (void)item.pdu_session_nas_pdu.resize(2);
     item.pdu_session_nas_pdu[0] = 0xaa;
     item.pdu_session_nas_pdu[1] = 0xbb;
-    item.s_nssai.sst            = 1;
+    item.s_nssai.sst            = slice_service_type{1};
 
     item.pdu_session_aggregate_maximum_bit_rate_dl = 100;
     item.pdu_session_aggregate_maximum_bit_rate_ul = 100;
     item.ul_ngu_up_tnl_info = {transport_layer_address::create_from_string("127.0.0.1"), int_to_gtpu_teid(0x1)};
-    item.pdu_session_type   = "ipv4";
+    item.pdu_session_type   = pdu_session_type_t::ipv4;
     item.security_ind       = {};
 
     for (unsigned k = 0; k < num_qos_flows; ++k) {
@@ -84,7 +83,7 @@ srsran::srs_cu_cp::generate_pdu_session_resource_setup(ue_index_t ue_index,
   }
 
   return req;
-};
+}
 
 cu_cp_pdu_session_resource_release_command srsran::srs_cu_cp::generate_pdu_session_resource_release(ue_index_t ue_index)
 {
@@ -101,7 +100,7 @@ cu_cp_pdu_session_resource_release_command srsran::srs_cu_cp::generate_pdu_sessi
   cmd.pdu_session_res_to_release_list_rel_cmd.emplace(pdu_session_id, pdu_session_res_to_release_item_rel_cmd);
 
   return cmd;
-};
+}
 
 cu_cp_pdu_session_resource_modify_request
 srsran::srs_cu_cp::generate_pdu_session_resource_modification(ue_index_t ue_index, unsigned psi, unsigned qfi)
@@ -164,7 +163,7 @@ srsran::srs_cu_cp::generate_e1ap_bearer_context_setup_response(gnb_cu_cp_ue_e1ap
   fill_e1ap_bearer_context_setup_response(resp, asn1_res.pdu.successful_outcome().value.bearer_context_setup_resp());
 
   return resp;
-};
+}
 
 e1ap_bearer_context_modification_response
 srsran::srs_cu_cp::generate_e1ap_bearer_context_modification_response(gnb_cu_cp_ue_e1ap_id_t cu_cp_ue_e1ap_id,
@@ -178,4 +177,4 @@ srsran::srs_cu_cp::generate_e1ap_bearer_context_modification_response(gnb_cu_cp_
                                                  asn1_res.pdu.successful_outcome().value.bearer_context_mod_resp());
 
   return resp;
-};
+}

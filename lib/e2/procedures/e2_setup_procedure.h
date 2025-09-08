@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -19,15 +19,12 @@
  * and at http://www.gnu.org/licenses/.
  *
  */
+
 #pragma once
 
-#include "../common/e2ap_asn1_utils.h"
-#include "srsran/asn1/e2ap/e2ap.h"
 #include "srsran/e2/e2.h"
 #include "srsran/e2/e2_event_manager.h"
 #include "srsran/support/async/async_task.h"
-
-class e2_event_manager;
 
 namespace srsran {
 

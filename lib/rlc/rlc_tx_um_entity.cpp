@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -27,6 +27,24 @@
 
 #ifdef JBPF_ENABLED
 #include "jbpf_srsran_hooks.h"
+
+#define CALL_JBPF_HOOK(hook_fn, ...) {                           \
+  struct jbpf_rlc_ctx_info jbpf_ctx = {0};  \
+  jbpf_ctx.ctx_id = 0; \
+  jbpf_ctx.gnb_du_id = (uint64_t)gnb_du_id;\
+  jbpf_ctx.du_ue_index = ue_index;\
+  jbpf_ctx.is_srb = rb_id.is_srb();\
+  jbpf_ctx.rb_id = rb_id.is_srb() ? srb_id_to_uint(rb_id.get_srb_id()) \
+                                   : drb_id_to_uint(rb_id.get_drb_id());\
+  jbpf_ctx.direction = JBPF_DL; \
+  jbpf_ctx.rlc_mode = JBPF_RLC_MODE_UM; \
+  jbpf_ctx.u.um_tx.sdu_queue_info = {                             \
+      true, \
+      sdu_queue.get_state().n_sdus,                             \
+      sdu_queue.get_state().n_bytes};                           \
+  hook_fn(&jbpf_ctx, ##__VA_ARGS__); \
+}
+
 #endif
 
 using namespace srsran;
@@ -38,7 +56,7 @@ rlc_tx_um_entity::rlc_tx_um_entity(gnb_du_id_t                          du_id_,
                                    rlc_tx_upper_layer_data_notifier&    upper_dn_,
                                    rlc_tx_upper_layer_control_notifier& upper_cn_,
                                    rlc_tx_lower_layer_notifier&         lower_dn_,
-                                   rlc_metrics_aggregator&              metrics_agg_,
+                                   rlc_bearer_metrics_collector&        metrics_coll_,
                                    rlc_pcap&                            pcap_,
                                    task_executor&                       pcell_executor_,
                                    task_executor&                       ue_executor_,
@@ -49,7 +67,7 @@ rlc_tx_um_entity::rlc_tx_um_entity(gnb_du_id_t                          du_id_,
                 upper_dn_,
                 upper_cn_,
                 lower_dn_,
-                metrics_agg_,
+                metrics_coll_,
                 pcap_,
                 pcell_executor_,
                 ue_executor_,
@@ -60,7 +78,7 @@ rlc_tx_um_entity::rlc_tx_um_entity(gnb_du_id_t                          du_id_,
   head_len_full(rlc_um_pdu_header_size_complete_sdu),
   head_len_first(rlc_um_pdu_header_size_no_so(cfg.sn_field_length)),
   head_len_not_first(rlc_um_pdu_header_size_with_so(cfg.sn_field_length)),
-  pcap_context(ue_index_, rb_id_, config)
+  pcap_context(ue_index, rb_id_, config)
 {
   metrics_low.metrics_set_mode(rlc_mode::um_bidir);
 
@@ -68,18 +86,22 @@ rlc_tx_um_entity::rlc_tx_um_entity(gnb_du_id_t                          du_id_,
   srsran_assert(config.pdcp_sn_len == pdcp_sn_size::size12bits || config.pdcp_sn_len == pdcp_sn_size::size18bits,
                 "Cannot create RLC TX AM, unsupported pdcp_sn_len={}. du={} ue={} {}",
                 config.pdcp_sn_len,
-                du_id_,
-                ue_index_,
+                fmt::underlying(gnb_du_id),
+                fmt::underlying(ue_index),
                 rb_id);
 
   logger.log_info("RLC UM configured. {}", cfg);
+
+#ifdef JBPF_ENABLED
+  CALL_JBPF_HOOK(hook_rlc_dl_creation);
+#endif  
 }
 
 // TS 38.322 v16.2.0 Sec. 5.2.2.1
 void rlc_tx_um_entity::handle_sdu(byte_buffer sdu_buf, bool is_retx)
 {
   rlc_sdu sdu_;
-  sdu_.time_of_arrival = std::chrono::high_resolution_clock::now();
+  sdu_.time_of_arrival = std::chrono::steady_clock::now();
 
   sdu_.buf     = std::move(sdu_buf);
   sdu_.pdcp_sn = get_pdcp_sn(sdu_.buf, cfg.pdcp_sn_len, /* is_srb = */ false, logger.get_basic_logger());
@@ -88,16 +110,6 @@ void rlc_tx_um_entity::handle_sdu(byte_buffer sdu_buf, bool is_retx)
   if (SRSRAN_UNLIKELY(is_retx)) {
     logger.log_error("Ignored unexpected PDCP retransmission flag in RLC UM SDU");
   }
-
-#ifdef JBPF_ENABLED
-  {
-    int rb_id_value = rb_id.is_srb() ? srb_id_to_uint(rb_id.get_srb_id()) 
-                                    : drb_id_to_uint(rb_id.get_drb_id());
-    struct jbpf_rlc_ctx_info ctx_info = {0, (uint64_t)gnb_du_id, ue_index, rb_id.is_srb(), 
-      (uint8_t)rb_id_value, JBPF_RLC_MODE_UM};
-    hook_rlc_dl_new_sdu(&ctx_info, sdu_.buf.length(), sdu_.pdcp_sn.has_value() ? sdu_.pdcp_sn.value() : 0);
-  }
-#endif
 
   size_t sdu_length = sdu_.buf.length();
   if (sdu_queue.write(sdu_)) {
@@ -113,6 +125,10 @@ void rlc_tx_um_entity::handle_sdu(byte_buffer sdu_buf, bool is_retx)
     logger.log_info("Dropped SDU. sdu_len={} pdcp_sn={} {}", sdu_length, sdu_.pdcp_sn, sdu_queue.get_state());
     metrics_high.metrics_add_lost_sdus(1);
   }
+
+#ifdef JBPF_ENABLED
+  CALL_JBPF_HOOK(hook_rlc_dl_new_sdu, sdu_.buf.length(), sdu_.pdcp_sn.has_value() ? sdu_.pdcp_sn.value() : 0, false);
+#endif  
 }
 
 // TS 38.322 v16.2.0 Sec. 5.4
@@ -120,27 +136,23 @@ void rlc_tx_um_entity::discard_sdu(uint32_t pdcp_sn)
 {
   if (sdu_queue.try_discard(pdcp_sn)) {
     logger.log_info("Discarded SDU. pdcp_sn={}", pdcp_sn);
-
 #ifdef JBPF_ENABLED
-    {
-      int rb_id_value = rb_id.is_srb() ? srb_id_to_uint(rb_id.get_srb_id()) 
-                                      : drb_id_to_uint(rb_id.get_drb_id());
-      struct jbpf_rlc_ctx_info ctx_info = {0, (uint64_t)gnb_du_id, ue_index, rb_id.is_srb(), 
-        (uint8_t)rb_id_value, JBPF_RLC_MODE_UM};
-      hook_rlc_dl_discard_sdu(&ctx_info, pdcp_sn);
-    }
-#endif
-  
+  CALL_JBPF_HOOK(hook_rlc_dl_discard_sdu, pdcp_sn, true);
+#endif    
     metrics_high.metrics_add_discard(1);
     handle_changed_buffer_state();
   } else {
     logger.log_info("Could not discard SDU. pdcp_sn={}", pdcp_sn);
+#ifdef JBPF_ENABLED
+    CALL_JBPF_HOOK(hook_rlc_dl_discard_sdu, pdcp_sn, false);
+#endif    
     metrics_high.metrics_add_discard_failure(1);
   }
 }
 
 // TS 38.322 v16.2.0 Sec. 5.2.2.1
-size_t rlc_tx_um_entity::pull_pdu(span<uint8_t> mac_sdu_buf)
+size_t rlc_tx_um_entity::pull_pdu(span<uint8_t> mac_sdu_buf) noexcept SRSRAN_RTSAN_NONBLOCKING
+
 {
   uint32_t grant_len = mac_sdu_buf.size();
   logger.log_debug("MAC opportunity. grant_len={}", grant_len);
@@ -155,11 +167,6 @@ size_t rlc_tx_um_entity::pull_pdu(span<uint8_t> mac_sdu_buf)
     logger.log_debug("Cannot fit SDU into grant_len={}. head_len_full={}", grant_len, head_len_full);
     return 0;
   }
-
-  // Multiple threads can read from the SDU queue and change the
-  // RLC UM TX state (current SDU, tx_next and next_so).
-  // As such we need to lock to access these variables.
-  std::lock_guard<std::mutex> lock(mutex);
 
   // Get a new SDU, if none is currently being transmitted
   if (sdu.buf.empty()) {
@@ -179,23 +186,19 @@ size_t rlc_tx_um_entity::pull_pdu(span<uint8_t> mac_sdu_buf)
 
     // Notify the upper layer about the beginning of the transfer of the current SDU
     if (sdu.pdcp_sn.has_value()) {
+
+#ifdef JBPF_ENABLED
+      auto latency = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() -
+                                                                      sdu.time_of_arrival);
+      CALL_JBPF_HOOK(hook_rlc_dl_sdu_send_started, sdu.pdcp_sn.value(), false, (uint64_t)latency.count());
+#endif
+
       // Use size of SDU queue for desired_buf_size
       //
       // From TS 38.425 Sec. 5.4.2.1:
       // - If the value of the desired buffer size is 0, the hosting node shall stop sending any data per bearer.
       // - If the value of the desired buffer size in b) above is greater than 0, (...) the hosting node may send up to
       //   this amount of data per bearer beyond the "Highest Transmitted NR PDCP SN" for RLC UM.
-
-#ifdef JBPF_ENABLED
-      {
-        int rb_id_value = rb_id.is_srb() ? srb_id_to_uint(rb_id.get_srb_id()) 
-                                        : drb_id_to_uint(rb_id.get_drb_id());
-        struct jbpf_rlc_ctx_info ctx_info = {0, (uint64_t)gnb_du_id, ue_index, rb_id.is_srb(), 
-          (uint8_t)rb_id_value, JBPF_RLC_MODE_UM};
-        hook_rlc_dl_sdu_send_started(&ctx_info, sdu.pdcp_sn.value(), false);
-      }
-#endif
-    
       upper_dn.on_transmitted_sdu(sdu.pdcp_sn.value(), cfg.queue_size_bytes);
     }
   }
@@ -248,20 +251,24 @@ size_t rlc_tx_um_entity::pull_pdu(span<uint8_t> mac_sdu_buf)
   if (header.si == rlc_si_field::full_sdu || header.si == rlc_si_field::last_segment) {
 
 #ifdef JBPF_ENABLED
-    {
-      int rb_id_value = rb_id.is_srb() ? srb_id_to_uint(rb_id.get_srb_id()) 
-                                      : drb_id_to_uint(rb_id.get_drb_id());
-      struct jbpf_rlc_ctx_info ctx_info = {0, (uint64_t)gnb_du_id, ue_index, rb_id.is_srb(), 
-        (uint8_t)rb_id_value, JBPF_RLC_MODE_UM};
-      hook_rlc_dl_sdu_send_completed(&ctx_info, sdu.pdcp_sn.has_value() ? sdu.pdcp_sn.value() : 0, false);
-    }
+    auto latency = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() -
+                                                                      sdu.time_of_arrival);
+    CALL_JBPF_HOOK(hook_rlc_dl_sdu_send_completed, sdu.pdcp_sn.has_value() ? sdu.pdcp_sn.value() : 0, false,
+                    (uint64_t)latency.count());
 #endif
 
-    sdu.buf.clear();
+    // Recycle SDU buffer in non real-time UE executor
+    auto release_sdu_func = TRACE_TASK([sdu = std::move(sdu.buf)]() mutable {
+      // leaving this scope will implicitly delete the SDU
+    });
+    if (!ue_executor.defer(std::move(release_sdu_func))) {
+      logger.log_warning("Cannot release transmitted SDU in UE executor. Releasing from pcell executor.");
+      sdu.buf.clear();
+    }
     next_so = 0;
     if (metrics_low.is_enabled()) {
-      auto sdu_latency = std::chrono::duration_cast<std::chrono::nanoseconds>(
-          std::chrono::high_resolution_clock::now() - sdu.time_of_arrival);
+      auto sdu_latency =
+          std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - sdu.time_of_arrival);
       metrics_low.metrics_add_sdu_latency_us(sdu_latency.count() / 1000);
       metrics_low.metrics_add_pulled_sdus(1);
     }
@@ -294,13 +301,7 @@ size_t rlc_tx_um_entity::pull_pdu(span<uint8_t> mac_sdu_buf)
   }
 
 #ifdef JBPF_ENABLED
-  {
-    int rb_id_value = rb_id.is_srb() ? srb_id_to_uint(rb_id.get_srb_id()) 
-                                    : drb_id_to_uint(rb_id.get_drb_id());
-    struct jbpf_rlc_ctx_info ctx_info = {0, (uint64_t)gnb_du_id, ue_index, rb_id.is_srb(), 
-      (uint8_t)rb_id_value, JBPF_RLC_MODE_UM};
-    hook_rlc_dl_tx_pdu(&ctx_info, JBPF_RLC_PDUTYPE_STATUS, (uint32_t)pdu_size, 0);
-  }
+  CALL_JBPF_HOOK(hook_rlc_dl_tx_pdu, JBPF_RLC_PDUTYPE_DATA, (uint32_t)pdu_size);
 #endif  
 
   return pdu_size;
@@ -351,7 +352,7 @@ void rlc_tx_um_entity::handle_changed_buffer_state()
   if (not pending_buffer_state.test_and_set(std::memory_order_seq_cst)) {
     logger.log_debug("Triggering buffer state update to lower layer");
     // Redirect handling of status to pcell_executor
-    if (not pcell_executor.defer([this]() { update_mac_buffer_state(); })) {
+    if (not pcell_executor.defer(TRACE_TASK([this]() { update_mac_buffer_state(); }))) {
       logger.log_error("Failed to enqueue buffer state update");
     }
   } else {
@@ -359,12 +360,14 @@ void rlc_tx_um_entity::handle_changed_buffer_state()
   }
 }
 
-void rlc_tx_um_entity::update_mac_buffer_state()
+void rlc_tx_um_entity::update_mac_buffer_state() noexcept SRSRAN_RTSAN_NONBLOCKING
 {
   pending_buffer_state.clear(std::memory_order_seq_cst);
-  unsigned bs = get_buffer_state();
-  if (not(bs > MAX_DL_PDU_LENGTH && prev_buffer_state > MAX_DL_PDU_LENGTH)) {
+  rlc_buffer_state bs = get_buffer_state();
+  if (bs.pending_bytes <= MAX_DL_PDU_LENGTH || prev_buffer_state.pending_bytes <= MAX_DL_PDU_LENGTH ||
+      suspend_bs_notif_barring) {
     logger.log_debug("Sending buffer state update to lower layer. bs={}", bs);
+    suspend_bs_notif_barring = false;
     lower_dn.on_buffer_state_update(bs);
   } else {
     logger.log_debug(
@@ -376,9 +379,9 @@ void rlc_tx_um_entity::update_mac_buffer_state()
 }
 
 // TS 38.322 v16.2.0 Sec 5.5
-uint32_t rlc_tx_um_entity::get_buffer_state()
+rlc_buffer_state rlc_tx_um_entity::get_buffer_state()
 {
-  std::lock_guard<std::mutex> lock(mutex);
+  rlc_buffer_state bs = {};
 
   // minimum bytes needed to tx all queued SDUs + each header
   rlc_sdu_queue_lockfree::state_t queue_state = sdu_queue.get_state();
@@ -388,7 +391,17 @@ uint32_t rlc_tx_um_entity::get_buffer_state()
   uint32_t segment_bytes = 0;
   if (not sdu.buf.empty()) {
     segment_bytes = (sdu.buf.length() - next_so) + head_len_not_first;
+    bs.hol_toa    = sdu.time_of_arrival;
+  } else {
+    const rlc_sdu* next_sdu = sdu_queue.front();
+    if (next_sdu != nullptr) {
+      bs.hol_toa = next_sdu->time_of_arrival;
+    }
   }
 
-  return queue_bytes + segment_bytes;
+  bs.pending_bytes = queue_bytes + segment_bytes;
+  if (bs.pending_bytes <= MAX_DL_PDU_LENGTH) {
+    suspend_bs_notif_barring = true;
+  }
+  return bs;
 }

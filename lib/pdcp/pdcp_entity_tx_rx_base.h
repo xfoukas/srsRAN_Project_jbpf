@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -24,7 +24,7 @@
 
 #include "pdcp_sn.h"
 #include "srsran/pdcp/pdcp_config.h"
-#include "srsran/ran/lcid.h"
+#include "srsran/ran/rb_id.h"
 
 namespace srsran {
 
@@ -69,10 +69,12 @@ constexpr uint32_t pdcp_window_size(pdcp_sn_size sn_size)
 class pdcp_entity_tx_rx_base
 {
 protected:
-  explicit pdcp_entity_tx_rx_base(rb_id_t       rb_id_,
+  explicit pdcp_entity_tx_rx_base(uint32_t      ue_index_,
+                                  rb_id_t       rb_id_,
                                   pdcp_rb_type  rb_type_,
                                   pdcp_rlc_mode rlc_mode_,
                                   pdcp_sn_size  sn_size_) :
+    ue_index(ue_index_),
     rb_id(rb_id_),
     rb_type(rb_type_),
     rlc_mode(rlc_mode_),
@@ -92,6 +94,7 @@ protected:
   /// BEARER (defined as the radio bearer identifier in TS 33.501. It will use the value RB identity –1 as in TS 38.331)
   /// Ref: TS 38.323 Sec. 5.9 Integrity protection and verification
   uint8_t bearer_id;
+  uint32_t ue_index;
   rb_id_t rb_id;
 
   /*

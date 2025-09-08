@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -40,10 +40,17 @@ srsran::config_validators::validate_sched_ue_creation_request_message(const sche
 
     HANDLE_ERROR(validate_pdsch_cfg(cell.serv_cell_cfg));
 
-    if (cell.serv_cell_cfg.ul_config.has_value() and cell.serv_cell_cfg.ul_config->init_ul_bwp.pucch_cfg.has_value() and
-        cell.serv_cell_cfg.ul_config->init_ul_bwp.srs_cfg.has_value()) {
-      HANDLE_ERROR(validate_pucch_cfg(cell.serv_cell_cfg, cell_cfg.dl_carrier.nof_ant));
-      HANDLE_ERROR(validate_srs_cfg(cell.serv_cell_cfg));
+    if (cell.serv_cell_cfg.ul_config.has_value()) {
+      if (cell.serv_cell_cfg.ul_config->init_ul_bwp.pucch_cfg.has_value() and
+          cell.serv_cell_cfg.ul_config->init_ul_bwp.srs_cfg.has_value() and
+          cell_cfg.ul_cfg_common.init_ul_bwp.pucch_cfg_common.has_value()) {
+        const pucch_config_common& pucch_cfg_common = cell_cfg.ul_cfg_common.init_ul_bwp.pucch_cfg_common.value();
+        HANDLE_ERROR(validate_pucch_cfg(cell.serv_cell_cfg, pucch_cfg_common, cell_cfg.dl_carrier.nof_ant));
+        HANDLE_ERROR(validate_srs_cfg(cell.serv_cell_cfg));
+      }
+
+      HANDLE_ERROR(
+          validate_pusch_cfg(cell.serv_cell_cfg.ul_config.value(), cell.serv_cell_cfg.csi_meas_cfg.has_value()));
     }
 
     HANDLE_ERROR(validate_csi_meas_cfg(cell.serv_cell_cfg, cell_cfg.tdd_cfg_common));

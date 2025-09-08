@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -21,17 +21,16 @@
  */
 
 #include "lib/scheduler/scheduler_impl.h"
-#include "lib/scheduler/ue_scheduling/ue_cell_grid_allocator.h"
-#include "lib/scheduler/ue_scheduling/ue_fallback_scheduler.h"
 #include "test_utils/dummy_test_components.h"
 #include "tests/test_doubles/scheduler/pucch_res_test_builder_helper.h"
+#include "tests/test_doubles/scheduler/scheduler_config_helper.h"
 #include "tests/unittests/scheduler/test_utils/config_generators.h"
 #include "tests/unittests/scheduler/test_utils/scheduler_test_suite.h"
-#include "srsran/adt/optional.h"
 #include "srsran/ran/duplex_mode.h"
 #include "srsran/ran/pdcch/search_space.h"
-#include "srsran/scheduler/scheduler_dci.h"
-#include "srsran/scheduler/scheduler_slot_handler.h"
+#include "srsran/ran/pusch/pusch_configuration.h"
+#include "srsran/scheduler/config/logical_channel_config_factory.h"
+#include "srsran/scheduler/result/dci_info.h"
 #include "srsran/support/test_utils.h"
 #include <gtest/gtest.h>
 #include <unordered_map>
@@ -67,7 +66,7 @@ struct test_bench {
 
   explicit test_bench(const scheduler_expert_config&                  expert_cfg_,
                       const sched_cell_configuration_request_message& cell_req) :
-    expert_cfg{expert_cfg_}, cell_cfg{expert_cfg, cell_req}, sch{scheduler_config{expert_cfg, cfg_notif, metric_notif}}
+    expert_cfg{expert_cfg_}, cell_cfg{expert_cfg, cell_req}, sch{scheduler_config{expert_cfg, cfg_notif}}
   {
     sch.handle_cell_configuration_request(cell_req);
   }
@@ -91,8 +90,6 @@ protected:
   srslog::basic_logger&         test_logger = srslog::fetch_basic_logger("TEST", true);
   std::optional<test_bench>     bench;
   pucch_res_builder_test_helper pucch_cfg_builder;
-
-  unsigned last_csi_report_offset = 0;
 
   // We use this value to account for the case when the PDSCH or PUSCH is allocated several slots in advance.
   unsigned max_k_value = 0;
@@ -130,19 +127,19 @@ protected:
     test_logger.set_context(current_slot.sfn(), current_slot.slot_index());
     bench->sched_res = &bench->sch.slot_indication(current_slot, to_du_cell_index(0));
 
-    srs_du::pucch_builder_params pucch_basic_params{.nof_ue_pucch_f0_or_f1_res_harq = 8,
-                                                    .nof_ue_pucch_f2_res_harq       = 8,
-                                                    .nof_sr_resources               = 8,
-                                                    .nof_csi_resources              = 8};
-    auto&                        f1_params = pucch_basic_params.f0_or_f1_params.emplace<srs_du::pucch_f1_params>();
-    f1_params.nof_cyc_shifts               = srs_du::nof_cyclic_shifts::twelve;
-    f1_params.occ_supported                = true;
+    pucch_builder_params pucch_basic_params{.nof_ue_pucch_f0_or_f1_res_harq       = 8,
+                                            .nof_ue_pucch_f2_or_f3_or_f4_res_harq = 8,
+                                            .nof_sr_resources                     = 8,
+                                            .nof_csi_resources                    = 8};
+    auto&                f1_params = pucch_basic_params.f0_or_f1_params.emplace<pucch_f1_params>();
+    f1_params.nof_cyc_shifts       = pucch_nof_cyclic_shifts::twelve;
+    f1_params.occ_supported        = true;
     pucch_cfg_builder.setup(bench->cell_cfg, pucch_basic_params);
   }
 
   void run_slot()
   {
-    current_slot++;
+    ++current_slot;
 
     mac_logger.set_context(current_slot.sfn(), current_slot.slot_index());
     test_logger.set_context(current_slot.sfn(), current_slot.slot_index());
@@ -153,18 +150,24 @@ protected:
     test_scheduler_result_consistency(bench->cell_cfg, current_slot, *bench->sched_res);
   }
 
-  static scheduler_expert_config create_expert_config(sch_mcs_index max_msg4_mcs_index,
-                                                      bool          enable_csi_rs_pdsch_multiplexing = true)
+  static scheduler_expert_config create_expert_config(sch_mcs_index            max_msg4_mcs_index,
+                                                      vrb_to_prb::mapping_type pdsch_interleaving_bundle_size,
+                                                      bool                     enable_csi_rs_pdsch_multiplexing = true)
   {
     auto cfg                                = config_helpers::make_default_scheduler_expert_config();
     cfg.ue.enable_csi_rs_pdsch_multiplexing = enable_csi_rs_pdsch_multiplexing;
     cfg.ue.max_msg4_mcs                     = max_msg4_mcs_index;
+    cfg.ue.pdsch_interleaving_bundle_size   = pdsch_interleaving_bundle_size;
     return cfg;
   }
 
-  sched_cell_configuration_request_message create_custom_cell_config_request(duplex_mode mode) const
+  sched_cell_configuration_request_message
+  create_custom_cell_config_request(duplex_mode mode, bool enable_pusch_transform_precoding) const
   {
-    return test_helpers::make_default_sched_cell_configuration_request(create_custom_cell_cfg_builder_params(mode));
+    auto msg =
+        sched_config_helper::make_default_sched_cell_configuration_request(create_custom_cell_cfg_builder_params(mode));
+    msg.ul_cfg_common.init_ul_bwp.rach_cfg_common->msg3_transform_precoder = enable_pusch_transform_precoding;
+    return msg;
   }
 
   unsigned pdsch_tbs_scheduled_bytes_per_lc(const sched_test_ue& u, lcid_t lcid)
@@ -228,23 +231,31 @@ protected:
     return cell_cfg;
   }
 
-  void add_ue(du_ue_index_t ue_index, lcid_t lcid_, lcg_id_t lcgid_, duplex_mode mode, bool is_fallback = false)
+  void add_ue(du_ue_index_t ue_index,
+              lcid_t        lcid_,
+              lcg_id_t      lcgid_,
+              duplex_mode   mode,
+              bool          enable_pusch_transform_precoding,
+              bool          is_fallback = false)
   {
     const auto& cell_cfg_params = create_custom_cell_cfg_builder_params(mode);
-    add_ue(ue_index, lcid_, lcgid_, cell_cfg_params, is_fallback);
+    add_ue(ue_index, lcid_, lcgid_, cell_cfg_params, enable_pusch_transform_precoding, is_fallback);
   }
 
   void add_ue(du_ue_index_t                     ue_index,
               lcid_t                            lcid_,
               lcg_id_t                          lcgid_,
               const cell_config_builder_params& params,
+              bool                              enable_pusch_transform_precoding,
               bool                              is_fallback = false)
   {
-    auto ue_creation_req               = test_helpers::create_default_sched_ue_creation_request(params);
+    auto ue_creation_req               = sched_config_helper::create_default_sched_ue_creation_request(params);
     ue_creation_req.starts_in_fallback = is_fallback;
 
     ue_creation_req.ue_index = ue_index;
     ue_creation_req.crnti    = to_rnti(allocate_rnti());
+    (*ue_creation_req.cfg.cells)[0].serv_cell_cfg.init_dl_bwp.pdsch_cfg->vrb_to_prb_interleaving =
+        bench.value().expert_cfg.ue.pdsch_interleaving_bundle_size;
 
     auto it = std::find_if(ue_creation_req.cfg.lc_config_list->begin(),
                            ue_creation_req.cfg.lc_config_list->end(),
@@ -256,14 +267,26 @@ protected:
     it->lc_group = lcgid_;
 
     pucch_cfg_builder.add_build_new_ue_pucch_cfg(ue_creation_req.cfg.cells.value()[0].serv_cell_cfg);
+    if (enable_pusch_transform_precoding) {
+      ue_creation_req.cfg.cells.value()[0]
+          .serv_cell_cfg.ul_config.value()
+          .init_ul_bwp.pusch_cfg.value()
+          .trans_precoder = srsran::pusch_config::transform_precoder::enabled;
+    }
     bench->sch.handle_ue_creation_request(ue_creation_req);
 
     bench->ues[ue_index] = sched_test_ue{ue_creation_req.crnti, {}, {}, ue_creation_req};
   }
 
-  void add_ue(sched_ue_creation_request_message& ue_create_req)
+  void add_ue(sched_ue_creation_request_message& ue_create_req, bool enable_pusch_transform_precoding)
   {
     pucch_cfg_builder.add_build_new_ue_pucch_cfg(ue_create_req.cfg.cells.value()[0].serv_cell_cfg);
+    (*ue_create_req.cfg.cells)[0].serv_cell_cfg.init_dl_bwp.pdsch_cfg->vrb_to_prb_interleaving =
+        bench.value().expert_cfg.ue.pdsch_interleaving_bundle_size;
+    if (enable_pusch_transform_precoding) {
+      ue_create_req.cfg.cells.value()[0].serv_cell_cfg.ul_config.value().init_ul_bwp.pusch_cfg.value().trans_precoder =
+          pusch_config::transform_precoder::enabled;
+    }
     bench->sch.handle_ue_creation_request(ue_create_req);
 
     bench->ues[ue_create_req.ue_index] = sched_test_ue{ue_create_req.crnti, {}, {}, ue_create_req};
@@ -281,6 +304,13 @@ protected:
     test_ue.dl_bsr_list[lcid] = msg;
 
     bench->sch.handle_dl_buffer_state_indication(msg);
+  }
+
+  void push_conres_mac_ce(du_ue_index_t ue_index)
+  {
+    // Notification from upper layers of DL buffer state.
+    const dl_mac_ce_indication msg{.ue_index = ue_index, .ce_lcid = lcid_dl_sch_t::UE_CON_RES_ID};
+    bench->sch.handle_dl_mac_ce_indication(msg);
   }
 
   void notify_ul_bsr_from_ue(du_ue_index_t ue_index, unsigned buffer_size, lcg_id_t lcg_id)
@@ -464,29 +494,25 @@ protected:
     pdu.crnti    = pucch.crnti;
     pdu.ue_index = bench->rnti_to_du_ue_index(pdu.crnti);
 
-    switch (pucch.format) {
+    switch (pucch.format()) {
       case pucch_format::FORMAT_0:
       case pucch_format::FORMAT_1: {
         uci_indication::uci_pdu::uci_pucch_f0_or_f1_pdu pucch_pdu{};
-        if (pucch.format == pucch_format::FORMAT_0) {
-          pucch_pdu.sr_detected = sr_nof_bits_to_uint(pucch.format_0.sr_bits) > 0;
-          // Auto ACK harqs.
-          pucch_pdu.harqs.resize(pucch.format_0.harq_ack_nof_bits, mac_harq_ack_report_status::ack);
-        } else {
-          pucch_pdu.sr_detected = sr_nof_bits_to_uint(pucch.format_1.sr_bits) > 0;
-          // Auto ACK harqs.
-          pucch_pdu.harqs.resize(pucch.format_1.harq_ack_nof_bits, mac_harq_ack_report_status::ack);
-        }
+        const sr_nof_bits                               sr_bits           = pucch.uci_bits.sr_bits;
+        const unsigned                                  harq_ack_nof_bits = pucch.uci_bits.harq_ack_nof_bits;
+        pucch_pdu.sr_detected                                             = sr_nof_bits_to_uint(sr_bits) > 0;
+        // Auto ACK harqs.
+        pucch_pdu.harqs.resize(harq_ack_nof_bits, mac_harq_ack_report_status::ack);
         pucch_pdu.ul_sinr_dB = 55;
         pdu.pdu              = pucch_pdu;
         break;
       }
       case pucch_format::FORMAT_2: {
         uci_indication::uci_pdu::uci_pucch_f2_or_f3_or_f4_pdu pucch_pdu{};
-        pucch_pdu.sr_info.resize(sr_nof_bits_to_uint(pucch.format_2.sr_bits));
-        pucch_pdu.sr_info.fill(0, sr_nof_bits_to_uint(pucch.format_2.sr_bits), true);
+        pucch_pdu.sr_info.resize(sr_nof_bits_to_uint(pucch.uci_bits.sr_bits));
+        pucch_pdu.sr_info.fill(0, sr_nof_bits_to_uint(pucch.uci_bits.sr_bits), true);
         // Auto ACK harqs.
-        pucch_pdu.harqs.resize(pucch.format_2.harq_ack_nof_bits, mac_harq_ack_report_status::ack);
+        pucch_pdu.harqs.resize(pucch.uci_bits.harq_ack_nof_bits, mac_harq_ack_report_status::ack);
         if (pucch.csi_rep_cfg.has_value()) {
           pucch_pdu.csi.emplace();
           // Fill with dummy values.
@@ -560,16 +586,29 @@ protected:
 
 // Parameters to be passed to test.
 struct multiple_ue_test_params {
-  uint16_t    nof_ues;
-  uint16_t    min_buffer_size_in_bytes;
-  uint16_t    max_buffer_size_in_bytes;
-  duplex_mode duplx_mode;
+  uint16_t                 nof_ues;
+  uint16_t                 min_buffer_size_in_bytes;
+  uint16_t                 max_buffer_size_in_bytes;
+  duplex_mode              duplx_mode;
+  bool                     enable_pusch_transform_precoding;
+  vrb_to_prb::mapping_type pdsch_interleaving_bundle_size;
 };
 
-class multiple_ue_sched_tester : public scheduler_impl_tester, public ::testing::TestWithParam<multiple_ue_test_params>
+class multiple_ue_sched_tester
+  : public scheduler_impl_tester,
+    public ::testing::TestWithParam<
+        std::tuple<uint16_t, std::pair<uint16_t, uint16_t>, duplex_mode, bool, vrb_to_prb::mapping_type>>
 {
 public:
-  multiple_ue_sched_tester() : params{GetParam()} {}
+  multiple_ue_sched_tester() :
+    params{std::get<0>(GetParam()),
+           std::get<1>(GetParam()).first,
+           std::get<1>(GetParam()).second,
+           std::get<2>(GetParam()),
+           std::get<3>(GetParam()),
+           std::get<4>(GetParam())}
+  {
+  }
 
 protected:
   multiple_ue_test_params params;
@@ -586,14 +625,19 @@ TEST_P(multiple_ue_sched_tester, dl_buffer_state_indication_test)
   // Vector to keep track of ACKs to send.
   std::vector<uci_indication> uci_ind_to_send;
 
-  setup_sched(create_expert_config(10), create_custom_cell_config_request(params.duplx_mode));
+  setup_sched(create_expert_config(10, params.pdsch_interleaving_bundle_size),
+              create_custom_cell_config_request(params.duplx_mode, params.enable_pusch_transform_precoding));
   // Add UE(s) and notify to each UE a DL buffer status indication of random size between min and max defined in params.
   // Assumption: LCID is DRB1.
-  for (unsigned idx = 0; idx < params.nof_ues; idx++) {
+  for (unsigned idx = 0; idx != params.nof_ues; ++idx) {
     // Initialize.
     is_bsr_zero_sent[idx] = false;
 
-    add_ue(to_du_ue_index(idx), LCID_MIN_DRB, static_cast<lcg_id_t>(0), params.duplx_mode);
+    add_ue(to_du_ue_index(idx),
+           LCID_MIN_DRB,
+           static_cast<lcg_id_t>(0),
+           params.duplx_mode,
+           params.enable_pusch_transform_precoding);
 
     push_buffer_state_to_dl_ue(
         to_du_ue_index(idx),
@@ -601,7 +645,10 @@ TEST_P(multiple_ue_sched_tester, dl_buffer_state_indication_test)
         LCID_MIN_DRB);
   }
 
-  for (unsigned i = 0; i != params.nof_ues * test_bench::max_test_run_slots_per_ue * (1U << current_slot.numerology());
+  for (unsigned
+           i              = 0,
+           nof_iterations = params.nof_ues * test_bench::max_test_run_slots_per_ue * (1U << current_slot.numerology());
+       i != nof_iterations;
        ++i) {
     run_slot();
 
@@ -616,7 +663,7 @@ TEST_P(multiple_ue_sched_tester, dl_buffer_state_indication_test)
     }
     swap(uci_ind_to_send, uci_ind_not_for_current_slot);
 
-    for (unsigned idx = 0; idx < params.nof_ues; idx++) {
+    for (unsigned idx = 0; idx != params.nof_ues; ++idx) {
       auto& test_ue = get_ue(to_du_ue_index(idx));
       // Update the PDSCH scheduled slot in the future.
       const auto& pdsch_slot = get_pdsch_scheduled_slot(test_ue);
@@ -656,7 +703,7 @@ TEST_P(multiple_ue_sched_tester, dl_buffer_state_indication_test)
     }
   }
 
-  for (unsigned idx = 0; idx < params.nof_ues; idx++) {
+  for (unsigned idx = 0; idx != params.nof_ues; ++idx) {
     const auto& test_ue = get_ue(to_du_ue_index(idx));
     ASSERT_EQ(test_ue.dl_bsr_list.at(lcid).bs, 0)
         << fmt::format("Condition failed for UE with c-rnti={}", test_ue.crnti);
@@ -671,15 +718,20 @@ TEST_P(multiple_ue_sched_tester, ul_buffer_state_indication_test)
 
   const lcg_id_t lcgid = uint_to_lcg_id(0);
 
-  setup_sched(create_expert_config(10), create_custom_cell_config_request(params.duplx_mode));
+  setup_sched(create_expert_config(10, params.pdsch_interleaving_bundle_size),
+              create_custom_cell_config_request(params.duplx_mode, params.enable_pusch_transform_precoding));
   // Add UE(s) and notify UL BSR from UE of random size between min and max defined in params.
   // Assumption: LCID is DRB1.
-  for (unsigned idx = 0; idx < params.nof_ues; idx++) {
+  for (unsigned idx = 0; idx != params.nof_ues; ++idx) {
     // Initialize.
     is_bsr_zero_sent[idx]               = false;
     pusch_scheduled_slot_in_future[idx] = {};
 
-    add_ue(to_du_ue_index(idx), LCID_MIN_DRB, static_cast<lcg_id_t>(0), params.duplx_mode);
+    add_ue(to_du_ue_index(idx),
+           LCID_MIN_DRB,
+           static_cast<lcg_id_t>(0),
+           params.duplx_mode,
+           params.enable_pusch_transform_precoding);
 
     notify_ul_bsr_from_ue(
         to_du_ue_index(idx),
@@ -687,7 +739,10 @@ TEST_P(multiple_ue_sched_tester, ul_buffer_state_indication_test)
         static_cast<lcg_id_t>(0));
   }
 
-  for (unsigned i = 0; i != params.nof_ues * test_bench::max_test_run_slots_per_ue * (1U << current_slot.numerology());
+  for (unsigned
+           i              = 0,
+           nof_iterations = params.nof_ues * test_bench::max_test_run_slots_per_ue * (1U << current_slot.numerology());
+       i != nof_iterations;
        ++i) {
     run_slot();
 
@@ -696,7 +751,7 @@ TEST_P(multiple_ue_sched_tester, ul_buffer_state_indication_test)
     crc_ind.cell_index = to_du_cell_index(0);
     crc_ind.sl_rx      = current_slot;
 
-    for (unsigned idx = 0; idx < params.nof_ues; idx++) {
+    for (unsigned idx = 0; idx != params.nof_ues; ++idx) {
       auto& test_ue = get_ue(to_du_ue_index(idx));
       // Update the PUSCH scheduled slot in the future.
       const auto& pusch_slot = get_pusch_scheduled_slot(test_ue);
@@ -737,7 +792,7 @@ TEST_P(multiple_ue_sched_tester, ul_buffer_state_indication_test)
     }
   }
 
-  for (unsigned idx = 0; idx < params.nof_ues; idx++) {
+  for (unsigned idx = 0; idx != params.nof_ues; ++idx) {
     const auto& test_ue = get_ue(to_du_ue_index(idx));
     ASSERT_EQ(test_ue.ul_bsr_list.at(lcgid).nof_bytes, 0)
         << fmt::format("Condition failed for UE with c-rnti={}", test_ue.crnti);
@@ -754,7 +809,7 @@ TEST_P(multiple_ue_sched_tester, when_scheduling_multiple_ue_in_small_bw_neither
   auto builder_params           = create_custom_cell_cfg_builder_params(params.duplx_mode);
   builder_params.channel_bw_mhz = bs_channel_bandwidth::MHz5;
   if (params.duplx_mode == duplex_mode::TDD) {
-    builder_params.channel_bw_mhz = srsran::bs_channel_bandwidth::MHz10;
+    builder_params.channel_bw_mhz = bs_channel_bandwidth::MHz10;
   }
   builder_params.band = band_helper::get_band_from_dl_arfcn(builder_params.dl_f_ref_arfcn);
 
@@ -778,8 +833,8 @@ TEST_P(multiple_ue_sched_tester, when_scheduling_multiple_ue_in_small_bw_neither
 
   config_helpers::cell_config_builder_params_extended extended_params{builder_params};
   const bool                                          enable_csi_rs_pdsch_multiplexing = true;
-  setup_sched(create_expert_config(10, enable_csi_rs_pdsch_multiplexing),
-              test_helpers::make_default_sched_cell_configuration_request(extended_params));
+  setup_sched(create_expert_config(10, params.pdsch_interleaving_bundle_size, enable_csi_rs_pdsch_multiplexing),
+              sched_config_helper::make_default_sched_cell_configuration_request(extended_params));
 
   // NOTE: The buffer size must be high enough for the scheduler to keep allocating resources to the UE. In order to
   // avoid failing of test we ignore the min_buffer_size_in_bytes and max_buffer_size_in_bytes set in params.
@@ -788,15 +843,17 @@ TEST_P(multiple_ue_sched_tester, when_scheduling_multiple_ue_in_small_bw_neither
 
   // Add UE(s) and notify to each UE a DL buffer status indication of random size between min and max defined in
   // params. Assumption: LCID is DRB1.
-  for (unsigned idx = 0; idx < params.nof_ues; idx++) {
-    add_ue(to_du_ue_index(idx), lcid, lcgid, extended_params);
+  for (unsigned idx = 0; idx != params.nof_ues; ++idx) {
+    add_ue(to_du_ue_index(idx), lcid, lcgid, extended_params, params.enable_pusch_transform_precoding);
     push_buffer_state_to_dl_ue(to_du_ue_index(idx), dl_buffer_size, lcid);
     notify_ul_bsr_from_ue(to_du_ue_index(idx), ul_buffer_size, lcgid);
   }
 
-  bool     first_pdsch_scheduled = false;
-  bool     first_pusch_scheduled = false;
-  unsigned nof_cqi_reported      = 0;
+  bool           first_pdsch_scheduled    = false;
+  bool           first_pusch_scheduled    = false;
+  unsigned       nof_cqi_reported         = 0;
+  unsigned       all_ues_rx_csi_run_index = max_test_run_slots;
+  const unsigned expected_k               = 4;
 
   for (unsigned i = 0; i != max_test_run_slots; ++i) {
     run_slot();
@@ -815,9 +872,12 @@ TEST_P(multiple_ue_sched_tester, when_scheduling_multiple_ue_in_small_bw_neither
 
     for (const auto& pucch : bench->sched_res->ul.pucchs) {
       uci_ind.ucis.push_back(build_pucch_uci_pdu(pucch));
-      if (pucch.format == srsran::pucch_format::FORMAT_2 and pucch.csi_rep_cfg.has_value()) {
+      if (pucch.format() == pucch_format::FORMAT_2 and pucch.csi_rep_cfg.has_value()) {
         // For now CSI report is only sent in PUCCH format 2.
         ++nof_cqi_reported;
+        if (nof_cqi_reported == params.nof_ues) {
+          all_ues_rx_csi_run_index = i + expected_k;
+        }
       }
     }
     for (const auto& pusch : bench->sched_res->ul.puschs) {
@@ -825,6 +885,9 @@ TEST_P(multiple_ue_sched_tester, when_scheduling_multiple_ue_in_small_bw_neither
         uci_ind.ucis.push_back(build_pusch_uci_pdu(pusch));
         if (pusch.uci->csi.has_value()) {
           ++nof_cqi_reported;
+          if (nof_cqi_reported == params.nof_ues) {
+            all_ues_rx_csi_run_index = i + expected_k;
+          }
         }
       }
       crc_ind.crcs.push_back(
@@ -853,7 +916,7 @@ TEST_P(multiple_ue_sched_tester, when_scheduling_multiple_ue_in_small_bw_neither
       }
     }
 
-    for (unsigned idx = 0; idx < params.nof_ues; idx++) {
+    for (unsigned idx = 0; idx != params.nof_ues; ++idx) {
       auto& test_ue = get_ue(to_du_ue_index(idx));
       // Kep pushing buffer status and UL BSR to ensure scheduler keeps scheduling UE.
       push_buffer_state_to_dl_ue(
@@ -862,7 +925,7 @@ TEST_P(multiple_ue_sched_tester, when_scheduling_multiple_ue_in_small_bw_neither
     }
 
     // Ensure there is at least one PDSCH scheduled in each DL slot and one PUSCH scheduled in each UL slot.
-    if (first_pusch_scheduled and first_pdsch_scheduled and nof_cqi_reported >= params.nof_ues) {
+    if (first_pusch_scheduled and first_pdsch_scheduled and i >= all_ues_rx_csi_run_index) {
       if (bench->cell_cfg.tdd_cfg_common.has_value()) {
         if (has_active_tdd_dl_symbols(bench->cell_cfg.tdd_cfg_common.value(), current_slot.slot_index())) {
           ASSERT_GE(bench->sched_res->dl.ue_grants.size(), 1) << fmt::format("Failed at slot: {}", current_slot);
@@ -880,23 +943,145 @@ TEST_P(multiple_ue_sched_tester, when_scheduling_multiple_ue_in_small_bw_neither
 
 TEST_P(multiple_ue_sched_tester, not_scheduled_when_buffer_status_zero)
 {
-  setup_sched(create_expert_config(10), create_custom_cell_config_request(params.duplx_mode));
+  setup_sched(create_expert_config(10, params.pdsch_interleaving_bundle_size),
+              create_custom_cell_config_request(params.duplx_mode, params.enable_pusch_transform_precoding));
   // Add UE(s) and notify UL BSR + DL Buffer status with zero value.
   // Assumption: LCID is DRB1.
-  for (unsigned idx = 0; idx < params.nof_ues; idx++) {
-    add_ue(to_du_ue_index(idx), LCID_MIN_DRB, static_cast<lcg_id_t>(0), params.duplx_mode);
+  for (unsigned idx = 0; idx != params.nof_ues; ++idx) {
+    add_ue(to_du_ue_index(idx),
+           LCID_MIN_DRB,
+           static_cast<lcg_id_t>(0),
+           params.duplx_mode,
+           params.enable_pusch_transform_precoding);
 
     notify_ul_bsr_from_ue(to_du_ue_index(idx), 0, static_cast<lcg_id_t>(0));
     push_buffer_state_to_dl_ue(to_du_ue_index(idx), 0, LCID_MIN_DRB);
   }
 
-  for (unsigned i = 0; i != params.nof_ues * test_bench::max_test_run_slots_per_ue * (1U << current_slot.numerology());
+  for (unsigned
+           i              = 0,
+           nof_iterations = params.nof_ues * test_bench::max_test_run_slots_per_ue * (1U << current_slot.numerology());
+       i != nof_iterations;
        ++i) {
     run_slot();
-    for (unsigned idx = 0; idx < params.nof_ues; idx++) {
+    for (unsigned idx = 0; idx != params.nof_ues; ++idx) {
       auto& test_ue = get_ue(to_du_ue_index(idx));
       ASSERT_FALSE(ue_is_allocated_pusch(test_ue));
       ASSERT_FALSE(ue_is_allocated_pdsch(test_ue));
+    }
+  }
+}
+
+TEST_P(multiple_ue_sched_tester, dl_dci_format_1_0_test)
+{
+  // Used to track BSR 0.
+  std::map<unsigned, bool>                      is_bsr_zero_sent;
+  std::map<unsigned, std::optional<slot_point>> pdsch_scheduled_slot_in_future;
+
+  const lcid_t lcid = LCID_MIN_DRB;
+
+  // Vector to keep track of ACKs to send.
+  std::vector<uci_indication> uci_ind_to_send;
+
+  // Pre-populate common UE creation request parameters.
+  const auto& cell_cfg_params = create_custom_cell_cfg_builder_params(params.duplx_mode);
+  auto        ue_creation_req = sched_config_helper::create_default_sched_ue_creation_request(cell_cfg_params);
+
+  auto it = std::find_if(ue_creation_req.cfg.lc_config_list->begin(),
+                         ue_creation_req.cfg.lc_config_list->end(),
+                         [](const auto& l) { return l.lcid == lcid; });
+  if (it == ue_creation_req.cfg.lc_config_list->end()) {
+    ue_creation_req.cfg.lc_config_list->push_back(config_helpers::create_default_logical_channel_config(lcid));
+    it = ue_creation_req.cfg.lc_config_list->end() - 1;
+  }
+  it->lc_group = static_cast<lcg_id_t>(0);
+
+  auto& ss_list = (*ue_creation_req.cfg.cells)[0].serv_cell_cfg.init_dl_bwp.pdcch_cfg->search_spaces;
+  ss_list.clear();
+  ss_list.push_back(config_helpers::make_default_common_search_space_config());
+  ss_list.back().set_non_ss0_id(to_search_space_id(2));
+  // Note: We use Aggregation Level 2 to avoid collisions with CORESET#0 PDCCH candidates.
+  ss_list.back().set_non_ss0_nof_candidates({0, 2, 0, 0, 0});
+
+  // Setup scheduler and add UEs.
+  setup_sched(create_expert_config(10, params.pdsch_interleaving_bundle_size),
+              create_custom_cell_config_request(params.duplx_mode, params.enable_pusch_transform_precoding));
+  // Add UE(s) and notify to each UE a DL buffer status indication of random size between min and max defined in params.
+  // Assumption: LCID is DRB1.
+  for (unsigned idx = 0; idx != params.nof_ues; ++idx) {
+    // Initialize.
+    is_bsr_zero_sent[idx] = false;
+
+    ue_creation_req.ue_index = to_du_ue_index(idx);
+    ue_creation_req.crnti    = to_rnti(allocate_rnti());
+
+    add_ue(ue_creation_req, params.enable_pusch_transform_precoding);
+
+    push_buffer_state_to_dl_ue(
+        to_du_ue_index(idx),
+        test_rgen::uniform_int<unsigned>(params.min_buffer_size_in_bytes, params.max_buffer_size_in_bytes),
+        LCID_MIN_DRB);
+  }
+
+  for (unsigned
+           i              = 0,
+           nof_iterations = params.nof_ues * test_bench::max_test_run_slots_per_ue * (1U << current_slot.numerology());
+       i != nof_iterations;
+       ++i) {
+    run_slot();
+
+    std::vector<uci_indication> uci_ind_not_for_current_slot;
+    // Send ACKs if there are any to send.
+    for (const auto& ind : uci_ind_to_send) {
+      if (current_slot == ind.slot_rx) {
+        bench->sch.handle_uci_indication(ind);
+      } else {
+        uci_ind_not_for_current_slot.push_back(ind);
+      }
+    }
+    swap(uci_ind_to_send, uci_ind_not_for_current_slot);
+
+    for (unsigned idx = 0; idx != params.nof_ues; ++idx) {
+      sched_test_ue& test_ue = get_ue(to_du_ue_index(idx));
+
+      // Perform task related to sending ACK back for scheduled PDSCH.
+      const auto& pdsch_slot = get_pdsch_scheduled_slot(test_ue);
+      if (pdsch_slot.has_value()) {
+        pdsch_scheduled_slot_in_future[idx] = pdsch_slot;
+      }
+      const auto& ack_nack_slot = get_pdsch_ack_nack_scheduled_slot(test_ue);
+      if (ack_nack_slot.has_value()) {
+        uci_ind_to_send.push_back(build_harq_ack_pucch_f0_f1_uci_ind(to_du_ue_index(idx), ack_nack_slot.value()));
+      }
+
+      // Wait until last PDSCH scheduled slot has passed to send Buffer status 0.
+      const auto* grant = find_ue_pdsch(test_ue);
+      if (is_bsr_zero_sent[idx] && pdsch_scheduled_slot_in_future[idx].has_value() &&
+          current_slot > pdsch_scheduled_slot_in_future[idx].value()) {
+        ASSERT_TRUE(grant == nullptr or not grant->pdsch_cfg.codewords[0].new_data)
+            << fmt::format("Condition failed for UE with c-rnti={}", test_ue.crnti);
+        continue;
+      }
+
+      // Send Buffer status 0 upon receiving grants for all requested bytes.
+      const unsigned tbs_sched_bytes = pdsch_tbs_scheduled_bytes_per_lc(test_ue, lcid);
+      if (tbs_sched_bytes == 0 && test_ue.dl_bsr_list.at(lcid).bs == 0 &&
+          pdsch_scheduled_slot_in_future[idx].has_value() &&
+          current_slot > pdsch_scheduled_slot_in_future[idx].value() && not is_bsr_zero_sent[idx]) {
+        is_bsr_zero_sent[idx] = true;
+        // Notify buffer status of 0 to ensure scheduler does not schedule further for this UE.
+        push_buffer_state_to_dl_ue(to_du_ue_index(idx), 0, lcid);
+      }
+
+      // Update Buffer status maintained in test UE.
+      if (grant != nullptr && grant->pdsch_cfg.codewords[0].new_data) {
+        if (tbs_sched_bytes > test_ue.dl_bsr_list.at(lcid).bs) {
+          // Accounting for MAC headers.
+          test_ue.dl_bsr_list.at(lcid).bs = 0;
+        } else {
+          test_ue.dl_bsr_list.at(lcid).bs -= tbs_sched_bytes;
+        }
+      }
     }
   }
 }
@@ -914,7 +1099,7 @@ TEST_P(multiple_ue_sched_tester, dl_dci_format_1_1_test)
 
   // Pre-populate common UE creation request parameters.
   const auto& cell_cfg_params = create_custom_cell_cfg_builder_params(params.duplx_mode);
-  auto        ue_creation_req = test_helpers::create_default_sched_ue_creation_request(cell_cfg_params);
+  auto        ue_creation_req = sched_config_helper::create_default_sched_ue_creation_request(cell_cfg_params);
 
   auto it = std::find_if(ue_creation_req.cfg.lc_config_list->begin(),
                          ue_creation_req.cfg.lc_config_list->end(),
@@ -932,17 +1117,18 @@ TEST_P(multiple_ue_sched_tester, dl_dci_format_1_1_test)
       .set_non_ss0_monitored_dci_formats(srsran::search_space_configuration::ue_specific_dci_format::f0_1_and_1_1);
 
   // Setup scheduler and add UEs.
-  setup_sched(create_expert_config(10), create_custom_cell_config_request(params.duplx_mode));
+  setup_sched(create_expert_config(10, params.pdsch_interleaving_bundle_size),
+              create_custom_cell_config_request(params.duplx_mode, params.enable_pusch_transform_precoding));
   // Add UE(s) and notify to each UE a DL buffer status indication of random size between min and max defined in params.
   // Assumption: LCID is DRB1.
-  for (unsigned idx = 0; idx < params.nof_ues; idx++) {
+  for (unsigned idx = 0; idx != params.nof_ues; ++idx) {
     // Initialize.
     is_bsr_zero_sent[idx] = false;
 
     ue_creation_req.ue_index = to_du_ue_index(idx);
     ue_creation_req.crnti    = to_rnti(allocate_rnti());
 
-    add_ue(ue_creation_req);
+    add_ue(ue_creation_req, params.enable_pusch_transform_precoding);
 
     push_buffer_state_to_dl_ue(
         to_du_ue_index(idx),
@@ -950,7 +1136,10 @@ TEST_P(multiple_ue_sched_tester, dl_dci_format_1_1_test)
         LCID_MIN_DRB);
   }
 
-  for (unsigned i = 0; i != params.nof_ues * test_bench::max_test_run_slots_per_ue * (1U << current_slot.numerology());
+  for (unsigned
+           i              = 0,
+           nof_iterations = params.nof_ues * test_bench::max_test_run_slots_per_ue * (1U << current_slot.numerology());
+       i != nof_iterations;
        ++i) {
     run_slot();
 
@@ -965,31 +1154,36 @@ TEST_P(multiple_ue_sched_tester, dl_dci_format_1_1_test)
     }
     swap(uci_ind_to_send, uci_ind_not_for_current_slot);
 
-    for (unsigned idx = 0; idx < params.nof_ues; idx++) {
+    for (unsigned idx = 0; idx != params.nof_ues; ++idx) {
       sched_test_ue& test_ue = get_ue(to_du_ue_index(idx));
 
       // Check whether DCI formats match the SearchSpace configuration and uses DCI format 1_1 for SS#2.
       const auto* pdcch_grant = find_ue_dl_pdcch(test_ue);
       if (pdcch_grant != nullptr) {
         const auto& ss_cfg = get_ss_cfg(test_ue, pdcch_grant->ctx.context.ss_id);
-        ASSERT_TRUE(ss_cfg.has_value()) << fmt::format(
-            "Condition failed for UE with c-rnti={} and SS id={}", test_ue.crnti, pdcch_grant->ctx.context.ss_id);
+        ASSERT_TRUE(ss_cfg.has_value()) << fmt::format("Condition failed for UE with c-rnti={} and SS id={}",
+                                                       test_ue.crnti,
+                                                       fmt::underlying(pdcch_grant->ctx.context.ss_id));
         if (ss_cfg->is_common_search_space()) {
           // Checking for only TC-RNTI and C-RNTI F1_0.
           ASSERT_TRUE(pdcch_grant->dci.type == srsran::dci_dl_rnti_config_type::c_rnti_f1_0 or
                       pdcch_grant->dci.type == srsran::dci_dl_rnti_config_type::tc_rnti_f1_0)
               << fmt::format("Condition failed for UE with c-rnti={} and SS id={}",
                              test_ue.crnti,
-                             pdcch_grant->ctx.context.ss_id);
+                             fmt::underlying(pdcch_grant->ctx.context.ss_id));
         } else {
           const auto dci_fmt =
               std::get<search_space_configuration::ue_specific_dci_format>(ss_cfg->get_monitored_dci_formats());
           if (dci_fmt == srsran::search_space_configuration::ue_specific_dci_format::f0_0_and_f1_0) {
-            ASSERT_TRUE(pdcch_grant->dci.type == srsran::dci_dl_rnti_config_type::c_rnti_f1_0) << fmt::format(
-                "Condition failed for UE with c-rnti={} and SS id={}", test_ue.crnti, pdcch_grant->ctx.context.ss_id);
+            ASSERT_TRUE(pdcch_grant->dci.type == srsran::dci_dl_rnti_config_type::c_rnti_f1_0)
+                << fmt::format("Condition failed for UE with c-rnti={} and SS id={}",
+                               test_ue.crnti,
+                               fmt::underlying(pdcch_grant->ctx.context.ss_id));
           } else {
-            ASSERT_TRUE(pdcch_grant->dci.type == srsran::dci_dl_rnti_config_type::c_rnti_f1_1) << fmt::format(
-                "Condition failed for UE with c-rnti={} and SS id={}", test_ue.crnti, pdcch_grant->ctx.context.ss_id);
+            ASSERT_TRUE(pdcch_grant->dci.type == srsran::dci_dl_rnti_config_type::c_rnti_f1_1)
+                << fmt::format("Condition failed for UE with c-rnti={} and SS id={}",
+                               test_ue.crnti,
+                               fmt::underlying(pdcch_grant->ctx.context.ss_id));
           }
         }
       }
@@ -1046,7 +1240,7 @@ TEST_P(multiple_ue_sched_tester, ul_dci_format_0_1_test)
 
   // Pre-populate common UE creation request parameters.
   const auto& cell_cfg_params = create_custom_cell_cfg_builder_params(params.duplx_mode);
-  auto        ue_creation_req = test_helpers::create_default_sched_ue_creation_request(cell_cfg_params);
+  auto        ue_creation_req = sched_config_helper::create_default_sched_ue_creation_request(cell_cfg_params);
 
   auto it = std::find_if(ue_creation_req.cfg.lc_config_list->begin(),
                          ue_creation_req.cfg.lc_config_list->end(),
@@ -1064,10 +1258,11 @@ TEST_P(multiple_ue_sched_tester, ul_dci_format_0_1_test)
       .set_non_ss0_monitored_dci_formats(srsran::search_space_configuration::ue_specific_dci_format::f0_1_and_1_1);
 
   // Setup scheduler and add UEs.
-  setup_sched(create_expert_config(10), create_custom_cell_config_request(params.duplx_mode));
+  setup_sched(create_expert_config(10, params.pdsch_interleaving_bundle_size),
+              create_custom_cell_config_request(params.duplx_mode, params.enable_pusch_transform_precoding));
   // Add UE(s) and notify UL BSR from UE of random size between min and max defined in params.
   // Assumption: LCID is DRB1.
-  for (unsigned idx = 0; idx < params.nof_ues; idx++) {
+  for (unsigned idx = 0; idx != params.nof_ues; ++idx) {
     // Initialize.
     is_bsr_zero_sent[idx]               = false;
     pusch_scheduled_slot_in_future[idx] = {};
@@ -1075,7 +1270,7 @@ TEST_P(multiple_ue_sched_tester, ul_dci_format_0_1_test)
     ue_creation_req.ue_index = to_du_ue_index(idx);
     ue_creation_req.crnti    = to_rnti(allocate_rnti());
 
-    add_ue(ue_creation_req);
+    add_ue(ue_creation_req, params.enable_pusch_transform_precoding);
 
     notify_ul_bsr_from_ue(
         to_du_ue_index(idx),
@@ -1083,7 +1278,10 @@ TEST_P(multiple_ue_sched_tester, ul_dci_format_0_1_test)
         static_cast<lcg_id_t>(0));
   }
 
-  for (unsigned i = 0; i != params.nof_ues * test_bench::max_test_run_slots_per_ue * (1U << current_slot.numerology());
+  for (unsigned
+           i              = 0,
+           nof_iterations = params.nof_ues * test_bench::max_test_run_slots_per_ue * (1U << current_slot.numerology());
+       i != nof_iterations;
        ++i) {
     run_slot();
 
@@ -1092,31 +1290,36 @@ TEST_P(multiple_ue_sched_tester, ul_dci_format_0_1_test)
     crc_ind.cell_index = to_du_cell_index(0);
     crc_ind.sl_rx      = current_slot;
 
-    for (unsigned idx = 0; idx < params.nof_ues; idx++) {
+    for (unsigned idx = 0; idx != params.nof_ues; ++idx) {
       auto& test_ue = get_ue(to_du_ue_index(idx));
 
       // Check whether DCI formats match the SearchSpace configuration and uses DCI format 1_1 for SS#2.
       const auto* pdcch_grant = find_ue_ul_pdcch(test_ue);
       if (pdcch_grant != nullptr) {
         const auto& ss_cfg = get_ss_cfg(test_ue, pdcch_grant->ctx.context.ss_id);
-        ASSERT_TRUE(ss_cfg.has_value()) << fmt::format(
-            "Condition failed for UE with c-rnti={} and SS id={}", test_ue.crnti, pdcch_grant->ctx.context.ss_id);
+        ASSERT_TRUE(ss_cfg.has_value()) << fmt::format("Condition failed for UE with c-rnti={} and SS id={}",
+                                                       test_ue.crnti,
+                                                       fmt::underlying(pdcch_grant->ctx.context.ss_id));
         if (ss_cfg->is_common_search_space()) {
           // Checking for only TC-RNTI and C-RNTI F1_0.
           ASSERT_TRUE(pdcch_grant->dci.type == srsran::dci_ul_rnti_config_type::c_rnti_f0_0 or
                       pdcch_grant->dci.type == srsran::dci_ul_rnti_config_type::tc_rnti_f0_0)
               << fmt::format("Condition failed for UE with c-rnti={} and SS id={}",
                              test_ue.crnti,
-                             pdcch_grant->ctx.context.ss_id);
+                             fmt::underlying(pdcch_grant->ctx.context.ss_id));
         } else {
           const auto dci_fmt =
               std::get<search_space_configuration::ue_specific_dci_format>(ss_cfg->get_monitored_dci_formats());
           if (dci_fmt == srsran::search_space_configuration::ue_specific_dci_format::f0_0_and_f1_0) {
-            ASSERT_TRUE(pdcch_grant->dci.type == srsran::dci_ul_rnti_config_type::c_rnti_f0_0) << fmt::format(
-                "Condition failed for UE with c-rnti={} and SS id={}", test_ue.crnti, pdcch_grant->ctx.context.ss_id);
+            ASSERT_TRUE(pdcch_grant->dci.type == srsran::dci_ul_rnti_config_type::c_rnti_f0_0)
+                << fmt::format("Condition failed for UE with c-rnti={} and SS id={}",
+                               test_ue.crnti,
+                               fmt::underlying(pdcch_grant->ctx.context.ss_id));
           } else {
-            ASSERT_TRUE(pdcch_grant->dci.type == srsran::dci_ul_rnti_config_type::c_rnti_f0_1) << fmt::format(
-                "Condition failed for UE with c-rnti={} and SS id={}", test_ue.crnti, pdcch_grant->ctx.context.ss_id);
+            ASSERT_TRUE(pdcch_grant->dci.type == srsran::dci_ul_rnti_config_type::c_rnti_f0_1)
+                << fmt::format("Condition failed for UE with c-rnti={} and SS id={}",
+                               test_ue.crnti,
+                               fmt::underlying(pdcch_grant->ctx.context.ss_id));
           }
         }
       }
@@ -1169,7 +1372,8 @@ class single_ue_sched_tester : public scheduler_impl_tester, public ::testing::T
 
 TEST_F(single_ue_sched_tester, successfully_schedule_srb0_retransmission_fdd)
 {
-  setup_sched(create_expert_config(6), create_custom_cell_config_request(duplex_mode::FDD));
+  setup_sched(create_expert_config(6, vrb_to_prb::mapping_type::non_interleaved),
+              create_custom_cell_config_request(duplex_mode::FDD, false));
 
   // Keep track of ACKs to send.
   std::optional<uci_indication> uci_ind_to_send;
@@ -1177,7 +1381,7 @@ TEST_F(single_ue_sched_tester, successfully_schedule_srb0_retransmission_fdd)
   // Add UE(s) and notify UL BSR + DL Buffer status with 110 value.
   // Assumption: LCID is SRB0.
   const bool is_fallback = true;
-  add_ue(to_du_ue_index(0), LCID_SRB0, static_cast<lcg_id_t>(0), duplex_mode::FDD, is_fallback);
+  add_ue(to_du_ue_index(0), LCID_SRB0, static_cast<lcg_id_t>(0), duplex_mode::FDD, false, is_fallback);
 
   // Enqueue ConRes CE.
   bench->sch.handle_dl_mac_ce_indication(dl_mac_ce_indication{to_du_ue_index(0), lcid_dl_sch_t::UE_CON_RES_ID});
@@ -1224,9 +1428,10 @@ TEST_F(single_ue_sched_tester, srb0_retransmission_not_scheduled_if_csi_rs_is_pr
   // Keep track of ACKs to send.
   std::optional<uci_indication> uci_ind_to_send;
 
-  setup_sched(create_expert_config(10), create_custom_cell_config_request(srsran::duplex_mode::FDD));
+  setup_sched(create_expert_config(10, vrb_to_prb::mapping_type::non_interleaved),
+              create_custom_cell_config_request(srsran::duplex_mode::FDD, false));
   // Add UE.
-  add_ue(to_du_ue_index(0), LCID_SRB0, static_cast<lcg_id_t>(0), srsran::duplex_mode::FDD);
+  add_ue(to_du_ue_index(0), LCID_SRB0, static_cast<lcg_id_t>(0), srsran::duplex_mode::FDD, false);
 
   if (not bench->cell_cfg.nzp_csi_rs_list.empty()) {
     const unsigned csi_rs_periodicity =
@@ -1282,10 +1487,11 @@ TEST_F(single_ue_sched_tester, srb0_retransmission_not_scheduled_if_csi_rs_is_pr
 
 TEST_F(single_ue_sched_tester, test_ue_scheduling_with_empty_spcell_cfg)
 {
-  setup_sched(create_expert_config(10), create_custom_cell_config_request(srsran::duplex_mode::TDD));
+  setup_sched(create_expert_config(10, vrb_to_prb::mapping_type::non_interleaved),
+              create_custom_cell_config_request(srsran::duplex_mode::TDD, false));
   // Add UE.
-  const auto& cell_cfg_params        = create_custom_cell_cfg_builder_params(srsran::duplex_mode::TDD);
-  auto        ue_creation_req        = test_helpers::create_empty_spcell_cfg_sched_ue_creation_request(cell_cfg_params);
+  const auto& cell_cfg_params = create_custom_cell_cfg_builder_params(srsran::duplex_mode::TDD);
+  auto        ue_creation_req = sched_config_helper::create_empty_spcell_cfg_sched_ue_creation_request(cell_cfg_params);
   ue_creation_req.starts_in_fallback = true;
 
   ue_creation_req.ue_index = to_du_ue_index(0);
@@ -1295,6 +1501,8 @@ TEST_F(single_ue_sched_tester, test_ue_scheduling_with_empty_spcell_cfg)
 
   run_slot();
 
+  // Push ConRes MAC CE to trigger the ConRes completion in the scheduler.
+  push_conres_mac_ce(to_du_ue_index(0));
   // Push DL buffer status indication.
   push_buffer_state_to_dl_ue(to_du_ue_index(0), 100, LCID_SRB0);
 
@@ -1319,33 +1527,29 @@ void PrintTo(const multiple_ue_test_params&, ::std::ostream*) {}
 
 INSTANTIATE_TEST_SUITE_P(multiple_ue_sched_tester,
                          multiple_ue_sched_tester,
-                         testing::Values(multiple_ue_test_params{.nof_ues                  = 3,
-                                                                 .min_buffer_size_in_bytes = 1000,
-                                                                 .max_buffer_size_in_bytes = 3000,
-                                                                 .duplx_mode               = duplex_mode::FDD},
-                                         multiple_ue_test_params{.nof_ues                  = 32,
-                                                                 .min_buffer_size_in_bytes = 100,
-                                                                 .max_buffer_size_in_bytes = 300,
-                                                                 .duplx_mode               = duplex_mode::FDD},
-                                         multiple_ue_test_params{.nof_ues                  = 3,
-                                                                 .min_buffer_size_in_bytes = 2000,
-                                                                 .max_buffer_size_in_bytes = 3000,
-                                                                 .duplx_mode               = duplex_mode::TDD},
-                                         multiple_ue_test_params{.nof_ues                  = 2,
-                                                                 .min_buffer_size_in_bytes = 1000,
-                                                                 .max_buffer_size_in_bytes = 3000,
-                                                                 .duplx_mode               = duplex_mode::TDD},
-                                         multiple_ue_test_params{.nof_ues                  = 32,
-                                                                 .min_buffer_size_in_bytes = 100,
-                                                                 .max_buffer_size_in_bytes = 300,
-                                                                 .duplx_mode               = duplex_mode::TDD}),
+                         ::testing::Combine(::testing::Values(3, 32),
+                                            ::testing::Values(std::make_pair(100, 300),
+                                                              std::make_pair(1000, 3000),
+                                                              std::make_pair(2000, 3000)),
+                                            ::testing::Values(duplex_mode::FDD, duplex_mode::TDD),
+                                            ::testing::Values(false, true),
+                                            ::testing::Values(vrb_to_prb::mapping_type::non_interleaved,
+                                                              vrb_to_prb::mapping_type::interleaved_n2,
+                                                              vrb_to_prb::mapping_type::interleaved_n4)),
                          [](const testing::TestParamInfo<multiple_ue_sched_tester::ParamType>& params) -> std::string {
-                           const auto& p = params.param;
-                           return fmt::format("nof_ues_{}_buffer_size_{}_{}_mode_{}",
-                                              p.nof_ues,
-                                              p.min_buffer_size_in_bytes,
-                                              p.max_buffer_size_in_bytes,
-                                              to_string(p.duplx_mode));
+                           const auto nof_ues                          = std::get<0>(params.param);
+                           const auto min_buffer_size_in_bytes         = std::get<1>(params.param).first;
+                           const auto max_buffer_size_in_bytes         = std::get<1>(params.param).second;
+                           const auto duplx_mode                       = std::get<2>(params.param);
+                           const auto enable_pusch_transform_precoding = std::get<3>(params.param);
+                           const auto pdsch_interleaving_bundle_size   = std::get<4>(params.param);
+                           return fmt::format("nof_ues_{}_buffer_size_{}_{}_mode_{}_tp_{}_interleaving_{}",
+                                              nof_ues,
+                                              min_buffer_size_in_bytes,
+                                              max_buffer_size_in_bytes,
+                                              to_string(duplx_mode),
+                                              enable_pusch_transform_precoding ? "on" : "off",
+                                              fmt::underlying(pdsch_interleaving_bundle_size));
                          });
 
 int main(int argc, char** argv)

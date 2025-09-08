@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -33,16 +33,31 @@ rlc_rx_tm_entity::rlc_rx_tm_entity(gnb_du_id_t                       gnb_du_id_,
                                    rb_id_t                           rb_id_,
                                    const rlc_rx_tm_config&           config,
                                    rlc_rx_upper_layer_data_notifier& upper_dn_,
-                                   rlc_metrics_aggregator&           metrics_agg_,
+                                   rlc_bearer_metrics_collector&     metrics_coll_,
                                    rlc_pcap&                         pcap_,
                                    task_executor&                    ue_executor,
                                    timer_manager&                    timers) :
-  rlc_rx_entity(gnb_du_id_, ue_index_, rb_id_, upper_dn_, metrics_agg_, pcap_, ue_executor, timers),
+  rlc_rx_entity(gnb_du_id_, ue_index_, rb_id_, upper_dn_, metrics_coll_, pcap_, ue_executor, timers),
   cfg(config),
-  pcap_context(ue_index, rb_id_, /* is_uplink */ true)
+  pcap_context(ue_index, rb_id, /* is_uplink */ true)
 {
   metrics.metrics_set_mode(rlc_mode::tm);
   logger.log_info("RLC TM created. {}", cfg);
+
+#ifdef JBPF_ENABLED
+  {
+    struct jbpf_rlc_ctx_info jbpf_ctx = {0};
+    jbpf_ctx.ctx_id = 0;    /* Context id (could be implementation specific) */
+    jbpf_ctx.gnb_du_id = (uint64_t)gnb_du_id;
+    jbpf_ctx.du_ue_index = ue_index;
+    jbpf_ctx.is_srb = rb_id.is_srb();
+    jbpf_ctx.rb_id = rb_id.is_srb() ? srb_id_to_uint(rb_id.get_srb_id()) 
+                                    : drb_id_to_uint(rb_id.get_drb_id());
+    jbpf_ctx.direction = JBPF_UL; 
+    jbpf_ctx.rlc_mode = JBPF_RLC_MODE_TM; 
+    hook_rlc_ul_creation(&jbpf_ctx);
+  }
+#endif    
 }
 
 void rlc_rx_tm_entity::handle_pdu(byte_buffer_slice buf)
@@ -60,13 +75,18 @@ void rlc_rx_tm_entity::handle_pdu(byte_buffer_slice buf)
   }
 
 #ifdef JBPF_ENABLED
-      {
-        int rb_id_value = rb_id.is_srb() ? srb_id_to_uint(rb_id.get_srb_id()) 
-                                        : drb_id_to_uint(rb_id.get_drb_id());
-        struct jbpf_rlc_ctx_info ctx_info = {0, (uint64_t)gnb_du_id, ue_index, rb_id.is_srb(), 
-          (uint8_t)rb_id_value, JBPF_RLC_MODE_TM};
-        hook_rlc_ul_sdu_delivered(&ctx_info, 0, 0, sdu.value().length());
-      }
+  {
+    struct jbpf_rlc_ctx_info jbpf_ctx = {0};
+    jbpf_ctx.ctx_id = 0;    /* Context id (could be implementation specific) */
+    jbpf_ctx.gnb_du_id = (uint64_t)gnb_du_id;
+    jbpf_ctx.du_ue_index = ue_index;
+    jbpf_ctx.is_srb = rb_id.is_srb();
+    jbpf_ctx.rb_id = rb_id.is_srb() ? srb_id_to_uint(rb_id.get_srb_id()) 
+                                    : drb_id_to_uint(rb_id.get_drb_id());
+    jbpf_ctx.direction = JBPF_UL; 
+    jbpf_ctx.rlc_mode = JBPF_RLC_MODE_TM; 
+    hook_rlc_ul_sdu_delivered(&jbpf_ctx, 0, sdu.value().length(), 0);
+  }
 #endif
 
   logger.log_info(sdu.value().begin(), sdu.value().end(), "RX SDU. sdu_len={}", sdu.value().length());

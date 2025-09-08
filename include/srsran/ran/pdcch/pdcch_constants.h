@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -22,7 +22,7 @@
 
 #pragma once
 
-#include "srsran/phy/constants.h"
+#include "srsran/ran/resource_block.h"
 
 namespace srsran {
 namespace pdcch_constants {
@@ -33,7 +33,7 @@ static constexpr unsigned NOF_RB_PER_FREQ_RESOURCE = 6;
 
 /// Defines the maximum number of frequency resources in a CORESET as per TS38.331 in ControlResourceSet
 /// information element.
-static constexpr unsigned MAX_NOF_FREQ_RESOURCES = MAX_RB / NOF_RB_PER_FREQ_RESOURCE;
+static constexpr unsigned MAX_NOF_FREQ_RESOURCES = MAX_NOF_PRBS / NOF_RB_PER_FREQ_RESOURCE;
 
 /// Maximum number of DCIs in a single transmission (it is not specified by the TS).
 static constexpr unsigned MAX_NOF_DCI = 1;
@@ -42,10 +42,13 @@ static constexpr unsigned MAX_NOF_DCI = 1;
 static constexpr unsigned MAX_DCI_PAYLOAD_SIZE = 128;
 
 /// Number of REs used for data in per RB and symbol as per TS38.211 section 7.3.2.5.
-static constexpr unsigned NOF_RE_PDCCH_PER_RB = NRE - 3;
+static constexpr unsigned NOF_RE_PDCCH_PER_RB = NOF_SUBCARRIERS_PER_RB - 3;
 
 /// Number of REGs per CCE as per TS38.211 Section 7.3.2.2.
 static constexpr unsigned NOF_REG_PER_CCE = 6;
+
+/// Number of CRC bits that are attached to a PDCCH, as per TS38.211 Section 7.1.3.
+static constexpr unsigned NOF_CRC_BITS = 24U;
 
 /// Maximum CORESET duration in symbols as per TS38.211 Section 7.3.2.2. and TS 38.331 "maxCoReSetDuration".
 static constexpr unsigned MAX_CORESET_DURATION = 3;
@@ -61,11 +64,14 @@ static constexpr unsigned MAX_NOF_RB_PDCCH = MAX_AGGREGATION_LEVEL * NOF_REG_PER
 /// Maximum number of REs for data in a single transmission.
 static constexpr unsigned MAX_NOF_RE_PDCCH = MAX_NOF_RB_PDCCH * NOF_RE_PDCCH_PER_RB;
 
+/// Bits per symbol for QPSK, the modulation used for PDCCH, as per TS38.211 Section 7.3.2.4.
+static constexpr unsigned QPSK_BITS_PER_SYMBOL = 2;
+
 /// Define the maximum number of encoded data bits in a transmission.
-static constexpr unsigned MAX_NOF_BITS = MAX_NOF_RE_PDCCH * 2;
+static constexpr unsigned MAX_NOF_BITS = MAX_NOF_RE_PDCCH * QPSK_BITS_PER_SYMBOL;
 
 /// Define the number of encoded data bits per CCE in a transmission.
-static constexpr unsigned NOF_BITS_PER_CCE = NOF_REG_PER_CCE * NOF_RE_PDCCH_PER_RB * 2;
+static constexpr unsigned NOF_BITS_PER_CCE = NOF_REG_PER_CCE * NOF_RE_PDCCH_PER_RB * QPSK_BITS_PER_SYMBOL;
 
 } // namespace pdcch_constants
 } // namespace srsran

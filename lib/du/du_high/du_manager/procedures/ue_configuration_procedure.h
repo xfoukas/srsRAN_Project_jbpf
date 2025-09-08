@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -41,6 +41,7 @@ public:
   const char* name() const { return "UE Configuration"; }
 
 private:
+  bool changed_detected() const;
   // Stop activity in DRBs that need to be replaced.
   async_task<void> stop_drbs_to_rem();
   // Update DU UE bearers. This stage includes the creation/modification/removal of SRBs/DRBs, creation of RLC
@@ -48,12 +49,15 @@ private:
   void update_ue_context();
   void clear_old_ue_context();
 
-  /// \brief Update MAC MUX and DEMUX tables of the respective UE, given the newly added/modified/removed bearers.
-  async_task<mac_ue_reconfiguration_response> update_mac_mux_and_demux();
+  /// \brief Update MAC MUX and DEMUX tables of the respective UE, given the newly added/modified/removed bearers and
+  /// the scheduler with the new UE config.
+  async_task<mac_ue_reconfiguration_response> update_mac_and_sched();
 
   f1ap_ue_context_update_response make_ue_config_response();
   f1ap_ue_context_update_response make_empty_ue_config_response();
   f1ap_ue_context_update_response make_ue_config_failure();
+
+  void handle_rrc_reconfiguration_complete_ind();
 
   const f1ap_ue_context_update_request request;
   du_ue_manager_repository&            ue_mng;
@@ -66,6 +70,9 @@ private:
   // Snapshot of the UE resources at the start of the UE configuration procedure.
   du_ue_resource_config          prev_ue_res_cfg;
   du_ue_resource_update_response ue_res_cfg_resp;
+
+  // MAC response to a config.
+  mac_ue_reconfiguration_response mac_res;
 
   // SRBs that were actually added during the configuration.
   static_vector<srb_id_t, MAX_NOF_SRBS> srbs_added;

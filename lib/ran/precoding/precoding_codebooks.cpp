@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -19,9 +19,10 @@
  * and at http://www.gnu.org/licenses/.
  *
  */
+
 #include "srsran/ran/precoding/precoding_codebooks.h"
 #include "srsran/adt/interval.h"
-#include "srsran/support/math_utils.h"
+#include "srsran/support/math/math_utils.h"
 
 using namespace srsran;
 
@@ -99,7 +100,7 @@ precoding_weight_matrix srsran::make_one_layer_two_ports(unsigned i_codebook)
   static constexpr cf_t                               minus_sqrt_1_2   = {-M_SQRT1_2, 0};
   static constexpr cf_t                               minus_j_sqrt_1_2 = {0, -M_SQRT1_2};
   static constexpr std::array<std::array<cf_t, 2>, 4> codebooks        = {
-             {{sqrt_1_2, sqrt_1_2}, {sqrt_1_2, j_sqrt_1_2}, {sqrt_1_2, minus_sqrt_1_2}, {sqrt_1_2, minus_j_sqrt_1_2}}};
+      {{sqrt_1_2, sqrt_1_2}, {sqrt_1_2, j_sqrt_1_2}, {sqrt_1_2, minus_sqrt_1_2}, {sqrt_1_2, minus_j_sqrt_1_2}}};
 
   srsran_assert(i_codebook_range.contains(i_codebook),
                 "The given codebook identifier (i.e., {}) is out of the range {}",

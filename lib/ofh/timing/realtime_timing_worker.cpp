@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -23,6 +23,7 @@
 #include "realtime_timing_worker.h"
 #include "srsran/instrumentation/traces/ofh_traces.h"
 #include "srsran/ofh/timing/ofh_ota_symbol_boundary_notifier.h"
+#include "srsran/support/rtsan.h"
 #include <future>
 #include <thread>
 
@@ -111,7 +112,6 @@ void realtime_timing_worker::start()
   std::future<void>  fut = p.get_future();
 
   if (!executor.defer([this, &p]() {
-        status.store(worker_status::running, std::memory_order_relaxed);
         // Signal start() caller thread that the operation is complete.
         p.set_value();
 
@@ -133,31 +133,29 @@ void realtime_timing_worker::stop()
   logger.info("Requesting stop of the realtime timing worker");
   status.store(worker_status::stop_requested, std::memory_order_relaxed);
 
-  // Wait for the timing thread to stop.
+  // Wait for the timing thread to stop - this line also introduces a happens-before relationship with the clear on
+  // ota_notifier.
   while (status.load(std::memory_order_acquire) != worker_status::stopped) {
     std::this_thread::sleep_for(std::chrono::milliseconds(1));
   }
 
+  // Clear the subscribed notifiers.
+  ota_notifiers.clear();
+
   logger.info("Stopped the realtime timing worker");
 }
 
-void realtime_timing_worker::timing_loop()
+void realtime_timing_worker::timing_loop() SRSRAN_RTSAN_NONBLOCKING
 {
-  while (true) {
-    if (SRSRAN_UNLIKELY(status.load(std::memory_order_relaxed) == worker_status::stop_requested)) {
-      // Clear the subscribed notifiers.
-      ota_notifiers.clear();
-      // Release semantics - The destructor of this class accesses the ota_notifiers vector from a different thread from
-      // where we call clear() just above.
-      status.store(worker_status::stopped, std::memory_order_release);
-      return;
-    }
-
+  while (SRSRAN_LIKELY(status.load(std::memory_order_relaxed) == worker_status::running)) {
     poll();
   }
+
+  // Acquire/Release semantics - ota_notifiers is cleared and destructed by a different thread.
+  status.store(worker_status::stopped, std::memory_order_release);
 }
 
-/// Returns the difference between cur and prev taking into account wrap arounds of the values.
+/// Returns the difference between cur and prev taking into account a potential wrap around of the values.
 static unsigned circular_distance(unsigned cur, unsigned prev, unsigned size)
 {
   return (cur >= prev) ? (cur - prev) : (size + cur - prev);
@@ -188,6 +186,7 @@ void realtime_timing_worker::poll()
 
   // Are we still in the same symbol as before?
   if (delta == 0) {
+    SRSRAN_RTSAN_SCOPED_DISABLER(d);
     std::this_thread::sleep_for(sleep_time);
     return;
   }
@@ -211,24 +210,23 @@ void realtime_timing_worker::poll()
       nof_symbols_per_slot);
 
   for (unsigned i = 0; i != delta; ++i) {
+    unsigned skipped_symbol_id = delta - 1 - i;
     // Notify pending symbols from oldest to newest.
-    notify_slot_symbol_point(symbol_point - (delta - 1 - i));
+    notify_slot_symbol_point({symbol_point - skipped_symbol_id, std::chrono::system_clock::now()});
   }
 }
 
-void realtime_timing_worker::notify_slot_symbol_point(slot_symbol_point slot)
+void realtime_timing_worker::notify_slot_symbol_point(const slot_symbol_point_context& slot_context)
 {
   ofh_tracer << instant_trace_event("ofh_timing_notify_symbol", instant_trace_event::cpu_scope::global);
 
   for (auto* notifier : ota_notifiers) {
-    notifier->on_new_symbol(slot);
+    notifier->on_new_symbol(slot_context);
   }
 }
 
 void realtime_timing_worker::subscribe(span<ota_symbol_boundary_notifier*> notifiers)
 {
-  std::vector<ota_symbol_boundary_notifier*> notifier_list(notifiers.begin(), notifiers.end());
-  if (!executor.defer([this, n = std::move(notifier_list)]() mutable { ota_notifiers = std::move(n); })) {
-    logger.error("Could not subscribe the given OTA symbol boundary notifiers");
-  }
+  // The defer() call in start() synchronizes the contents of ota_notifiers with the worker thread.
+  ota_notifiers.assign(notifiers.begin(), notifiers.end());
 }

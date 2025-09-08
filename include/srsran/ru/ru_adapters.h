@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -22,22 +22,24 @@
 
 #pragma once
 
-#include "ru_downlink_plane.h"
-#include "ru_error_notifier.h"
-#include "ru_timing_notifier.h"
-#include "ru_uplink_plane.h"
+#include "srsran/instrumentation/traces/du_traces.h"
 #include "srsran/phy/support/prach_buffer_context.h"
 #include "srsran/phy/support/shared_resource_grid.h"
 #include "srsran/phy/upper/upper_phy_error_handler.h"
 #include "srsran/phy/upper/upper_phy_rg_gateway.h"
 #include "srsran/phy/upper/upper_phy_rx_symbol_handler.h"
 #include "srsran/phy/upper/upper_phy_rx_symbol_request_notifier.h"
+#include "srsran/phy/upper/upper_phy_timing_context.h"
 #include "srsran/phy/upper/upper_phy_timing_handler.h"
+#include "srsran/ru/ru_downlink_plane.h"
+#include "srsran/ru/ru_error_notifier.h"
+#include "srsran/ru/ru_timing_notifier.h"
+#include "srsran/ru/ru_uplink_plane.h"
 
 namespace srsran {
 
 /// Upper PHY - Radio Unit downlink adapter.
-class upper_ru_dl_rg_adapter : public upper_phy_rg_gateway
+class upper_phy_ru_dl_rg_adapter : public upper_phy_rg_gateway
 {
 public:
   // See interface for documentation.
@@ -55,7 +57,7 @@ private:
 };
 
 /// Upper PHY - Radio Unit uplink request adapter.
-class upper_ru_ul_request_adapter : public upper_phy_rx_symbol_request_notifier
+class upper_phy_ru_ul_request_adapter : public upper_phy_rx_symbol_request_notifier
 {
 public:
   // See interface for documentation.
@@ -80,10 +82,10 @@ private:
 };
 
 /// Upper PHY - Radio Unit uplink adapter.
-class upper_ru_ul_adapter : public ru_uplink_plane_rx_symbol_notifier
+class upper_phy_ru_ul_adapter : public ru_uplink_plane_rx_symbol_notifier
 {
 public:
-  explicit upper_ru_ul_adapter(unsigned nof_sectors) : handlers(nof_sectors) {}
+  explicit upper_phy_ru_ul_adapter(unsigned nof_sectors) : handlers(nof_sectors) {}
 
   // See interface for documentation.
   void on_new_uplink_symbol(const ru_uplink_rx_symbol_context& context, const shared_resource_grid& grid) override
@@ -112,17 +114,17 @@ private:
 };
 
 /// Upper PHY - Radio Unit timing adapter.
-class upper_ru_timing_adapter : public ru_timing_notifier
+class upper_phy_ru_timing_adapter : public ru_timing_notifier
 {
 public:
-  explicit upper_ru_timing_adapter(unsigned nof_sectors) : handlers(nof_sectors) {}
+  explicit upper_phy_ru_timing_adapter(unsigned nof_sectors) : handlers(nof_sectors) {}
 
   // See interface for documentation.
-  void on_tti_boundary(slot_point slot) override
+  void on_tti_boundary(const tti_boundary_context& slot_context) override
   {
     srsran_assert(!handlers.empty(), "Adapter is not connected");
     for (auto& handler : handlers) {
-      handler->handle_tti_boundary({slot});
+      handler->handle_tti_boundary({slot_context.slot, slot_context.time_point});
     }
   }
 
@@ -157,10 +159,10 @@ private:
 };
 
 /// Upper PHY - Radio Unit error adapter.
-class upper_ru_error_adapter : public ru_error_notifier
+class upper_phy_ru_error_adapter : public ru_error_notifier
 {
 public:
-  explicit upper_ru_error_adapter(unsigned nof_sectors) : handlers(nof_sectors) {}
+  explicit upper_phy_ru_error_adapter(unsigned nof_sectors) : handlers(nof_sectors) {}
 
   // See interface for documentation.
   void on_late_downlink_message(const ru_error_context& context) override
@@ -169,6 +171,27 @@ public:
     srsran_assert(handlers[context.sector], "Adapter for sector '{}' is not connected", context.sector);
 
     handlers[context.sector]->handle_late_downlink_message(context.slot);
+    l1_dl_tracer << instant_trace_event{"handle_dl_data_late", instant_trace_event::cpu_scope::thread};
+  }
+
+  // See interface for documentation.
+  void on_late_uplink_message(const ru_error_context& context) override
+  {
+    srsran_assert(context.sector < handlers.size(), "Invalid sector '{}'", context.sector);
+    srsran_assert(handlers[context.sector], "Adapter for sector '{}' is not connected", context.sector);
+
+    handlers[context.sector]->handle_late_uplink_message(context.slot);
+    l1_ul_tracer << instant_trace_event{"handle_ul_request_late", instant_trace_event::cpu_scope::thread};
+  }
+
+  // See interface for documentation.
+  void on_late_prach_message(const ru_error_context& context) override
+  {
+    srsran_assert(context.sector < handlers.size(), "Invalid sector '{}'", context.sector);
+    srsran_assert(handlers[context.sector], "Adapter for sector '{}' is not connected", context.sector);
+
+    handlers[context.sector]->handle_late_prach_message(context.slot);
+    l1_ul_tracer << instant_trace_event{"handle_late_prach_message", instant_trace_event::cpu_scope::thread};
   }
 
   /// Maps the given upper PHY error handler and sector to this adapter.

@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -23,7 +23,8 @@
 #pragma once
 
 #include "srsran/adt/byte_buffer.h"
-#include "srsran/adt/optional.h"
+#include "srsran/rlc/rlc_buffer_state.h"
+#include <optional>
 
 /*
  * This file will hold the interfaces and notifiers for the RLC entity.
@@ -44,6 +45,7 @@
  *    inherit or a notifier that the RLC will keep as a member.
  *
  */
+
 namespace srsran {
 
 /****************************************
@@ -53,10 +55,20 @@ namespace srsran {
 /// can optionally be accompanied with the corresponding PDCP sequence number (SN)
 /// so that RLC AM can notify the PDCP of ACKs, and PDCP can notify RLC AM/UM to discard PDCP PDUs
 struct rlc_sdu {
-  byte_buffer                           buf     = {};    ///< SDU buffer
-  bool                                  is_retx = false; ///< Determines whether this SDU is a PDCP retransmission
-  std::optional<uint32_t>               pdcp_sn;         ///< Optional PDCP sequence number
-  std::chrono::system_clock::time_point time_of_arrival;
+  /// \brief SDU buffer.
+  byte_buffer buf = {};
+
+  /// \brief Determines whether this SDU is a PDCP retransmission.
+  bool is_retx = false;
+
+  /// \brief Optional PDCP sequence number.
+  std::optional<uint32_t> pdcp_sn;
+
+  /// \brief Time of arrival at RLC from upper layers.
+  ///
+  /// This represents the time where the SDU is put into the SDU queue.
+  std::chrono::time_point<std::chrono::steady_clock> time_of_arrival;
+
   rlc_sdu() = default;
   rlc_sdu(byte_buffer buf_, std::optional<uint32_t> pdcp_sn_) : buf(std::move(buf_)), pdcp_sn(pdcp_sn_) {}
 };
@@ -143,6 +155,7 @@ public:
 /***************************************
  * Interfaces/notifiers for lower layers
  ***************************************/
+
 /// This interface represents the data exit point of the transmitting side of a RLC entity.
 /// The lower layers will use this interface to pull a PDU from the RLC, or to
 /// query the current buffer state of the RLC bearer.
@@ -166,8 +179,10 @@ public:
   /// \brief Get the buffer status information
   /// This function provides the current buffer state of the RLC TX entity.
   /// This is the gross total size required to fully flush the TX entity (potentially by multiple calls to pull_pdu).
+  /// It also includes the head of line (HOL) time of arrival (TOA) of the oldest SDU or ReTx that is queued for
+  /// transmission.
   /// \return Provides the current buffer state
-  virtual uint32_t get_buffer_state() = 0;
+  virtual rlc_buffer_state get_buffer_state() = 0;
 };
 
 class rlc_tx_lower_layer_notifier
@@ -182,6 +197,6 @@ public:
 
   /// \brief Method called by RLC bearer whenever its buffer state is updated and the respective result
   /// needs to be forwarded to lower layers.
-  virtual void on_buffer_state_update(unsigned bsr) = 0;
+  virtual void on_buffer_state_update(const rlc_buffer_state& bsr) = 0;
 };
 } // namespace srsran

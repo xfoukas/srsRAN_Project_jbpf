@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -29,6 +29,7 @@
 #include "srsran/phy/lower/processors/downlink/pdxch/pdxch_processor_baseband.h"
 #include "srsran/phy/lower/processors/downlink/pdxch/pdxch_processor_notifier.h"
 #include "srsran/phy/lower/processors/downlink/pdxch/pdxch_processor_request_handler.h"
+#include "srsran/phy/lower/processors/lower_phy_center_freq_controller.h"
 #include "srsran/phy/support/resource_grid_context.h"
 
 namespace srsran {
@@ -36,7 +37,8 @@ namespace srsran {
 /// Implements PDxCH baseband processor.
 class pdxch_processor_impl : public pdxch_processor,
                              private pdxch_processor_baseband,
-                             private pdxch_processor_request_handler
+                             private pdxch_processor_request_handler,
+                             private lower_phy_center_freq_controller
 {
 public:
   struct configuration {
@@ -53,22 +55,32 @@ public:
     srsran_assert(modulator, "Invalid modulator.");
   }
 
-  // See interface for documentation.
+  // See pdxch_processor interface for documentation.
   void connect(pdxch_processor_notifier& notifier) override;
 
-  // See interface for documentation.
+  // See pdxch_processor interface for documentation.
+  void stop() override { stopped = true; }
+
+  // See pdxch_processor interface for documentation.
   pdxch_processor_request_handler& get_request_handler() override;
 
-  // See interface for documentation.
+  // See pdxch_processor interface for documentation.
   pdxch_processor_baseband& get_baseband() override;
 
+  // See pdxch_processor interface for documentation.
+  lower_phy_center_freq_controller& get_center_freq_control() override;
+
 private:
-  // See interface for documentation.
+  // See pdxch_processor_baseband interface for documentation.
   bool process_symbol(baseband_gateway_buffer_writer& samples, const symbol_context& context) override;
 
-  // See interface for documentation.
+  // See pdxch_processor_request_handler interface for documentation.
   void handle_request(const shared_resource_grid& grid, const resource_grid_context& context) override;
 
+  // See lower_phy_center_freq_controller interface for documentation.
+  bool set_carrier_center_frequency(double carrier_center_frequency_Hz) override;
+
+  std::atomic<bool>                      stopped = false;
   unsigned                               nof_symbols_per_slot;
   unsigned                               nof_tx_ports;
   pdxch_processor_notifier*              notifier = nullptr;

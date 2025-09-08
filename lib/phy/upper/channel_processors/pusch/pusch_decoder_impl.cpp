@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -143,7 +143,7 @@ span<log_likelihood_ratio> pusch_decoder_impl::get_next_block_view(unsigned bloc
   srsran_assert(state == internal_states::collecting,
                 "Invalid state. It was expected to be {} but it was {}.",
                 to_string(internal_states::collecting),
-                state);
+                to_string(state));
 
   // Makes sure the block size does not overflow the buffer.
   srsran_assert(softbits_count + block_size <= softbits_buffer.size(),
@@ -210,7 +210,7 @@ void pusch_decoder_impl::on_new_softbits(span<const log_likelihood_ratio> softbi
   srsran_assert(state == internal_states::collecting,
                 "Invalid state. It was expected to be {} but it was {}.",
                 to_string(internal_states::collecting),
-                state);
+                to_string(state));
 
   span<log_likelihood_ratio> block = get_next_block_view(softbits.size());
 
@@ -238,24 +238,24 @@ void pusch_decoder_impl::on_new_softbits(span<const log_likelihood_ratio> softbi
 void pusch_decoder_impl::on_end_softbits()
 {
   // Verify the number of bits match with the configured one.
-  srsran_assert(!nof_ulsch_softbits.has_value() || (nof_ulsch_softbits.value() == units::bits(softbits_count)),
+  srsran_assert(!nof_ulsch_softbits.has_value() || (*nof_ulsch_softbits == units::bits(softbits_count)),
                 "The number of UL-SCH softbits, i.e., {}, does not match the expected value, i.e., {}.",
-                softbits_count,
-                nof_ulsch_softbits.value());
+                units::bits(softbits_count),
+                *nof_ulsch_softbits);
 
   unsigned modulation_order = get_bits_per_symbol(current_config.mod);
   srsran_assert(softbits_count % modulation_order == 0,
                 "The number of soft bits (i.e., {}) must be multiple of the modulation order (i.e., {}).",
-                softbits_count,
+                units::bits(softbits_count),
                 modulation_order);
 
   // Skip processing if all codeblock decoding tasks have already been dispatched. This should be the case if the
   // number of CW softbits has been provided by calling set_nof_sofbits.
   if (available_cb_counter == nof_codeblocks) {
     srsran_assert(nof_ulsch_softbits->value() == softbits_count,
-                  "The number of provided softbits (i.e. {}), does not match the expected number (i.e. {}).",
-                  softbits_count,
-                  nof_ulsch_softbits->value());
+                  "The number of provided softbits (i.e., {}), does not match the expected number (i.e. {}).",
+                  units::bits(softbits_count),
+                  *nof_ulsch_softbits);
 
     // Try to transition from collecting to decoding.
     internal_states expected_state = internal_states::collecting;
@@ -329,14 +329,19 @@ void pusch_decoder_impl::fork_codeblock_task(unsigned cb_id)
     span<bool> cb_crcs = unique_rm_buffer->get_codeblocks_crc();
 
     // Code block processing task.
-    trace_point tp = l1_tracer.now();
+    trace_point tp = l1_ul_tracer.now();
 
     // Check current CRC status.
     if (cb_crcs[cb_id]) {
       // Dematch the new LLRs and combine them with the ones from previous transmissions. We do this everytime,
       // including when the CRC for the codeblock is OK (from previous retransmissions), because we may need to
       // decode it again if, eventually, we find out that the CRC of the entire transport block is KO.
-      decoder_pool->get().rate_match(rm_buffer, cb_llrs, current_config.new_data, cb_meta);
+      auto decoder_ptr = decoder_pool->get();
+      if (decoder_ptr) {
+        decoder_ptr->rate_match(rm_buffer, cb_llrs, current_config.new_data, cb_meta);
+      } else {
+        logger.error("Not enough codeblock decoder instances (RM only).");
+      }
 
       if (cb_task_counter.fetch_sub(1) == 1) {
         join_and_notify();
@@ -345,28 +350,34 @@ void pusch_decoder_impl::fork_codeblock_task(unsigned cb_id)
     }
 
     // Try to decode.
-    std::optional<unsigned> nof_iters = decoder_pool->get().decode(message,
-                                                                   rm_buffer,
-                                                                   cb_llrs,
-                                                                   current_config.new_data,
-                                                                   block_crc->get_generator_poly(),
-                                                                   current_config.use_early_stop,
-                                                                   current_config.nof_ldpc_iterations,
-                                                                   cb_meta);
+    std::optional<unsigned> nof_iters;
+    auto                    decoder_ptr = decoder_pool->get();
+    if (decoder_ptr) {
+      nof_iters = decoder_ptr->decode(message,
+                                      rm_buffer,
+                                      cb_llrs,
+                                      current_config.new_data,
+                                      block_crc->get_generator_poly(),
+                                      current_config.use_early_stop,
+                                      current_config.nof_ldpc_iterations,
+                                      cb_meta);
+    } else {
+      logger.error("Not enough codeblock decoder instances.");
+    }
 
     if (nof_iters.has_value()) {
       // If successful decoding, flag the CRC, record number of iterations and copy bits to the TB buffer.
-      cb_crcs[cb_id] = true;
-      cb_stats.push_blocking(nof_iters.value());
+      cb_crcs[cb_id]  = true;
+      cb_stats[cb_id] = *nof_iters;
     } else {
-      cb_stats.push_blocking(current_config.nof_ldpc_iterations);
+      cb_stats[cb_id] = current_config.nof_ldpc_iterations;
     }
 
     if (cb_task_counter.fetch_sub(1) == 1) {
       join_and_notify();
     }
 
-    l1_tracer << trace_event("cb_decode", tp);
+    l1_ul_tracer << trace_event("cb_decode", tp);
   };
 
   // Execute task asynchronously if an executor is available and the number of codeblocks is larger than one.
@@ -399,11 +410,7 @@ void pusch_decoder_impl::join_and_notify()
   stats.ldpc_decoder_stats.reset();
 
   // Calculate statistics.
-  std::optional<unsigned> cb_nof_iter = cb_stats.try_pop();
-  while (cb_nof_iter.has_value()) {
-    stats.ldpc_decoder_stats.update(cb_nof_iter.value());
-    cb_nof_iter = cb_stats.try_pop();
-  }
+  std::for_each_n(cb_stats.begin(), nof_cbs, [&stats](unsigned element) { stats.ldpc_decoder_stats.update(element); });
 
   if (nof_cbs == 1) {
     // When only one codeblock, the CRC of codeblock and transport block are the same.

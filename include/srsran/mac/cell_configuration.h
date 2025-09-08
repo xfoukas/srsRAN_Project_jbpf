@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -22,24 +22,28 @@
 
 #pragma once
 
-#include "srsran/adt/bounded_bitset.h"
 #include "srsran/adt/byte_buffer.h"
-#include "srsran/adt/optional.h"
 #include "srsran/ran/carrier_configuration.h"
 #include "srsran/ran/du_types.h"
 #include "srsran/ran/pci.h"
-#include "srsran/ran/slot_point.h"
-#include "srsran/ran/ssb_configuration.h"
+#include "srsran/ran/ssb/ssb_configuration.h"
 #include "srsran/ran/subcarrier_spacing.h"
-#include "srsran/scheduler/config/bwp_configuration.h"
-#include "srsran/scheduler/sched_consts.h"
 #include "srsran/scheduler/scheduler_configurator.h"
-#include "srsran/scheduler/scheduler_dci.h"
+#include "srsran/scheduler/scheduler_sys_info_handler.h"
 
 namespace srsran {
 
-struct tdd_configuration {
-  // TODO
+/// Type that can hold multiple versions of the payload for segmented messages.
+using bcch_dl_sch_payload_type = std::vector<byte_buffer>;
+
+/// System Information signalled by the cell.
+struct mac_cell_sys_info_config {
+  /// SIB1 payload.
+  byte_buffer sib1;
+  /// SI messages provided by the cell and which are part of the SIB1 SI-SchedConfig.
+  static_vector<bcch_dl_sch_payload_type, MAX_SI_MESSAGES> si_messages;
+  /// SI scheduling configuration to provide to MAC scheduler.
+  si_scheduling_update_request si_sched_cfg;
 };
 
 /// Request to create Cell in MAC and Scheduler.
@@ -61,10 +65,8 @@ struct mac_cell_creation_request {
   bool cell_barred;
   bool intra_freq_resel;
 
-  /// BCCH-DL-SCH Message payload containing the SIB1 and SI messages to be broadcast.
-  std::vector<byte_buffer> bcch_dl_sch_payloads;
-
-  // TODO: Fill remaining fields
+  /// Cell-specific encoded system information.
+  mac_cell_sys_info_config sys_info;
 };
 
 } // namespace srsran

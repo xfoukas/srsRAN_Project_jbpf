@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -22,9 +22,8 @@
 
 #include "du_processor_test_helpers.h"
 #include "../du_processor_test_messages.h"
-#include "lib/cu_cp/cu_cp_controller/common_task_scheduler.h"
 #include "tests/unittests/cu_cp/test_helpers.h"
-#include "tests/unittests/f1ap/cu_cp/f1ap_cu_test_helpers.h"
+#include "srsran/cu_cp/common_task_scheduler.h"
 #include "srsran/cu_cp/cu_cp_configuration_helpers.h"
 #include "srsran/ran/plmn_identity.h"
 #include <memory>
@@ -51,10 +50,10 @@ struct dummy_cu_cp_measurement_handler : public cu_cp_measurement_handler {
   std::optional<rrc_meas_cfg>
   handle_measurement_config_request(ue_index_t                  ue_index,
                                     nr_cell_identity            nci,
-                                    std::optional<rrc_meas_cfg> current_meas_config = {}) override
+                                    std::optional<rrc_meas_cfg> current_meas_config = std::nullopt) override
   {
     return std::nullopt;
-  };
+  }
   void handle_measurement_report(const ue_index_t ue_index, const rrc_meas_results& meas_results) override {}
 };
 
@@ -118,13 +117,14 @@ du_processor_test::du_processor_test() :
     cu_cp_configuration cucfg     = config_helpers::make_default_cu_cp_config();
     cucfg.services.timers         = &timers;
     cucfg.services.cu_cp_executor = &ctrl_worker;
-    cu_cp_cfg.ngaps.push_back(cu_cp_configuration::ngap_params{nullptr, {{7, {{plmn_identity::test_value(), {{1}}}}}}});
+    cu_cp_cfg.ngap.ngaps.push_back(
+        cu_cp_configuration::ngap_config{nullptr, {{7, {{plmn_identity::test_value(), {{slice_service_type{1}}}}}}}});
 
     return cucfg;
   }()),
   common_task_sched(std::make_unique<dummy_task_sched>()),
 
-  du_cfg_mgr{cu_cp_cfg.node.gnb_id, config_helpers::get_supported_plmns(cu_cp_cfg.ngaps)}
+  du_cfg_mgr{cu_cp_cfg.node.gnb_id, config_helpers::get_supported_plmns(cu_cp_cfg.ngap.ngaps)}
 {
   test_logger.set_level(srslog::basic_levels::debug);
   cu_cp_logger.set_level(srslog::basic_levels::debug);

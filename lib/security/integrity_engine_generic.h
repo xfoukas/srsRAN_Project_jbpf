@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -45,6 +45,8 @@ private:
   uint8_t             bearer_id;
   security_direction  direction;
   integrity_algorithm integ_algo;
+
+  srslog::basic_logger& logger;
 };
 
 } // namespace security

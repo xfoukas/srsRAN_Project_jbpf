@@ -1,5 +1,5 @@
 #
-# Copyright 2021-2024 Software Radio Systems Limited
+# Copyright 2021-2025 Software Radio Systems Limited
 #
 # This file is part of srsRAN
 #
@@ -20,7 +20,13 @@
 
 set_directory_properties(PROPERTIES LABELS "support")
 
-add_executable(task_worker_test sync_task_executor_test.cpp task_worker_test.cpp strand_executor_test.cpp task_execution_manager_test.cpp)
+add_executable(task_worker_test
+        sync_task_executor_test.cpp
+        task_worker_test.cpp
+        strand_executor_test.cpp
+        task_execution_manager_test.cpp
+        metrics_executor_test.cpp
+        fork_limit_executor_test.cpp)
 target_link_libraries(task_worker_test srslog srsran_support gtest gtest_main)
 gtest_discover_tests(task_worker_test)
 add_test(task_worker_test task_worker_test)

@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -200,18 +200,20 @@ TEST_F(gtpu_tunnel_nru_rx_test, entity_creation)
 {
   // create Rx entity
   gtpu_tunnel_nru_config::gtpu_tunnel_nru_rx_config rx_cfg = {};
+  rx_cfg.node                                              = nru_node::cu_up;
   rx_cfg.local_teid                                        = gtpu_teid_t{0x1};
 
   rx = std::make_unique<gtpu_tunnel_nru_rx_impl>(srs_cu_up::ue_index_t::MIN_UE_INDEX, rx_cfg, rx_lower);
 
   ASSERT_NE(rx, nullptr);
-};
+}
 
 /// \brief Test reception of PDUs with no SN
 TEST_F(gtpu_tunnel_nru_rx_test, rx_no_sn)
 {
   // create Rx entity
   gtpu_tunnel_nru_config::gtpu_tunnel_nru_rx_config rx_cfg = {};
+  rx_cfg.node                                              = nru_node::du;
   rx_cfg.local_teid                                        = gtpu_teid_t{0x1};
 
   rx = std::make_unique<gtpu_tunnel_nru_rx_impl>(srs_cu_up::ue_index_t::MIN_UE_INDEX, rx_cfg, rx_lower);
@@ -229,7 +231,7 @@ TEST_F(gtpu_tunnel_nru_rx_test, rx_no_sn)
     ASSERT_EQ(rx_lower.rx_dl_sdus.size(), i + 1);
     EXPECT_EQ(rx_lower.rx_dl_sdus[i], sdu);
   }
-};
+}
 
 int main(int argc, char** argv)
 {

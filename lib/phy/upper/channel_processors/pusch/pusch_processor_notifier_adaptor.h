@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -23,7 +23,6 @@
 #pragma once
 
 #include "pusch_uci_decoder_notifier.h"
-#include "srsran/adt/optional.h"
 #include "srsran/phy/upper/channel_processors/pusch/pusch_decoder_notifier.h"
 #include "srsran/phy/upper/channel_processors/pusch/pusch_decoder_result.h"
 #include "srsran/phy/upper/channel_processors/pusch/pusch_demodulator_notifier.h"
@@ -145,23 +144,30 @@ private:
     pusch_demodulator_notifier_impl(channel_state_information& csi_) : csi(csi_) {}
 
     // See interface for documentation.
-    void on_provisional_stats(const demodulation_stats& stats) override { update_csi(stats); }
-
-    // See interface for documentation.
-    void on_end_stats(const demodulation_stats& stats) override { update_csi(stats); }
-
-  private:
-    void update_csi(const demodulation_stats& stats)
+    void on_provisional_stats(unsigned i_symbol, const demodulation_stats& stats) override
     {
       if (stats.sinr_dB.has_value()) {
-        csi.set_sinr_dB(channel_state_information::sinr_type::post_equalization, stats.sinr_dB.value());
+        csi.set_sinr_dB(channel_state_information::sinr_type::post_equalization, *stats.sinr_dB);
       }
       if (stats.evm.has_value()) {
-        csi.set_evm(stats.evm.value());
-        csi.set_sinr_dB(channel_state_information::sinr_type::evm, -20.0F * log10f(stats.evm.value()) - 3.7F);
+        csi.set_symbol_evm(i_symbol, *stats.evm);
+        csi.set_sinr_dB(channel_state_information::sinr_type::evm, -20.0F * log10f(*stats.evm) - 3.7F);
       }
     }
 
+    // See interface for documentation.
+    void on_end_stats(const demodulation_stats& stats) override
+    {
+      if (stats.sinr_dB.has_value()) {
+        csi.set_sinr_dB(channel_state_information::sinr_type::post_equalization, *stats.sinr_dB);
+      }
+      if (stats.evm.has_value()) {
+        csi.set_total_evm(*stats.evm);
+        csi.set_sinr_dB(channel_state_information::sinr_type::evm, -20.0F * log10f(*stats.evm) - 3.7F);
+      }
+    }
+
+  private:
     channel_state_information& csi;
   };
 

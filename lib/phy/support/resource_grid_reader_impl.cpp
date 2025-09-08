@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -162,7 +162,7 @@ void resource_grid_reader_impl::get(span<cf_t> symbols,
                                     unsigned   stride) const
 {
   srsran_assert(stride != 0, "The stride must not be zero.");
-  srsran_assert(k_init + stride * symbols.size() <= get_nof_subc(),
+  srsran_assert(k_init + stride * (symbols.size() - 1) < get_nof_subc(),
                 "The initial subcarrier index (i.e., {}) plus the number of symbols (i.e., {}) times the stride (i.e. "
                 "{}) exceeds the maximum number of subcarriers (i.e., {})",
                 k_init,

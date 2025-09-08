@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -23,7 +23,7 @@
 #pragma once
 
 #ifdef ENABLE_TSAN
-#include "sanitizer/tsan_interface.h"
+#include <sanitizer/tsan_interface.h>
 #endif
 
 #include "cameron314/concurrentqueue.h"
@@ -55,7 +55,14 @@ class unbounded_object_pool
 public:
   using ptr = std::unique_ptr<T, pool_deleter>;
 
-  unbounded_object_pool(unsigned initial_capacity)
+  unbounded_object_pool(unsigned initial_capacity) : objects(initial_capacity)
+  {
+    for (unsigned i = 0; i != initial_capacity; ++i) {
+      objects.enqueue(std::make_unique<T>());
+    }
+  }
+  unbounded_object_pool(unsigned initial_capacity, unsigned expected_nof_deallocation_contexts) :
+    objects(initial_capacity, 0, expected_nof_deallocation_contexts)
   {
     for (unsigned i = 0; i != initial_capacity; ++i) {
       objects.enqueue(std::make_unique<T>());
@@ -74,10 +81,7 @@ public:
     return ptr{new T(), pool_deleter{*this}};
   }
 
-  unsigned current_capacity_approx() const
-  {
-    return objects.size_approx();
-  }
+  unsigned current_capacity_approx() const { return objects.size_approx(); }
 
 private:
   moodycamel::ConcurrentQueue<std::unique_ptr<T>> objects;

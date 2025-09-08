@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -21,6 +21,7 @@
  */
 
 #pragma once
+
 #include "srsran/phy/upper/rx_buffer.h"
 #include "srsran/support/srsran_assert.h"
 
@@ -40,8 +41,10 @@ public:
   class callback : public rx_buffer
   {
   public:
-    /// Locks the buffer.
-    virtual void lock() = 0;
+    /// \brief Try to lock the buffer.
+    ///
+    /// \return \c true if the lock is successful, otherwise \c false.
+    virtual bool try_lock() = 0;
 
     /// Unlocks the buffer.
     virtual void unlock() = 0;
@@ -53,11 +56,15 @@ public:
   /// Builds an invalid buffer.
   explicit unique_rx_buffer() = default;
 
-  /// Builds a unique buffer from a buffer reference. It locks the internal buffer.
+  /// \brief Builds a unique buffer from a buffer reference.
+  ///
+  /// It tries to lock the underlying instance. If the locking fails, the buffer will be invalid.
   explicit unique_rx_buffer(callback& instance_) : ptr(&instance_)
   {
     if (ptr != nullptr) {
-      ptr->lock();
+      if (!ptr->try_lock()) {
+        ptr = nullptr;
+      }
     }
   }
 
@@ -78,9 +85,9 @@ public:
   {
     ptr       = other.ptr;
     other.ptr = nullptr;
-  };
+  }
 
-  /// Move assigment operator.
+  /// Move assignment operator.
   unique_rx_buffer& operator=(unique_rx_buffer&& other) noexcept
   {
     // Unlock current soft buffer if it is actually not unlocked.

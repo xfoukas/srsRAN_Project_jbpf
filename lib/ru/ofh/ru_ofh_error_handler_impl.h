@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -35,6 +35,12 @@ public:
 
   // See interface for documentation.
   void on_late_downlink_message(const ofh::error_context& context) override;
+
+  // See interface for documentation.
+  void on_late_uplink_message(const ofh::error_context& context) override;
+
+  // See interface for documentation.
+  void on_late_prach_message(const ofh::error_context& context) override;
 
 private:
   ru_error_notifier& error_notifier;

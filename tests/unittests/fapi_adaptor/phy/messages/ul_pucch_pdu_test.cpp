@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -54,11 +54,11 @@ TEST(FAPIPPHYULPUCCHAdaptorTest, ValidFormat1PDUPass)
   unsigned slot            = 2U;
   unsigned nof_rx_antennas = 1U;
 
-  uplink_processor::pucch_pdu pdu;
+  uplink_pdu_slot_repository::pucch_pdu pdu;
   convert_pucch_fapi_to_phy(pdu, fapi_pdu, sfn, slot, nof_rx_antennas);
 
   // Format 1 custom parameters.
-  const pucch_processor::format1_configuration& phy_pdu = pdu.format1;
+  const auto& phy_pdu = std::get<pucch_processor::format1_configuration>(pdu.config);
   ASSERT_EQ(fapi_pdu.start_symbol_index, phy_pdu.start_symbol_index);
   ASSERT_EQ(fapi_pdu.nr_of_symbols, phy_pdu.nof_symbols);
   ASSERT_EQ(fapi_pdu.time_domain_occ_index, phy_pdu.time_domain_occ);

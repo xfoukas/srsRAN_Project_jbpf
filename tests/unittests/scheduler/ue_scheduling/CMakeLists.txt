@@ -1,5 +1,5 @@
 #
-# Copyright 2021-2024 Software Radio Systems Limited
+# Copyright 2021-2025 Software Radio Systems Limited
 #
 # This file is part of srsRAN
 #
@@ -19,13 +19,12 @@
 #
 
 add_executable(ue_scheduler_test
-        logical_channel_test.cpp
+        dl_logical_channel_test.cpp
         fallback_scheduler_test.cpp
         ue_cell_test.cpp
         ue_configuration_test.cpp
         ue_grid_allocator_test.cpp
         ul_logical_channel_test.cpp
-        ue_pxsch_alloc_param_candidate_searcher_test.cpp
         ue_link_adaptation_controller_test.cpp
         ta_manager_test.cpp
         ue_harq_link_adaptation_test.cpp)

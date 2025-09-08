@@ -1,5 +1,5 @@
 #
-# Copyright 2021-2024 Software Radio Systems Limited
+# Copyright 2021-2025 Software Radio Systems Limited
 #
 # This file is part of srsRAN
 #
@@ -36,9 +36,9 @@ if (${CMAKE_SYSTEM_PROCESSOR} MATCHES "x86_64")
     set_source_files_properties(iq_compression_bfp_avx2.cpp PROPERTIES COMPILE_OPTIONS "-mavx2;")
     set_source_files_properties(iq_compression_none_avx2.cpp PROPERTIES COMPILE_OPTIONS "-mavx2;")
     set_source_files_properties(iq_compression_bfp_avx512.cpp PROPERTIES
-            COMPILE_OPTIONS "-mavx512f;-mavx512bw;-mavx512vl;-mavx512cd;-mavx512dq;")
+            COMPILE_OPTIONS "-mavx512f;-mavx512bw;-mavx512vl;-mavx512cd;-mavx512dq;-mavx512vbmi")
     set_source_files_properties(iq_compression_none_avx512.cpp PROPERTIES
-            COMPILE_OPTIONS "-mavx512f;-mavx512bw;-mavx512vl;-mavx512dq;")
+            COMPILE_OPTIONS "-mavx512f;-mavx512bw;-mavx512vl;-mavx512dq;-mavx512vbmi")
 endif (${CMAKE_SYSTEM_PROCESSOR} MATCHES "x86_64")
 
 if (${CMAKE_SYSTEM_PROCESSOR} MATCHES "aarch64")

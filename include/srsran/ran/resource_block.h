@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -22,10 +22,16 @@
 
 #pragma once
 
-#include "subcarrier_spacing.h"
-#include <cstdint>
+#include "srsran/ran/subcarrier_spacing.h"
+#include <array>
+#include <limits>
 
 namespace srsran {
+
+// Tags used to differentiate RB types.
+struct crb_tag {};
+struct prb_tag {};
+struct vrb_tag {};
 
 /// Maximum number of PRBs of a UE carrier, for any SCS.
 /// \remark See TS 38.331 - "maxNrofPhysicalResourceBlocks".
@@ -35,13 +41,13 @@ constexpr std::size_t MAX_NOF_PRBS = 275;
 constexpr std::size_t NOF_SUBCARRIERS_PER_RB = 12;
 
 /// Compute RB bandwidth in kHz, based on the used numerology.
-constexpr inline std::size_t get_rb_bw_khz(subcarrier_spacing scs)
+constexpr std::size_t get_rb_bw_khz(subcarrier_spacing scs)
 {
   return NOF_SUBCARRIERS_PER_RB * scs_to_khz(scs);
 }
 
 /// Converts channel bandwidth in MHz to index.
-constexpr inline std::size_t channel_bw_mhz_to_index_fr1(unsigned dl_bw_mhz)
+constexpr std::size_t channel_bw_mhz_to_index_fr1(unsigned dl_bw_mhz)
 {
   switch (dl_bw_mhz) {
     case 5:
@@ -77,7 +83,7 @@ constexpr inline std::size_t channel_bw_mhz_to_index_fr1(unsigned dl_bw_mhz)
 }
 
 /// Converts channel bandwidth in MHz to index.
-constexpr inline std::size_t channel_bw_mhz_to_index_fr2(unsigned dl_bw_mhz)
+constexpr std::size_t channel_bw_mhz_to_index_fr2(unsigned dl_bw_mhz)
 {
   switch (dl_bw_mhz) {
     case 50:

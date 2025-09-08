@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -34,7 +34,10 @@
       return spy;                                                                                                      \
     }                                                                                                                  \
                                                                                                                        \
-    std::vector<COMPONENT##_spy*>& get_entries() { return entries; }                                                   \
+    std::vector<COMPONENT##_spy*>& get_entries()                                                                       \
+    {                                                                                                                  \
+      return entries;                                                                                                  \
+    }                                                                                                                  \
                                                                                                                        \
   private:                                                                                                             \
     std::vector<COMPONENT##_spy*> entries;                                                                             \

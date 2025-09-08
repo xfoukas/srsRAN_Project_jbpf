@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -22,12 +22,14 @@
 
 #pragma once
 
+#include "apps/helpers/hal/hal_appconfig.h"
+#include "apps/helpers/logger/logger_appconfig.h"
+#include "apps/services/app_resource_usage/app_resource_usage_config.h"
 #include "apps/services/buffer_pool/buffer_pool_appconfig.h"
-#include "apps/services/e2/e2_appconfig.h"
-#include "apps/services/logger/logger_appconfig.h"
-#include "apps/services/os_sched_affinity_manager.h"
+#include "apps/services/metrics/metrics_appconfig.h"
+#include "apps/services/remote_control/remote_control_appconfig.h"
+#include "apps/services/worker_manager/worker_manager_appconfig.h"
 #include "srsran/ran/gnb_id.h"
-#include "srsran/support/executors/unique_thread.h"
 #include <string>
 
 #ifdef JBPF_ENABLED
@@ -38,51 +40,14 @@
 namespace srsran {
 
 struct cu_up_appconfig {
-  unsigned gtpu_queue_size          = 2048;
-  unsigned gtpu_reordering_timer_ms = 0;
-  bool     warn_on_drop             = false;
+  bool warn_on_drop = false;
 };
 
 /// Metrics report configuration.
 struct metrics_appconfig {
-  std::string addr = "127.0.0.1";
-  uint16_t    port = 55555;
-};
-
-/// CPU affinities configuration for the gNB app.
-struct cpu_affinities_appconfig {
-  /// CPUs isolation.
-  std::optional<os_sched_affinity_bitmask> isolated_cpus;
-  /// Low priority workers CPU affinity mask.
-  os_sched_affinity_config low_priority_cpu_cfg = {sched_affinity_mask_types::low_priority,
-                                                   {},
-                                                   sched_affinity_mask_policy::mask};
-};
-
-/// Non real time thread configuration for the gNB.
-struct non_rt_threads_appconfig {
-  /// Number of non real time threads for processing of CP and UP data in the upper layers
-  unsigned nof_non_rt_threads = 4;
-};
-
-/// Expert threads configuration of the gNB app.
-struct expert_threads_appconfig {
-  /// Non real time thread configuration of the gNB app.
-  non_rt_threads_appconfig non_rt_threads;
-};
-
-/// Expert configuration of the gNB app.
-struct expert_execution_appconfig {
-  /// gNB CPU affinities.
-  cpu_affinities_appconfig affinities;
-  /// Expert thread configuration of the gNB app.
-  expert_threads_appconfig threads;
-};
-
-/// HAL configuration of the gNB app.
-struct hal_appconfig {
-  /// EAL configuration arguments.
-  std::string eal_args;
+  app_services::app_resource_usage_config rusage_config;
+  app_services::metrics_appconfig         metrics_service_cfg;
+  bool                                    autostart_stdout_metrics = false;
 };
 
 #ifdef JBPF_ENABLED
@@ -143,8 +108,6 @@ struct gnb_appconfig {
   gnb_id_t gnb_id = {411, 22};
   /// Node name.
   std::string ran_node_name = "srsgnb01";
-  /// E2 configuration.
-  e2_appconfig e2_cfg;
   /// Buffer pool configuration.
   buffer_pool_appconfig buffer_pool_config;
   /// Expert configuration.
@@ -155,6 +118,10 @@ struct gnb_appconfig {
 #endif
   /// HAL configuration.
   std::optional<hal_appconfig> hal_config;
+  /// Remote control configuration.
+  remote_control_appconfig remote_control_config;
+  /// Dry run mode enabled flag.
+  bool enable_dryrun = false;
 };
 
 } // namespace srsran

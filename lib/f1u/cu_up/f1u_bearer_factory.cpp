@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -33,8 +33,9 @@ std::unique_ptr<f1u_bearer> srsran::srs_cu_up::create_f1u_bearer(uint32_t       
                                                                  f1u_tx_pdu_notifier&           tx_pdu_notifier,
                                                                  f1u_rx_delivery_notifier&      rx_delivery_notifier,
                                                                  f1u_rx_sdu_notifier&           rx_sdu_notifier,
-                                                                 timer_factory                  ue_dl_timer_factory,
+                                                                 timer_factory                  ue_ctrl_timer_factory,
                                                                  unique_timer&                  ue_inactivity_timer,
+                                                                 task_executor&                 dl_exec,
                                                                  task_executor&                 ul_exec)
 {
   auto bearer = std::make_unique<f1u_bearer_impl>(ue_index,
@@ -44,8 +45,9 @@ std::unique_ptr<f1u_bearer> srsran::srs_cu_up::create_f1u_bearer(uint32_t       
                                                   tx_pdu_notifier,
                                                   rx_delivery_notifier,
                                                   rx_sdu_notifier,
-                                                  ue_dl_timer_factory,
+                                                  ue_ctrl_timer_factory,
                                                   ue_inactivity_timer,
+                                                  dl_exec,
                                                   ul_exec);
   return bearer;
 }

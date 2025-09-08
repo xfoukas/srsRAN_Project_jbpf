@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -25,7 +25,7 @@
 #include "srsran/ran/band_helper.h"
 #include "srsran/ran/bs_channel_bandwidth.h"
 #include "srsran/ran/pci.h"
-#include "srsran/ran/ssb_properties.h"
+#include "srsran/ran/ssb/ssb_properties.h"
 #include "srsran/ran/tdd/tdd_ul_dl_config.h"
 
 namespace srsran {
@@ -72,6 +72,8 @@ struct cell_config_builder_params {
   uint8_t min_k2 = 4;
   /// Defines the TDD DL-UL pattern and periodicity. If no value is set, the cell is in FDD mode.
   std::optional<tdd_ul_dl_config_common> tdd_ul_dl_cfg_common;
+  /// Maximum number of DL layers.
+  std::optional<unsigned> max_nof_layers;
 };
 
 } // namespace srsran

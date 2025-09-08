@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -23,8 +23,11 @@
 #include "short_block_detector_impl.h"
 #include "short_block_encoder_impl.h"
 #include "srsran/adt/static_vector.h"
+#include "srsran/ran/uci/uci_info.h"
 #include "srsran/srsvec/bit.h"
+#include "srsran/srsvec/copy.h"
 #include "srsran/srsvec/dot_prod.h"
+#include "srsran/srsvec/fill.h"
 
 using namespace srsran;
 
@@ -49,28 +52,37 @@ static std::array<std::array<int8_t, MAX_BLOCK_LENGTH>, MAX_NOF_CODEWORDS_2> cre
     std::transform(cdwd.cbegin(), cdwd.cend(), table[idx].begin(), [](uint8_t a) { return (1 - 2 * a); });
   }
   return table;
-};
+}
 
 const std::array<std::array<int8_t, MAX_BLOCK_LENGTH>, MAX_NOF_CODEWORDS_2> short_block_detector_impl::DETECT_TABLE =
     create_lut();
 
-static void validate_spans(span<uint8_t> output, span<const log_likelihood_ratio> input, unsigned bits_per_symbol)
+static bool validate_spans(span<uint8_t> output, span<const log_likelihood_ratio> input, unsigned bits_per_symbol)
 {
   unsigned in_size  = input.size();
   unsigned out_size = output.size();
-  srsran_assert((out_size > 0) && (out_size <= MAX_MSG_LENGTH),
-                "The output length should be between 1 and {} bits.",
-                MAX_MSG_LENGTH);
-  if (out_size > 2) {
-    srsran_assert(
-        in_size > out_size,
-        "The number of input soft bits (i.e., {}) must be larger than the number of bits to decode (i.e., {}).",
-        in_size,
-        out_size);
-  } else {
-    // Input length must be no less than the number of bits per symbol of the block modulation.
-    srsran_assert(in_size >= bits_per_symbol, "Invalid input length.");
+
+  // The output length should be between 1 and 11 bits.
+  if ((out_size == 0) || (out_size > MAX_MSG_LENGTH)) {
+    return false;
   }
+
+  // Count the number of input bits that are not zero.
+  unsigned non_zero_count =
+      std::count_if(input.begin(), input.end(), [](log_likelihood_ratio elem) { return elem != 0; });
+
+  // The input number of non-zero bits must be equal to or greater than the minimum number of bits.
+  unsigned min_input_bits = calculate_uci_min_encoded_bits(out_size);
+  if (non_zero_count < min_input_bits) {
+    return false;
+  }
+
+  // For 1 and 2 bits, the number of input bits bust be equal to or greater than the modulation order.
+  if ((out_size <= 2) && (in_size < bits_per_symbol)) {
+    return false;
+  }
+
+  return true;
 }
 
 // ML detection for 2-bit messages.
@@ -124,7 +136,7 @@ double short_block_detector_impl::detect_3_11(span<uint8_t> output, span<const l
   uint8_t  bit0       = 0U;
   // Brute-force ML detector: correlate all codewords with the LLRs and pick the best one.
   for (unsigned cdwd_idx = 0; cdwd_idx != nof_codewords; ++cdwd_idx) {
-    int metric     = log_likelihood_ratio::dot_prod(input, DETECT_TABLE[cdwd_idx], 0);
+    int metric     = log_likelihood_ratio::dot_prod_sign(input, DETECT_TABLE[cdwd_idx]);
     int metric_abs = std::abs(metric);
     if (metric_abs > max_metric) {
       max_metric = metric_abs;
@@ -147,24 +159,37 @@ double short_block_detector_impl::detect_3_11(span<uint8_t> output, span<const l
 // Recovers the original short codeblock from its rate-matched version.
 static void rate_dematch(span<log_likelihood_ratio> output, span<const log_likelihood_ratio> input)
 {
-  unsigned output_size = output.size();
-  unsigned input_size  = input.size();
+  // Copy the first samples in common.
+  unsigned nof_copy = std::min(input.size(), output.size());
+  srsvec::copy(output.first(nof_copy), input.first(nof_copy));
 
-  std::fill(output.begin(), output.end(), 0);
-  for (unsigned idx = 0; idx != input_size; ++idx) {
-    output[idx % output_size] += input[idx];
+  // Pad the output with zeros if longer than the input.
+  if (input.size() <= output.size()) {
+    srsvec::fill(output.last(output.size() - nof_copy), 0);
+    return;
   }
-};
+
+  // Combine the rest of LLRs in blocks.
+  input = input.last(input.size() - output.size());
+  while (!input.empty()) {
+    // Determine the block size.
+    unsigned block_size = std::min(output.size(), input.size());
+
+    // Combine block of LLR.
+    log_likelihood_ratio::sum(output.first(block_size), output.first(block_size), input.first(block_size));
+
+    // Advance input.
+    input = input.last(input.size() - block_size);
+  }
+}
 
 bool short_block_detector_impl::detect(span<uint8_t>                    output,
                                        span<const log_likelihood_ratio> input,
                                        modulation_scheme                mod)
 {
+  // If the spans sizes are invalid, the result is invalid.
   unsigned bits_per_symbol = get_bits_per_symbol(mod);
-  validate_spans(output, input, bits_per_symbol);
-
-  // If all input bits are zero, the result is invalid.
-  if (std::all_of(input.begin(), input.end(), [](log_likelihood_ratio bit) { return bit == 0; })) {
+  if (!validate_spans(output, input, bits_per_symbol)) {
     std::fill(output.begin(), output.end(), 1);
     return false;
   }
@@ -195,4 +220,4 @@ bool short_block_detector_impl::detect(span<uint8_t>                    output,
   // TODO(david): Thresholds for the 1- and 2-bit cases are not meaningful.
   constexpr std::array<double, MAX_MSG_LENGTH> THRESHOLDS = {0, 0, 12, 14, 16, 18, 20, 22, 24, 26, 29};
   return (max_metric > THRESHOLDS[out_size - 1]);
-};
+}

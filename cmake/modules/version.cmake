@@ -1,5 +1,5 @@
 #
-# Copyright 2021-2024 Software Radio Systems Limited
+# Copyright 2021-2025 Software Radio Systems Limited
 #
 # This file is part of srsRAN
 #
@@ -18,7 +18,7 @@
 # and at http://www.gnu.org/licenses/.
 #
 
-set(SRSRAN_VERSION_MAJOR 24)
-set(SRSRAN_VERSION_MINOR 10)
+set(SRSRAN_VERSION_MAJOR 25)
+set(SRSRAN_VERSION_MINOR 04)
 set(SRSRAN_VERSION_PATCH 0)
 set(SRSRAN_VERSION_STRING "${SRSRAN_VERSION_MAJOR}.${SRSRAN_VERSION_MINOR}.${SRSRAN_VERSION_PATCH}")

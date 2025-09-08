@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -26,10 +26,10 @@ namespace srsran {
 namespace ofh {
 
 /// Open Fronthaul control interface.
-class controller
+class operation_controller
 {
 public:
-  virtual ~controller() = default;
+  virtual ~operation_controller() = default;
 
   /// \brief Starts the Open Fronthaul operation.
   /// \note Caller will be blocked until the controller is fully started.

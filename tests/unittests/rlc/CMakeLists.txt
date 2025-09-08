@@ -1,5 +1,5 @@
 #
-# Copyright 2021-2024 Software Radio Systems Limited
+# Copyright 2021-2025 Software Radio Systems Limited
 #
 # This file is part of srsRAN
 #
@@ -61,7 +61,7 @@ target_include_directories(rlc_pdu_recycler_test PRIVATE ${CMAKE_SOURCE_DIR})
 gtest_discover_tests(rlc_pdu_recycler_test)
 
 add_executable(rlc_sdu_queue_lockfree_test rlc_sdu_queue_lockfree_test.cpp)
-target_link_libraries(rlc_sdu_queue_lockfree_test srsran_support srslog)
+target_link_libraries(rlc_sdu_queue_lockfree_test srsran_support srslog gtest gtest_main)
 target_include_directories(rlc_sdu_queue_lockfree_test PRIVATE ${CMAKE_SOURCE_DIR})
 gtest_discover_tests(rlc_sdu_queue_lockfree_test)
 
@@ -70,7 +70,7 @@ target_link_libraries(rlc_retx_queue_test srsran_support srslog gtest gtest_main
 target_include_directories(rlc_retx_queue_test PRIVATE ${CMAKE_SOURCE_DIR})
 gtest_discover_tests(rlc_retx_queue_test)
 
-add_executable(rlc_metrics_aggregator_test rlc_metrics_aggregator_test.cpp)
-target_link_libraries(rlc_metrics_aggregator_test srsran_rlc srsran_support srslog gtest gtest_main)
-target_include_directories(rlc_metrics_aggregator_test PRIVATE ${CMAKE_SOURCE_DIR})
-gtest_discover_tests(rlc_metrics_aggregator_test)
+add_executable(rlc_bearer_metrics_collector_test rlc_bearer_metrics_collector_test.cpp)
+target_link_libraries(rlc_bearer_metrics_collector_test srsran_rlc srsran_support srslog gtest gtest_main)
+target_include_directories(rlc_bearer_metrics_collector_test PRIVATE ${CMAKE_SOURCE_DIR})
+gtest_discover_tests(rlc_bearer_metrics_collector_test)

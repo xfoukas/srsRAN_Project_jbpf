@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -23,6 +23,8 @@
 #pragma once
 
 #include "srsran/ru/ru_uplink_plane.h"
+#include <algorithm>
+#include <vector>
 
 namespace srsran {
 
@@ -37,6 +39,8 @@ class uplink_request_handler;
 class ru_uplink_plane_handler_proxy : public ru_uplink_plane_handler
 {
 public:
+  ru_uplink_plane_handler_proxy() = default;
+
   explicit ru_uplink_plane_handler_proxy(std::vector<ofh::uplink_request_handler*> sectors_) :
     sectors(std::move(sectors_))
   {

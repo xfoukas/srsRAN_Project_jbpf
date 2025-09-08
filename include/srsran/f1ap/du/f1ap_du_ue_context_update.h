@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -23,14 +23,11 @@
 #pragma once
 
 #include "srsran/adt/byte_buffer.h"
-#include "srsran/adt/optional.h"
 #include "srsran/f1ap/ue_context_management_configs.h"
-#include "srsran/pdcp/pdcp_sn_size.h"
 #include "srsran/ran/du_types.h"
-#include "srsran/ran/qos/five_qi.h"
 #include "srsran/ran/qos/qos_parameters.h"
 #include "srsran/ran/rnti.h"
-#include "srsran/ran/s_nssai.h"
+#include "srsran/ran/serv_cell_index.h"
 
 namespace srsran {
 namespace srs_du {
@@ -57,7 +54,9 @@ struct f1ap_scell_to_setup {
 
 /// \brief Request from DU F1AP to DU manager to modify existing UE configuration.
 struct f1ap_ue_context_update_request {
-  du_ue_index_t         ue_index;
+  du_ue_index_t                      ue_index;
+  std::optional<nr_cell_global_id_t> spcell_id;
+  /// New SRBs to setup.
   std::vector<srb_id_t> srbs_to_setup;
   /// List of new DRBs to setup.
   std::vector<f1ap_drb_to_setup> drbs_to_setup;
@@ -70,6 +69,9 @@ struct f1ap_ue_context_update_request {
   /// \brief If true, the gnb-DU shall generate a cell group configuration using full configuration. Otherwise, delta,
   /// should be used.
   bool full_config_required;
+  /// \brief measConfig selected by the CU-CP. If non-empty, the gnb-DU shall deduce which changes to measConfig need
+  /// to be applied as per TS 38.473, 8.3.1.2.
+  byte_buffer meas_cfg;
   /// \brief Optional HO preparation information. If present, the gnb-DU shall proceed with a reconfiguration with sync
   /// as defined in TS 38.331, and TS 38.473, 8.3.1.2.
   byte_buffer ho_prep_info;
@@ -78,6 +80,8 @@ struct f1ap_ue_context_update_request {
   byte_buffer source_cell_group_cfg;
   /// Container with the UE-CapabilityRAT-ContainerList, as per TS 38.331.
   byte_buffer ue_cap_rat_list;
+  /// Indiction that the CU-CP has received the RRC reconfiguration complete.
+  bool rrc_recfg_complete_ind;
 };
 
 /// \brief Response from DU manager to DU F1AP with the result of the UE context update.
@@ -91,17 +95,17 @@ struct f1ap_ue_context_update_response {
   std::vector<f1ap_drb_failed_to_setupmod> failed_drbs_setups;
   /// List of DRBs that failed to be modified.
   std::vector<f1ap_drb_failed_to_setupmod> failed_drb_mods;
-  byte_buffer                              du_to_cu_rrc_container;
+  byte_buffer                              cell_group_cfg;
+  byte_buffer                              meas_gap_cfg;
   bool                                     full_config_present = false;
 };
 
-/// \brief Handled causes for RLF.
-enum class rlf_cause { max_mac_kos_reached, max_rlc_retxs_reached, rlc_protocol_failure };
-
 /// \brief Request Command for F1AP UE CONTEXT Release Request.
 struct f1ap_ue_context_release_request {
+  enum class cause_type { rlf_mac, rlf_rlc, other };
+
   du_ue_index_t ue_index;
-  rlf_cause     cause;
+  cause_type    cause;
 };
 
 /// \brief Request Command for F1AP UE CONTEXT Modification Required.

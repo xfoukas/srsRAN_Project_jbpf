@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -24,6 +24,7 @@
 #include "dl_csi_pdu.h"
 #include "dl_pdcch_pdu.h"
 #include "dl_pdsch_pdu.h"
+#include "dl_prs_pdu.h"
 #include "dl_ssb_pdu.h"
 #include "field_checkers.h"
 #include "uci_pdus.h"
@@ -31,7 +32,7 @@
 #include "ul_pucch_pdu.h"
 #include "ul_pusch_pdu.h"
 #include "ul_srs_pdu.h"
-#include "srsran/support/format_utils.h"
+#include "srsran/support/format/fmt_to_c_str.h"
 
 using namespace srsran;
 using namespace fapi;
@@ -89,6 +90,9 @@ error_type<validator_report> srsran::fapi::validate_dl_tti_request(const dl_tti_
       case dl_pdu_type::CSI_RS:
         success &= validate_dl_csi_pdu(pdu.csi_rs_pdu, report);
         break;
+      case dl_pdu_type::PRS:
+        success &= validate_dl_prs_pdu(pdu.prs_pdu, report);
+        break;
       default:
         srsran_assert(0, "Invalid pdu_type");
         break;
@@ -141,14 +145,14 @@ static bool validate_pdu_cw_index(unsigned value, validator_report& report)
   return validate_field(MIN_VALUE, MAX_VALUE, value, "CW index", message_type_id::tx_data_request, report);
 }
 
-/// Validates the payload property of a custom Tx_Data.request TBS-TLV, as per SCF-222 v4.0 section 3.4.6.
-static bool validate_tlv_custom_payload(const uint8_t* payload, validator_report& report)
+/// Validates the payload property of a Tx_Data.request message, as per SCF-222 v4.0 section 3.4.6.
+static bool validate_pdu_payload(const shared_transport_block& buffer, validator_report& report)
 {
-  if (payload != nullptr) {
+  if (!buffer.get_buffer().empty()) {
     return true;
   }
 
-  report.append(0U, "TLV payload custom", message_type_id::tx_data_request);
+  report.append(0, "PDU Payload", message_type_id::tx_data_request);
   return false;
 }
 
@@ -163,7 +167,7 @@ error_type<validator_report> srsran::fapi::validate_tx_data_request(const tx_dat
 
   for (const auto& pdu : msg.pdus) {
     success &= validate_pdu_cw_index(pdu.cw_index, report);
-    success &= validate_tlv_custom_payload(pdu.tlv_custom.payload, report);
+    success &= validate_pdu_payload(pdu.pdu, report);
   }
 
   // Build the result.
@@ -462,9 +466,71 @@ static bool validate_srs_usage(unsigned value, validator_report& report)
 static bool validate_report_type(unsigned value, validator_report& report)
 {
   static constexpr unsigned MIN_VALUE = 0;
-  static constexpr unsigned MAX_VALUE = 1;
+  static constexpr unsigned MAX_VALUE = 7;
+  static constexpr unsigned NO_REPORT = 255;
+
+  // No report value is allowed.
+  if (value == NO_REPORT) {
+    return true;
+  }
 
   return validate_field(MIN_VALUE, MAX_VALUE, value, "Report type", message_type_id::srs_indication, report);
+}
+
+/// Validates the positioning report coordinate system for UL-AOA property of the SRS.indication PDU, as per SCF-222
+/// v8.0 section 3.4.10 in table 3-209.
+static bool validate_coordinate_system(unsigned value, validator_report& report)
+{
+  static constexpr unsigned MIN_VALUE = 0;
+  static constexpr unsigned MAX_VALUE = 1;
+
+  return validate_field(MIN_VALUE,
+                        MAX_VALUE,
+                        value,
+                        "SRS Positioning Report coordinate system for UL-AOA",
+                        message_type_id::srs_indication,
+                        report);
+}
+
+/// Validates the positioning report the UL-AOA property of the SRS.indication PDU, as per SCF-222 v8.0  section 3.4.10
+/// in table 3-209.
+static bool validate_ul_aoa(float value, validator_report& report)
+{
+  static constexpr unsigned MIN_VALUE = 0;
+  static constexpr unsigned MAX_VALUE = 3599;
+
+  unsigned aoa_in_tenths = std::round(value * 10);
+
+  return validate_field(
+      MIN_VALUE, MAX_VALUE, aoa_in_tenths, "SRS Positioning Report UL-AOA", message_type_id::srs_indication, report);
+}
+
+/// Validates the positioning report gNB RX-RX time difference property of the SRS.indication PDU, as per SCF-222 v8.0
+/// section 3.4.10 in table 3-209.
+static bool validate_gnb_rx_tx_difference(unsigned value, validator_report& report)
+{
+  static constexpr unsigned MIN_VALUE = 0;
+  static constexpr unsigned MAX_VALUE = 1970049;
+
+  return validate_field(MIN_VALUE,
+                        MAX_VALUE,
+                        value,
+                        "SRS Positioning Report coordinate system for UL-AOA",
+                        message_type_id::srs_indication,
+                        report);
+}
+
+/// Validates the positioning report RSRP property of the SRS.indication PDU, as per SCF-222 v8.0 section 3.4.10
+/// in table 3-209.
+static bool validate_srs_rsrp(float value, validator_report& report)
+{
+  static constexpr int MIN_VALUE = -1560;
+  static constexpr int MAX_VALUE = 0;
+
+  int rsrp_in_tenths = std::round(value * 10);
+
+  return validate_field(
+      MIN_VALUE, MAX_VALUE, rsrp_in_tenths, "SRS Positioning Report RSRP", message_type_id::srs_indication, report);
 }
 
 error_type<validator_report> srsran::fapi::validate_srs_indication(const srs_indication_message& msg)
@@ -483,7 +549,24 @@ error_type<validator_report> srsran::fapi::validate_srs_indication(const srs_ind
     success &= validate_timing_advance_offset(pdu.timing_advance_offset, message_type_id::srs_indication, report);
     success &= validate_timing_advance_offset_ns(pdu.timing_advance_offset_ns, message_type_id::srs_indication, report);
     success &= validate_srs_usage(static_cast<unsigned>(pdu.usage), report);
-    success &= validate_report_type(pdu.report_type, report);
+    success &= validate_report_type(static_cast<unsigned>(pdu.report_type), report);
+
+    // Validate positioning fields.
+    if (pdu.report_type == srs_report_type::positioning) {
+      const srs_positioning_report& pos_report = pdu.positioning;
+      success &= validate_coordinate_system(static_cast<unsigned>(pos_report.coordinate_system_aoa), report);
+      if (pos_report.gnb_rx_tx_difference) {
+        success &= validate_gnb_rx_tx_difference(pos_report.gnb_rx_tx_difference.value(), report);
+      }
+      if (pos_report.ul_aoa) {
+        success &= validate_ul_aoa(pos_report.ul_aoa.value(), report);
+      }
+      // NOTE: UL Relative Time Of Arrival is in PHY time units and will not be validated.
+
+      if (pos_report.rsrp) {
+        success &= validate_srs_rsrp(pos_report.rsrp.value(), report);
+      }
+    }
   }
 
   // Build the result.
@@ -765,7 +848,7 @@ static const char* get_uci_pdu_type_string(uci_pdu_type pdu_id)
     case uci_pdu_type::PUCCH_format_2_3_4:
       return "PUCCH Format 2/3/4";
     default:
-      srsran_assert(0, "Invalid UCI.indication PDU={}", pdu_id);
+      srsran_assert(0, "Invalid UCI.indication PDU={}", fmt::underlying(pdu_id));
       break;
   }
   return "";
@@ -784,7 +867,7 @@ static const char* get_ul_tti_pdu_type_string(ul_pdu_type pdu_id)
     case ul_pdu_type::SRS:
       return "SRS";
     default:
-      srsran_assert(0, "Invalid UL_TTI.request PDU={}", pdu_id);
+      srsran_assert(0, "Invalid UL_TTI.request PDU={}", fmt::underlying(pdu_id));
       break;
   }
   return "";
@@ -803,7 +886,7 @@ static const char* get_dl_tti_pdu_type_string(dl_pdu_type pdu_id)
     case dl_pdu_type::SSB:
       return "SSB";
     default:
-      srsran_assert(0, "Invalid DL_TTI.request PDU={}", pdu_id);
+      srsran_assert(0, "Invalid DL_TTI.request PDU={}", fmt::underlying(pdu_id));
       break;
   }
   return "";
@@ -837,7 +920,7 @@ static const char* get_pdu_type_string(message_type_id msg_id, unsigned pdu_id)
     case message_type_id::ul_tti_request:
       return get_ul_tti_pdu_type_string(static_cast<ul_pdu_type>(pdu_id));
     default:
-      srsran_assert(0, "Invalid FAPI message type={}", msg_id);
+      srsran_assert(0, "Invalid FAPI message type={}", fmt::underlying(msg_id));
       break;
   }
   return "";
@@ -886,7 +969,7 @@ static const char* get_message_type_string(message_type_id msg_id)
     case message_type_id::ul_tti_request:
       return "UL_TTI.request";
     default:
-      srsran_assert(0, "Invalid FAPI message type={}", msg_id);
+      srsran_assert(0, "Invalid FAPI message type={}", fmt::underlying(msg_id));
       break;
   }
   return "";
@@ -894,7 +977,7 @@ static const char* get_message_type_string(message_type_id msg_id)
 
 static void log_pdu_and_range_report(fmt::memory_buffer& buffer, const validator_report::error_report& report)
 {
-  fmt::format_to(buffer,
+  fmt::format_to(std::back_inserter(buffer),
                  "\t- PDU type={}, property={}, value={}, expected value=[{}-{}]\n",
                  get_pdu_type_string(report.message_type, report.pdu_type.value()),
                  report.property_name,
@@ -905,7 +988,7 @@ static void log_pdu_and_range_report(fmt::memory_buffer& buffer, const validator
 
 static void log_pdu_report(fmt::memory_buffer& buffer, const validator_report::error_report& report)
 {
-  fmt::format_to(buffer,
+  fmt::format_to(std::back_inserter(buffer),
                  "\t- PDU type={}, property={}, value={}\n",
                  get_pdu_type_string(report.message_type, report.pdu_type.value()),
                  report.property_name,
@@ -914,7 +997,7 @@ static void log_pdu_report(fmt::memory_buffer& buffer, const validator_report::e
 
 static void log_range_report(fmt::memory_buffer& buffer, const validator_report::error_report& report)
 {
-  fmt::format_to(buffer,
+  fmt::format_to(std::back_inserter(buffer),
                  "\t- Property={}, value={}, expected value=[{}-{}]\n",
                  report.property_name,
                  report.value,
@@ -924,14 +1007,17 @@ static void log_range_report(fmt::memory_buffer& buffer, const validator_report:
 
 static void log_basic_report(fmt::memory_buffer& buffer, const validator_report::error_report& report)
 {
-  fmt::format_to(buffer, "\t- Property={}, value={}\n", report.property_name, report.value);
+  fmt::format_to(std::back_inserter(buffer), "\t- Property={}, value={}\n", report.property_name, report.value);
 }
 
-void srsran::fapi::log_validator_report(const validator_report& report, srslog::basic_logger& logger)
+void srsran::fapi::log_validator_report(const validator_report& report,
+                                        srslog::basic_logger&   logger,
+                                        unsigned                sector_id)
 {
   fmt::memory_buffer str_buffer;
-  fmt::format_to(str_buffer,
-                 "Detected {} error(s) in message type '{}' in slot={}.{}:\n",
+  fmt::format_to(std::back_inserter(str_buffer),
+                 "Sector#{}: Detected {} error(s) in message type '{}' in slot={}.{}:\n",
+                 sector_id,
                  report.reports.size(),
                  get_message_type_string(report.reports.front().message_type),
                  report.sfn,

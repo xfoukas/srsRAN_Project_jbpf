@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -33,16 +33,39 @@
 #include "srsran/support/timers.h"
 #include "fmt/format.h"
 
+#ifdef JBPF_ENABLED
+#include "jbpf_srsran_hooks.h"
+#endif
+
 namespace srsran {
 
 /// Container to hold a SDU for transmission, the progress in case of segmentation, and associated meta data
 struct rlc_tx_am_sdu_info {
-  byte_buffer                           sdu     = {};    ///< SDU buffer
-  bool                                  is_retx = false; ///< Determines whether this SDU is a PDCP retransmission
-  std::optional<uint32_t>               pdcp_sn;         ///< Optional PDCP sequence number
-  std::chrono::system_clock::time_point time_of_arrival;
-  uint32_t                              next_so    = 0;                      ///< Segmentation progress
-  uint32_t                              retx_count = RETX_COUNT_NOT_STARTED; ///< Retransmission counter
+  /// \brief SDU buffer.
+  byte_buffer sdu;
+
+  /// \brief Determines whether this SDU is a PDCP retransmission.
+  bool is_retx = false;
+
+  /// \brief Optional PDCP sequence number.
+  std::optional<uint32_t> pdcp_sn;
+
+  /// \brief Time of arrival at RLC from upper layers.
+  ///
+  /// This represents the time where the SDU is put into the SDU queue.
+  std::chrono::time_point<std::chrono::steady_clock> time_of_arrival;
+
+  /// \brief Time of departure from RLC towards lower layers.
+  ///
+  /// This represents the time where the SDU is pulled from SDU queue, put into the TX window, and the PDU (or the first
+  /// segment) is forwarded towards lower layers.
+  std::chrono::time_point<std::chrono::steady_clock> time_of_departure;
+
+  /// \brief Segmentation progress.
+  uint32_t next_so = 0;
+
+  /// \brief Retransmission counter.
+  uint32_t retx_count = RETX_COUNT_NOT_STARTED;
 };
 
 /// \brief TX state variables
@@ -88,6 +111,8 @@ private:
   // TX state variables
   rlc_tx_am_state st;
 
+  // TX helper variables
+
   // TX SDU buffers
   rlc_sdu_queue_lockfree sdu_queue;
   uint32_t               sn_under_segmentation = INVALID_RLC_SN; // SN of the SDU currently being segmented
@@ -95,9 +120,6 @@ private:
   // RETX buffers
   rlc_retx_queue retx_queue;
   uint32_t       retx_sn = INVALID_RLC_SN; // SN of the most recent ReTx since last status report
-
-  // Mutexes
-  std::mutex mutex;
 
   /// TX counter modulus
   const uint32_t     mod;
@@ -107,7 +129,11 @@ private:
   const uint32_t am_window_size;
 
   /// TX window
-  std::unique_ptr<sdu_window<rlc_tx_am_sdu_info>> tx_window;
+  sdu_window<rlc_tx_am_sdu_info, rlc_bearer_logger> tx_window;
+#ifdef JBPF_ENABLED
+  /// Window size in bytes
+  uint32_t tx_window_bytes = 0;
+#endif
 
   /// Recycler for discarded PDUs (from tx_window) that shall be deleted by a different executor off the critical path
   rlc_pdu_recycler pdu_recycler;
@@ -129,7 +155,11 @@ private:
   pcap_rlc_pdu_context pcap_context;
 
   // Storage for previous buffer state
-  unsigned prev_buffer_state = 0;
+  rlc_buffer_state prev_buffer_state = {};
+
+  /// This flag is used to temporarily disable barring of huge buffer state notifications after seeing a small buffer
+  /// state (<= MAX_DL_PDU_LENGTH) until sending at least one notification towards lower layer.
+  bool suspend_bs_notif_barring = true;
 
   /// This atomic_flag indicates whether a buffer state update task has been queued but not yet run by pcell_executor.
   /// It helps to avoid queuing of redundant notification tasks in case of frequent changes of the buffer status.
@@ -137,7 +167,12 @@ private:
   /// latest buffer state upon execution.
   std::atomic_flag pending_buffer_state = ATOMIC_FLAG_INIT;
 
-  bool stopped = false;
+  /// Flag that indicates whether the upper part of the RLC entity is stopped. Access from ue_executor.
+  bool stopped_upper = false;
+  /// Flag that indicates whether the upper part of the RLC entity is stopped. Access from pcell_executor.
+  bool stopped_lower = false;
+
+  bool max_retx_reached = false;
 
 public:
   rlc_tx_am_entity(gnb_du_id_t                          gnb_du_id_,
@@ -147,22 +182,52 @@ public:
                    rlc_tx_upper_layer_data_notifier&    upper_dn_,
                    rlc_tx_upper_layer_control_notifier& upper_cn_,
                    rlc_tx_lower_layer_notifier&         lower_dn_,
-                   rlc_metrics_aggregator&              metrics_aggregator_,
+                   rlc_bearer_metrics_collector&        metrics_coll_,
                    rlc_pcap&                            pcap_,
                    task_executor&                       pcell_executor_,
                    task_executor&                       ue_executor_,
                    timer_manager&                       timers);
 
+#ifdef JBPF_ENABLED
+  ~rlc_tx_am_entity() override {
+    struct jbpf_rlc_ctx_info jbpf_ctx = {0};
+    jbpf_ctx.ctx_id = 0;   
+    jbpf_ctx.gnb_du_id = (uint64_t)gnb_du_id;
+    jbpf_ctx.du_ue_index = ue_index;
+    jbpf_ctx.is_srb = rb_id.is_srb();
+    jbpf_ctx.rb_id = rb_id.is_srb() ? srb_id_to_uint(rb_id.get_srb_id()) 
+                                    : drb_id_to_uint(rb_id.get_drb_id());
+    jbpf_ctx.direction = JBPF_DL; 
+    jbpf_ctx.rlc_mode = JBPF_RLC_MODE_AM; 
+    jbpf_ctx.u.am_tx.sdu_queue_info = {
+        true,
+        0,
+        0};
+      jbpf_ctx.u.am_tx.window_info = {
+        true,
+        0,
+        0};
+    hook_rlc_dl_deletion(&jbpf_ctx);
+  }
+#endif
+                   
   void stop() final
   {
     // Stop all timers. Any queued handlers of timers that just expired before this call are canceled automatically
-    if (not stopped) {
-      poll_retransmit_timer.stop();
+    if (not stopped_upper) {
+      stopped_upper = true;
       high_metrics_timer.stop();
-      low_metrics_timer.stop();
-      stopped = true;
+      // stop lower part (e.g. timers) from cell executor
+      auto stop_lower_part = TRACE_TASK([this]() {
+        stopped_lower = true;
+        poll_retransmit_timer.stop();
+        low_metrics_timer.stop();
+      });
+      if (!pcell_executor.execute(std::move(stop_lower_part))) {
+        logger.log_error("Unable to stop lower timers.");
+      }
     }
-  };
+  }
 
   // TX/RX interconnect
   void set_status_provider(rlc_rx_am_status_provider* status_provider_) { status_provider = status_provider_; }
@@ -172,9 +237,9 @@ public:
   void discard_sdu(uint32_t pdcp_sn) override;
 
   // Interfaces for lower layers
-  size_t pull_pdu(span<uint8_t> rlc_pdu_buf) override;
+  size_t pull_pdu(span<uint8_t> rlc_pdu_buf) noexcept override;
 
-  uint32_t get_buffer_state() override;
+  rlc_buffer_state get_buffer_state() override;
 
   // Status handler interface
   void on_status_pdu(rlc_am_status_pdu status) override;
@@ -195,7 +260,7 @@ public:
   ///
   /// Note: This function shall be executed by the same executor that calls pull_pdu(), i.e. the pcell_executor,
   /// in order to avoid incidential blocking of those critical paths.
-  void on_expired_poll_retransmit_timer();
+  void on_expired_poll_retransmit_timer() noexcept;
 
   // Window helpers
 
@@ -296,7 +361,7 @@ private:
 
   /// \brief Evaluates a status PDU, schedules RETX and removes ACK'ed SDUs from TX window
   /// \param status The status PDU
-  void handle_status_pdu(rlc_am_status_pdu status);
+  void handle_status_pdu(rlc_am_status_pdu status) noexcept;
 
   /// \brief Schedules RETX for NACK'ed PDUs
   ///
@@ -347,18 +412,8 @@ private:
   /// itself.
   ///
   /// Safe execution from: pcell_executor
-  /// \param is_locked provides info whether the \c mutex is already locked or not.
   /// \param force_notify forces a notification of the lower layer regardless of the current/previous buffer state.
-  void update_mac_buffer_state(bool is_locked, bool force_notify);
-
-  /// Lock-free version of \c get_buffer_state()
-  /// \return Provides the current buffer state
-  uint32_t get_buffer_state_nolock();
-
-  /// Creates the tx_window according to sn_size
-  /// \param sn_size Size of the sequence number (SN)
-  /// \return unique pointer to tx_window instance
-  std::unique_ptr<sdu_window<rlc_tx_am_sdu_info>> create_tx_window(rlc_am_sn_size sn_size);
+  void update_mac_buffer_state(bool force_notify) noexcept;
 
   void log_state(srslog::basic_levels level)
   {
@@ -376,13 +431,13 @@ namespace fmt {
 template <>
 struct formatter<srsran::rlc_tx_am_state> {
   template <typename ParseContext>
-  auto parse(ParseContext& ctx) -> decltype(ctx.begin())
+  auto parse(ParseContext& ctx)
   {
     return ctx.begin();
   }
 
   template <typename FormatContext>
-  auto format(const srsran::rlc_tx_am_state& st, FormatContext& ctx) -> decltype(std::declval<FormatContext>().out())
+  auto format(const srsran::rlc_tx_am_state& st, FormatContext& ctx) const
   {
     return format_to(ctx.out(),
                      "tx_next_ack={} tx_next={} poll_sn={} pdu_without_poll={} byte_without_poll={}",

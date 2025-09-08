@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -23,6 +23,8 @@
 #pragma once
 
 #include "srsran/ru/ru_downlink_plane.h"
+#include <algorithm>
+#include <vector>
 
 namespace srsran {
 
@@ -37,6 +39,8 @@ class downlink_handler;
 class ru_downlink_plane_handler_proxy : public ru_downlink_plane_handler
 {
 public:
+  ru_downlink_plane_handler_proxy() = default;
+
   explicit ru_downlink_plane_handler_proxy(std::vector<ofh::downlink_handler*> sectors_) : sectors(std::move(sectors_))
   {
     srsran_assert(std::all_of(sectors.begin(), sectors.end(), [](const auto& elem) { return elem != nullptr; }),

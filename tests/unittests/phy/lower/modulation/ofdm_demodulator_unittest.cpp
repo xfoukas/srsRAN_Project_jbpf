@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -28,9 +28,6 @@
 #include "srsran/srsvec/sc_prod.h"
 #include "srsran/support/test_utils.h"
 #include <random>
-
-/// Defines the maximum allowed error at the OFDM demodulator output.
-static constexpr float ASSERT_MAX_ERROR = 1.0F / 128.0F;
 
 using namespace srsran;
 
@@ -88,7 +85,7 @@ int main()
         ofdm_config.cp                        = cp;
         ofdm_config.nof_samples_window_offset = 0;
         ofdm_config.scale                     = dist_rg(rgen);
-        ofdm_config.center_freq_hz            = 0.0;
+        ofdm_config.center_freq_Hz            = 0.0;
 
         unsigned nsubc = ofdm_config.bw_rb * NRE;
 
@@ -168,7 +165,7 @@ int main()
           }
 
           // Assert resource grid entries.
-          rg.assert_entries(expected_rg, ASSERT_MAX_ERROR);
+          rg.assert_entries(expected_rg);
         }
       }
     }

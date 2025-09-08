@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -219,14 +219,14 @@ public:
   /// Scales all the coefficients by a real scaling factor.
   srs_channel_matrix& operator*=(float scale)
   {
-    srsvec::sc_prod(data.get_data(), scale, data.get_data());
+    srsvec::sc_prod(data.get_data(), data.get_data(), scale);
     return *this;
   }
 
   /// Scales all the coefficients by a complex scaling factor.
   srs_channel_matrix& operator*=(cf_t scale)
   {
-    srsvec::sc_prod(data.get_data(), scale, data.get_data());
+    srsvec::sc_prod(data.get_data(), data.get_data(), scale);
     return *this;
   }
 

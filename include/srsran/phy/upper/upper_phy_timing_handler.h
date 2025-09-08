@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -24,13 +24,7 @@
 
 namespace srsran {
 
-class slot_point;
-
-/// Describes the context of the current timing boundary.
-struct upper_phy_timing_context {
-  /// Indicates the current slot.
-  slot_point slot;
-};
+struct upper_phy_timing_context;
 
 /// Upper physical layer handler to align timing boundaries.
 class upper_phy_timing_handler

@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -51,6 +51,24 @@ enum class pucch_format : uint8_t { FORMAT_0, FORMAT_1, FORMAT_2, FORMAT_3, FORM
 inline uint8_t pucch_format_to_uint(pucch_format format)
 {
   return static_cast<uint8_t>(format);
+}
+
+inline const char* to_string(pucch_format format)
+{
+  switch (format) {
+    case pucch_format::FORMAT_0:
+      return "FORMAT_0";
+    case pucch_format::FORMAT_1:
+      return "FORMAT_1";
+    case pucch_format::FORMAT_2:
+      return "FORMAT_2";
+    case pucch_format::FORMAT_3:
+      return "FORMAT_3";
+    case pucch_format::FORMAT_4:
+      return "FORMAT_4";
+    default:
+      return "UNKNOWN";
+  }
 }
 
 /// Defines whether the PUCCH within the current slot belongs to a PUCCH repetition. For more details, refer to

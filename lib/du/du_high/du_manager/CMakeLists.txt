@@ -1,5 +1,5 @@
 #
-# Copyright 2021-2024 Software Radio Systems Limited
+# Copyright 2021-2025 Software Radio Systems Limited
 #
 # This file is part of srsRAN
 #
@@ -18,6 +18,7 @@
 # and at http://www.gnu.org/licenses/.
 #
 
+add_subdirectory(cbs)
 add_subdirectory(converters)
 add_subdirectory(du_ue)
 add_subdirectory(procedures)
@@ -26,7 +27,10 @@ add_subdirectory(ran_resource_management)
 set(SOURCES
         du_cell_manager.cpp
         du_manager_factory.cpp
-        du_manager_impl.cpp)
+        du_manager_impl.cpp
+        du_positioning_handler_factory.cpp
+        du_metrics_aggregator_impl.cpp
+)
 
 add_library(srsran_du_manager STATIC ${SOURCES})
 target_link_libraries(srsran_du_manager

@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -56,6 +56,8 @@ public:
     info.direction                                        = data_direction::uplink;
     info.filter_type                                      = context.filter_type;
   }
+
+  data_flow_message_encoding_metrics_collector* get_metrics_collector() override { return nullptr; }
 
   /// Returns true if the method enqueue section type 1 message has been called, otherwise false.
   bool has_enqueue_section_type_1_method_been_called() const

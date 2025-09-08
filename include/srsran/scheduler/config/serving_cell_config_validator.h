@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -22,8 +22,8 @@
 
 #pragma once
 
-#include "serving_cell_config.h"
 #include "srsran/ran/tdd/tdd_ul_dl_config.h"
+#include "srsran/scheduler/config/serving_cell_config.h"
 #include "srsran/support/config/validator_result.h"
 
 namespace srsran {
@@ -42,9 +42,17 @@ validator_result validate_pdsch_cfg(const serving_cell_config& ue_cell_cfg);
 
 /// \brief Validates PUCCH Config in \c sched_ue_creation_request_message used to create a UE.
 /// \param[in] ue_cell_cfg UE serving cell configuration to be validated.
+/// \param[in] pucch_cfg_common PUCCH commmon configuration.
 /// \param[in] nof_dl_antennas Number of antennas used for DL tx.
 /// \return In case an invalid parameter is detected, returns a string containing an error message.
-validator_result validate_pucch_cfg(const serving_cell_config& ue_cell_cfg, unsigned nof_dl_antennas);
+validator_result validate_pucch_cfg(const serving_cell_config& ue_cell_cfg,
+                                    const pucch_config_common& pucch_cfg_common,
+                                    unsigned                   nof_dl_antennas);
+
+/// \brief Validates PUSCH Config in \c sched_ue_creation_request_message used to create a UE.
+/// \param[in] uplink_config Uplink configuration to be validated.
+/// \return In case an invalid parameter is detected, returns a string containing an error message.
+validator_result validate_pusch_cfg(const uplink_config& ul_config, bool has_csi);
 
 /// \brief Validates SRS Config in \c sched_ue_creation_request_message used to create a UE.
 /// \param[in] ue_cell_cfg UE serving cell configuration to be validated.

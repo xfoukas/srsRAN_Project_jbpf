@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -34,6 +34,7 @@ class f1u_cu_up_test_frame : public f1u_tx_pdu_notifier, public f1u_rx_delivery_
 {
 public:
   std::list<nru_dl_message>    tx_msg_list;
+  std::list<uint32_t>          desired_buffer_size_list;
   std::list<uint32_t>          highest_transmitted_pdcp_sn_list;
   std::list<uint32_t>          highest_delivered_pdcp_sn_list;
   std::list<uint32_t>          highest_retransmitted_pdcp_sn_list;
@@ -44,6 +45,10 @@ public:
   void on_new_pdu(nru_dl_message msg) override { tx_msg_list.push_back(std::move(msg)); }
 
   // f1u_rx_delivery_notifier interface
+  void on_desired_buffer_size_notification(uint32_t desired_buffer_size) override
+  {
+    desired_buffer_size_list.push_back(desired_buffer_size);
+  }
   void on_transmit_notification(uint32_t highest_pdcp_sn) override
   {
     highest_transmitted_pdcp_sn_list.push_back(highest_pdcp_sn);
@@ -123,6 +128,7 @@ protected:
         *tester,
         ue_timer_factory,
         ue_inactivity_timer,
+        ue_worker,
         ue_worker);
   }
 
@@ -173,6 +179,7 @@ TEST_F(f1u_cu_up_test, tx_discard)
 
   f1u->discard_sdu(pdcp_sn);
   // advance time just before the timer-based DL notification is triggered
+  uint32_t f1u_dl_notif_time_ms = 10; // default notif timer
   for (uint32_t t = 0; t < f1u_dl_notif_time_ms - 1; t++) {
     EXPECT_TRUE(tester->tx_msg_list.empty());
     tick();

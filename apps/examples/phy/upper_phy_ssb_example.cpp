@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -23,13 +23,18 @@
 #include "upper_phy_ssb_example.h"
 #include "srsran/phy/support/prach_buffer.h"
 #include "srsran/phy/support/prach_buffer_context.h"
+#include "srsran/phy/support/re_pattern.h"
 #include "srsran/phy/support/resource_grid_mapper.h"
 #include "srsran/phy/support/resource_grid_reader.h"
 #include "srsran/phy/support/resource_grid_writer.h"
 #include "srsran/phy/support/shared_resource_grid.h"
 #include "srsran/phy/support/support_factories.h"
+#include "srsran/phy/upper/channel_coding/channel_coding_factories.h"
 #include "srsran/phy/upper/channel_processors/channel_processor_factories.h"
-#include "srsran/phy/upper/channel_processors/ssb_processor.h"
+#include "srsran/phy/upper/channel_processors/ssb/factories.h"
+#include "srsran/phy/upper/channel_processors/ssb/ssb_processor.h"
+#include "srsran/phy/upper/sequence_generators/sequence_generator_factories.h"
+#include "srsran/phy/upper/upper_phy_timing_context.h"
 #include "srsran/ran/precoding/precoding_codebooks.h"
 #include "srsran/srsvec/bit.h"
 #include <condition_variable>
@@ -53,6 +58,7 @@ private:
   std::unique_ptr<prach_buffer>         prach_buf;
   std::unique_ptr<ssb_processor>        ssb;
   std::unique_ptr<modulation_mapper>    data_modulator;
+  std::unique_ptr<resource_grid_mapper> mapper;
   upper_phy_rg_gateway*                 gateway;
   upper_phy_rx_symbol_request_notifier* rx_symb_req_notifier;
   ssb_configuration                     ssb_config;
@@ -75,6 +81,7 @@ public:
                        std::unique_ptr<resource_grid_pool>   ul_rg_pool_,
                        std::unique_ptr<ssb_processor>        ssb_,
                        std::unique_ptr<modulation_mapper>    data_modulator_,
+                       std::unique_ptr<resource_grid_mapper> mapper_,
                        upper_phy_rg_gateway*                 gateway_,
                        upper_phy_rx_symbol_request_notifier* rx_symb_req_notifier_,
                        const ssb_configuration&              ssb_config_,
@@ -92,6 +99,7 @@ public:
                                         prach_constants::MAX_NOF_PRACH_FD_OCCASIONS)),
     ssb(std::move(ssb_)),
     data_modulator(std::move(data_modulator_)),
+    mapper(std::move(mapper_)),
     gateway(gateway_),
     rx_symb_req_notifier(rx_symb_req_notifier_),
     ssb_config(ssb_config_),
@@ -107,6 +115,7 @@ public:
     srsran_assert(ul_rg_pool, "Invalid UL RG pool.");
     srsran_assert(ssb, "Invalid SSB processor.");
     srsran_assert(data_modulator, "Invalid modulation mapper.");
+    srsran_assert(mapper, "Invalid resource grid mapper.");
     srsran_assert(gateway, "Invalid RG gateway.");
     srsran_assert(rx_symb_req_notifier, "Invalid receive symbol request notifier.");
     srsran_assert(ssb_config.period_ms, "SSB period cannot be 0 ms.");
@@ -134,7 +143,7 @@ public:
       rx_symb_context.slot   = context.slot;
 
       // Try to allocate a resource grid.
-      shared_resource_grid rg = ul_rg_pool->allocate_resource_grid(rx_symb_context);
+      shared_resource_grid rg = ul_rg_pool->allocate_resource_grid(context.slot);
 
       // If the resource grid allocation fails, it aborts the slot request.
       if (rg) {
@@ -163,13 +172,8 @@ public:
       rx_symb_req_notifier->on_prach_capture_request(prach_context, *prach_buf);
     }
 
-    // Prepare resource grid context.
-    resource_grid_context rg_context;
-    rg_context.sector = 0;
-    rg_context.slot   = context.slot;
-
     // Get a resource grid from the pool.
-    shared_resource_grid rg = dl_rg_pool->allocate_resource_grid(rg_context);
+    shared_resource_grid rg = dl_rg_pool->allocate_resource_grid(context.slot);
 
     // Abort slot processing if the grid is not valid.
     if (!rg) {
@@ -209,7 +213,7 @@ public:
         pdu.subcarrier_offset = ssb_config.subcarrier_offset;
         pdu.offset_to_pointA  = ssb_config.offset_pointA;
         pdu.pattern_case      = ssb_config.pattern_case;
-        pdu.bch_payload       = {};
+        pdu.mib_payload       = {};
         pdu.ports             = {0};
 
         ssb->process(rg.get().get_writer(), pdu);
@@ -242,10 +246,12 @@ public:
       re_pattern grid_allocation(0, nof_subcs / NRE, 1, ~re_prb_mask(), ~symbol_slot_mask());
 
       // Map the data symbols to the grid.
-      resource_grid_mapper& mapper = rg->get_mapper();
-      mapper.map(data_symbols, grid_allocation, precoding_config);
+      mapper->map(rg.get_writer(), data_symbols, grid_allocation, precoding_config);
     }
 
+    resource_grid_context rg_context;
+    rg_context.sector = 0;
+    rg_context.slot   = context.slot;
     gateway->send(rg_context, std::move(rg));
 
     // Raise TTI boundary and notify.
@@ -301,7 +307,7 @@ std::unique_ptr<upper_phy_ssb_example> srsran::upper_phy_ssb_example::create(con
   std::shared_ptr<crc_calculator_factory> crc_calc_factory = create_crc_calculator_factory_sw("lut");
   ASSERT_FACTORY(crc_calc_factory);
 
-  std::shared_ptr<channel_modulation_factory> modulator_factory = create_channel_modulation_sw_factory();
+  std::shared_ptr<modulation_mapper_factory> modulator_factory = create_modulation_mapper_factory();
   ASSERT_FACTORY(modulator_factory);
 
   std::shared_ptr<pseudo_random_generator_factory> prg_factory = create_pseudo_random_generator_sw_factory();
@@ -330,7 +336,11 @@ std::unique_ptr<upper_phy_ssb_example> srsran::upper_phy_ssb_example::create(con
   std::shared_ptr<channel_precoder_factory> precoder_factory = create_channel_precoder_factory("auto");
   ASSERT_FACTORY(precoder_factory);
 
-  std::shared_ptr<resource_grid_factory> rg_factory = create_resource_grid_factory(precoder_factory);
+  std::shared_ptr<resource_grid_mapper_factory> rg_mapper_factory =
+      create_resource_grid_mapper_factory(precoder_factory);
+  ASSERT_FACTORY(rg_mapper_factory);
+
+  std::shared_ptr<resource_grid_factory> rg_factory = create_resource_grid_factory();
   ASSERT_FACTORY(rg_factory);
 
   ssb_processor_factory_sw_configuration ssb_factory_config;
@@ -379,14 +389,18 @@ std::unique_ptr<upper_phy_ssb_example> srsran::upper_phy_ssb_example::create(con
   }
 
   // Create modulation mapper for random data.
-  std::shared_ptr<channel_modulation_factory> data_modulator_factory = create_channel_modulation_sw_factory();
-  std::unique_ptr<modulation_mapper>          data_modulator = data_modulator_factory->create_modulation_mapper();
+  std::shared_ptr<modulation_mapper_factory> data_modulator_factory = create_modulation_mapper_factory();
+  std::unique_ptr<modulation_mapper>         data_modulator         = data_modulator_factory->create();
+
+  // Create resource grid mapper.
+  std::unique_ptr<resource_grid_mapper> mapper = rg_mapper_factory->create();
 
   return std::make_unique<upper_phy_example_sw>(logger,
                                                 std::move(dl_rg_pool),
                                                 std::move(ul_rg_pool),
                                                 std::move(ssb),
                                                 std::move(data_modulator),
+                                                std::move(mapper),
                                                 config.gateway,
                                                 config.rx_symb_req_notifier,
                                                 config.ssb_config,

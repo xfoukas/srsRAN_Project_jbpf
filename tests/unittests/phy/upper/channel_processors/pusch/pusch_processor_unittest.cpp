@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -330,7 +330,7 @@ TEST_P(PuschProcessorFixture, PuschProcessorUnittest)
   unsigned nof_re = pdu.freq_alloc.get_nof_rb() * nof_re_per_prb;
 
   // Generate resource block mask.
-  bounded_bitset<MAX_RB> rb_mask = pdu.freq_alloc.get_prb_mask(pdu.bwp_start_rb, pdu.bwp_size_rb);
+  crb_bitmap rb_mask = pdu.freq_alloc.get_crb_mask(pdu.bwp_start_rb, pdu.bwp_size_rb);
 
   // Generate transport block.
   std::vector<uint8_t> transport_block(tbs_dist(rgen));

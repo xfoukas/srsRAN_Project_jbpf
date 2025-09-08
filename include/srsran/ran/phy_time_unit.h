@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -23,7 +23,7 @@
 #pragma once
 
 #include "srsran/ran/subcarrier_spacing.h"
-#include "srsran/support/math_utils.h"
+#include "srsran/support/math/math_utils.h"
 
 namespace srsran {
 
@@ -94,8 +94,7 @@ public:
   /// An assertion is triggered if the result would be a non-integer number of samples.
   ///
   /// \tparam U Any data type that can be converted to \c value_type.
-  /// \param[in] scs      Subcarrier spacing in hertz.
-  /// \param[in] dft_size DFT size corresponding to the subcarrier spacing.
+  /// \param[in] sampling_rate_Hz_ Sampling rate in Hertz.
   /// \return The time value in samples.
   template <typename U>
   constexpr value_type to_samples(U sampling_rate_Hz_) const
@@ -110,6 +109,20 @@ public:
     return (value * sampling_rate_Hz) / (SCS_REF_HZ * N_F_REF * KAPPA);
   }
 
+  /// \brief Gets the time expressed as a number of samples for the given sampling rate rounding to the nearest integer.
+  /// \tparam U Any data type that can be converted to \c double.
+  /// \param[in] sampling_rate_Hz_ Sampling rate in Hertz.
+  /// \return The time value in samples.
+  template <typename U>
+  constexpr value_type to_nearest_samples(U sampling_rate_Hz_) const
+  {
+    static_assert(std::is_convertible<U, double>::value, "Invalid type.");
+    double sampling_rate_Hz = static_cast<double>(sampling_rate_Hz_);
+    double nof_samples =
+        static_cast<double>(value * sampling_rate_Hz) / static_cast<double>(SCS_REF_HZ * N_F_REF * KAPPA);
+    return static_cast<value_type>(std::round(nof_samples));
+  }
+
   /// \brief Gets the time expressed in units of \f$T_{\textup{A}}\f$.
   ///
   /// Conversion is performed as per TS38.213 Section 4.2, rounding to the nearest integer.
@@ -119,6 +132,42 @@ public:
   constexpr unsigned to_Ta(subcarrier_spacing scs) const
   {
     return divide_round(value * pow2(to_numerology_value(scs)), 16U * KAPPA);
+  }
+
+  /// \brief Converts the time to an UL Relative Time of Arrival (UL-RTOA) measurement.
+  ///
+  /// UL-RTOA measurements are part of the NR Positioning protocol described in TS38.455, Section 9.2.39 defines the
+  /// Information Elements for the measurement. The semantics are defined in TS38.455 Section 13.1.1.
+  ///
+  /// The measurements are reported in units of \f$T_c\f$ in the range of {-985024, ... 985024}. The reporting
+  /// resolution is given the parameter \f$k\f$, the resolution is defined as \f$T=T_c\times 2^k\f$.
+  ///
+  /// The resolution is selected from the parameter \e timingReportingGranularityFactor contained in the Information
+  /// Element \e TRPMeasurementQuantitiesList-Item in TS38.455 Section 9.3.4.
+  ///
+  /// The resultant measurement is mapped to the reported values according TS38.455 Tables 13.1.1-1/2/3/5/6.
+  ///
+  /// \param[in] resolution Measurement resolution, parameter \f$k\f$, in range {0, ..., 5}.
+  /// \return The resultant UL-RTOA measurement report value.
+  uint32_t to_ul_rtoa(unsigned resolution) const
+  {
+    // The value is below the minimum, report 0.
+    if (value < -985024) {
+      return 0;
+    }
+
+    // The value is above the maximum, report the maximum.
+    if (value > 985024) {
+      return (1970048 >> resolution) + 1;
+    }
+
+    // Conversion for negative measurements.
+    if (value < 0) {
+      return ((value + 985024) >> resolution) + 1;
+    }
+
+    // Conversion for positive measurements.
+    return ((value + 985023) >> resolution) + 1;
   }
 
   /// Overload addition operator.
@@ -200,25 +249,30 @@ public:
   constexpr bool operator<=(phy_time_unit other) const { return value <= other.value; }
 
   /// Creates a physical layer time from units of \f$\kappa\f$.
-  static constexpr inline phy_time_unit from_units_of_kappa(unsigned units_of_kappa)
+  static constexpr phy_time_unit from_units_of_kappa(unsigned units_of_kappa)
   {
     return phy_time_unit(static_cast<value_type>(units_of_kappa) * KAPPA);
   }
 
   /// Creates a physical layer time from units of \f$T_c\f$.
-  static constexpr inline phy_time_unit from_units_of_Tc(unsigned units_of_Tc)
+  template <typename Integer>
+  static constexpr phy_time_unit from_units_of_Tc(Integer units_of_Tc)
   {
+    static_assert(std::is_integral<Integer>::value);
     return phy_time_unit(static_cast<value_type>(units_of_Tc));
   }
 
   /// Creates a physical layer time from a timing advance command \f$T_A\f$, as per TS38.213 Section 4.2.
-  static constexpr inline phy_time_unit from_timing_advance(unsigned units_of_Ta, subcarrier_spacing scs)
+  template <typename Integer>
+  static constexpr phy_time_unit from_timing_advance(Integer units_of_Ta, subcarrier_spacing scs)
   {
-    return from_units_of_Tc(units_of_Ta * 16U * KAPPA / pow2(to_numerology_value(scs)));
+    static_assert(std::is_integral<Integer>::value);
+    return from_units_of_Tc(static_cast<Integer>(units_of_Ta * 16U * KAPPA) /
+                            static_cast<Integer>(pow2(to_numerology_value(scs))));
   }
 
   /// Creates a physical layer time from seconds.
-  static constexpr inline phy_time_unit from_seconds(double seconds)
+  static constexpr phy_time_unit from_seconds(double seconds)
   {
     // Convert to units of Tc.
     double tc_units_dbl = seconds / T_C;

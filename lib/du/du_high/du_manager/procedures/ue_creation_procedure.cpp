@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -27,6 +27,11 @@
 #include "srsran/rlc/rlc_rx.h"
 #include "srsran/rlc/rlc_srb_config_factory.h"
 
+#ifdef JBPF_ENABLED
+#include "jbpf_srsran_hooks.h"
+DEFINE_JBPF_HOOK(du_ue_ctx_creation);
+#endif
+
 using namespace srsran;
 using namespace srs_du;
 
@@ -47,6 +52,21 @@ void ue_creation_procedure::operator()(coro_context<async_task<void>>& ctx)
   CORO_BEGIN(ctx);
 
   proc_logger.log_proc_started();
+
+#ifdef JBPF_ENABLED 
+  {
+    const auto& cell_cfg = du_params.ran.cells[req.pcell_index];
+    struct jbpf_du_ue_ctx_info ue_info = {
+      0, /*ctx_id*/
+      (uint16_t)req.ue_index,
+      cell_cfg.tac,
+      cell_cfg.nr_cgi.plmn_id.to_bcd(),
+      cell_cfg.nr_cgi.nci.value(),
+      cell_cfg.pci,
+      (uint16_t)req.tc_rnti};
+    hook_du_ue_ctx_creation(&ue_info);
+  }
+#endif
 
   // > Check if UE context was created in the DU manager.
   ue_ctx_creation_outcome = create_du_ue_context();
@@ -102,17 +122,23 @@ void ue_creation_procedure::operator()(coro_context<async_task<void>>& ctx)
   CORO_RETURN();
 }
 
-expected<du_ue*, std::string> ue_creation_procedure::create_du_ue_context()
+expected<du_ue*, std::string> ue_creation_procedure::create_du_ue_context() const
 {
+  // Fetch the DU cell configuration of the primary cell UE is connected to.
+  // TODO: Use cell manager
+  const auto& cell_cfg = du_params.ran.cells[req.pcell_index];
+  if (not cell_cfg.enabled) {
+    return make_unexpected("UE created in inactive cell");
+  }
+
   // Create a DU UE resource manager, which will be responsible for managing bearer and PUCCH resources.
-  auto alloc_result = du_res_alloc.create_ue_resource_configurator(req.ue_index, req.pcell_index);
+  auto alloc_result =
+      du_res_alloc.create_ue_resource_configurator(req.ue_index, req.pcell_index, req.tc_rnti != rnti_t::INVALID_RNTI);
   if (not alloc_result.has_value()) {
     // The UE resource manager could not create a new UE entry.
     return make_unexpected(alloc_result.error());
   }
 
-  // Fetch the DU cell configuration of the primary cell UE is connected to.
-  const auto& cell_cfg = du_params.ran.cells[req.pcell_index];
   // Create the DU UE context.
   return ue_mng.add_ue(du_ue_context(req.ue_index, req.pcell_index, req.tc_rnti, cell_cfg.nr_cgi),
                        std::move(alloc_result.value()));
@@ -221,7 +247,11 @@ async_task<mac_ue_create_response> ue_creation_procedure::create_mac_ue()
     lc.ul_bearer                   = &bearer.second->connector.mac_rx_sdu_notifier;
     lc.dl_bearer                   = &bearer.second->connector.mac_tx_sdu_notifier;
   }
-  mac_ue_create_msg.ul_ccch_msg = not req.ul_ccch_msg.empty() ? &req.ul_ccch_msg : nullptr;
+  mac_ue_create_msg.ul_ccch_msg     = not req.ul_ccch_msg.empty() ? &req.ul_ccch_msg : nullptr;
+  mac_ue_create_msg.ul_ccch_slot_rx = req.slot_rx;
+  if (ue_ctx->resources->cfra.has_value()) {
+    mac_ue_create_msg.cfra_preamble_index = ue_ctx->resources->cfra->preamble_id;
+  }
 
   // Create Scheduler UE Config Request that will be embedded in the mac UE creation request.
   mac_ue_create_msg.sched_cfg = create_scheduler_ue_config_request(*ue_ctx, *ue_ctx->resources);

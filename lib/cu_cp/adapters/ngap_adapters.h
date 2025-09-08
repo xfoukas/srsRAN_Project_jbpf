@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -109,6 +109,12 @@ public:
     return cu_cp_handler->handle_ue_context_release_command(command);
   }
 
+  void on_transmission_of_handover_required() override
+  {
+    srsran_assert(cu_cp_handler != nullptr, "CU-CP NGAP handler must not be nullptr");
+    cu_cp_handler->handle_transmission_of_handover_required();
+  }
+
   async_task<bool> on_new_handover_command(ue_index_t ue_index, byte_buffer command) override
   {
     srsran_assert(cu_cp_handler != nullptr, "CU-CP NGAP handler must not be nullptr");
@@ -121,10 +127,22 @@ public:
     return cu_cp_handler->handle_ue_index_allocation_request(cgi);
   }
 
-  void on_n2_disconnection() override
+  void on_dl_ue_associated_nrppa_transport_pdu(ue_index_t ue_index, const byte_buffer& nrppa_pdu) override
   {
     srsran_assert(cu_cp_handler != nullptr, "CU-CP NGAP handler must not be nullptr");
-    cu_cp_handler->handle_n2_disconnection();
+    cu_cp_handler->handle_dl_ue_associated_nrppa_transport_pdu(ue_index, nrppa_pdu);
+  }
+
+  void on_dl_non_ue_associated_nrppa_transport_pdu(amf_index_t amf_index, const byte_buffer& nrppa_pdu) override
+  {
+    srsran_assert(cu_cp_handler != nullptr, "CU-CP NGAP handler must not be nullptr");
+    cu_cp_handler->handle_dl_non_ue_associated_nrppa_transport_pdu(amf_index, nrppa_pdu);
+  }
+
+  void on_n2_disconnection(amf_index_t amf_index) override
+  {
+    srsran_assert(cu_cp_handler != nullptr, "CU-CP NGAP handler must not be nullptr");
+    cu_cp_handler->handle_n2_disconnection(amf_index);
   }
 
 private:

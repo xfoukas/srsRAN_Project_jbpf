@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -22,50 +22,48 @@
 
 #pragma once
 
-#include "srsran/adt/optional.h"
-#include "srsran/asn1/asn1_utils.h"
 #include "srsran/du/du_high/du_manager/du_configurator.h"
 #include "srsran/e2/e2.h"
 #include "srsran/e2/e2sm/e2sm.h"
-#include <map>
 
 namespace srsran {
+
+namespace srs_du {
+
+class du_configurator;
+class f1ap_ue_id_translator;
+
+} // namespace srs_du
 
 class e2sm_rc_control_action_du_executor_base : public e2sm_control_action_executor
 {
 public:
   e2sm_rc_control_action_du_executor_base() = delete;
-  e2sm_rc_control_action_du_executor_base(srs_du::du_configurator& du_configurator_, uint32_t action_id_);
+  e2sm_rc_control_action_du_executor_base(srs_du::du_configurator&       du_configurator_,
+                                          srs_du::f1ap_ue_id_translator& f1ap_ue_id_translator_,
+                                          uint32_t                       action_id_);
   virtual ~e2sm_rc_control_action_du_executor_base() = default;
 
-  bool fill_ran_function_description(asn1::e2sm::ran_function_definition_ctrl_action_item_s& action_item);
+  asn1::e2sm::ran_function_definition_ctrl_action_item_s get_control_action_definition() override;
 
   /// e2sm_control_request_executor functions.
   uint32_t                              get_action_id() override;
   bool                                  ric_control_action_supported(const e2sm_ric_control_request& req) override = 0;
   async_task<e2sm_ric_control_response> execute_ric_control_action(const e2sm_ric_control_request& req) override   = 0;
-  virtual void parse_action_ran_parameter_value(const asn1::e2sm::ran_param_value_type_c& ran_p,
-                                                uint64_t                                  ran_param_id,
-                                                uint64_t                                  ue_id,
-                                                srs_du::du_mac_sched_control_config&      ctrl_cfg)                     = 0;
-  void         parse_ran_parameter_value(const asn1::e2sm::ran_param_value_type_c& ran_p,
-                                         uint64_t                                  ran_param_id,
-                                         uint64_t                                  ue_id,
-                                         srs_du::du_mac_sched_control_config&      ctrl_cfg);
   async_task<e2sm_ric_control_response> return_ctrl_failure(const e2sm_ric_control_request& req);
 
 protected:
-  srslog::basic_logger&           logger;
-  uint32_t                        action_id;
-  std::string                     action_name;
-  std::map<uint32_t, std::string> action_params;
-  srs_du::du_configurator&        du_param_configurator;
+  srslog::basic_logger&          logger;
+  uint32_t                       action_id;
+  srs_du::du_configurator&       du_param_configurator;
+  srs_du::f1ap_ue_id_translator& f1ap_ue_id_provider;
 };
 
 class e2sm_rc_control_action_2_6_du_executor : public e2sm_rc_control_action_du_executor_base
 {
 public:
-  e2sm_rc_control_action_2_6_du_executor(srs_du::du_configurator& du_configurator_);
+  e2sm_rc_control_action_2_6_du_executor(srs_du::du_configurator&       du_configurator_,
+                                         srs_du::f1ap_ue_id_translator& f1ap_ue_id_translator_);
   virtual ~e2sm_rc_control_action_2_6_du_executor() = default;
 
   /// e2sm_control_request_executor functions.
@@ -74,7 +72,8 @@ public:
   void parse_action_ran_parameter_value(const asn1::e2sm::ran_param_value_type_c& ran_p,
                                         uint64_t                                  ran_param_id,
                                         uint64_t                                  ue_id,
-                                        srs_du::du_mac_sched_control_config&      ctrl_cfg) override;
+                                        srs_du::du_mac_sched_control_config&      ctrl_cfg);
+  using T = srs_du::du_mac_sched_control_config;
 
 private:
   srs_du::du_mac_sched_control_config convert_to_du_config_request(const e2sm_ric_control_request& e2sm_req_);

@@ -1,5 +1,5 @@
 #
-# Copyright 2021-2024 Software Radio Systems Limited
+# Copyright 2021-2025 Software Radio Systems Limited
 #
 # This file is part of srsRAN
 #
@@ -19,9 +19,11 @@
 #
 
 add_subdirectory(config)
+add_subdirectory(support)
 add_subdirectory(logging)
 add_subdirectory(cell)
 add_subdirectory(common_scheduling)
+add_subdirectory(ue_context)
 add_subdirectory(ue_scheduling)
 
 set(SOURCES
@@ -29,31 +31,16 @@ set(SOURCES
         pdcch_scheduling/pdcch_slot_resource_allocator.cpp
         policy/scheduler_policy_factory.cpp
         policy/scheduler_time_rr.cpp
-        policy/scheduler_time_pf.cpp
+        policy/scheduler_time_qos.cpp
         pucch_scheduling/pucch_allocator_impl.cpp
         pucch_scheduling/pucch_guardbands_scheduler.cpp
         pucch_scheduling/pucch_resource_manager.cpp
         uci_scheduling/uci_scheduler_impl.cpp
         uci_scheduling/uci_allocator_impl.cpp
-        srs/srs_scheduler_impl.cpp
-        support/pdcch/pdcch_type0_helpers.cpp
-        support/pdsch/pdsch_default_time_allocation.cpp
-        support/pdsch/pdsch_dmrs_symbol_mask.cpp
-        support/pucch/pucch_default_resource.cpp
-        support/pusch/pusch_default_time_allocation.cpp
-        support/pusch/pusch_dmrs_symbol_mask.cpp
-        support/mcs_tbs_calculator.cpp
-        support/prbs_calculator.cpp
-        support/mcs_calculator.cpp
-        support/pdcch_aggregation_level_calculator.cpp
-        support/rb_helper.cpp
-        support/sr_helper.cpp
-        support/dci_builder.cpp
-        support/sch_pdu_builder.cpp
-        support/csi_report_helpers.cpp
-        slicing/slice_scheduler.cpp
+        slicing/inter_slice_scheduler.cpp
         slicing/ran_slice_instance.cpp
         slicing/slice_ue_repository.cpp
+        srs/srs_scheduler_impl.cpp
         cell_scheduler.cpp
         scheduler_factory.cpp
         scheduler_impl.cpp
@@ -65,4 +52,4 @@ add_library(srsran_sched STATIC ${SOURCES}
         $<TARGET_OBJECTS:sched_cell>
         $<TARGET_OBJECTS:common_sched>
         $<TARGET_OBJECTS:ue_sched>)
-target_link_libraries(srsran_sched srsran_ran sched_config scheduler_logger)
+target_link_libraries(srsran_sched srsran_ran sched_config sched_ue_context sched_support scheduler_logger)

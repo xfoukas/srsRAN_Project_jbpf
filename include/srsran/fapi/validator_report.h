@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -22,9 +22,9 @@
 
 #pragma once
 
-#include "srsran/adt/optional.h"
 #include "srsran/adt/static_vector.h"
-#include "srsran/fapi/messages.h"
+#include "srsran/fapi/messages/base_message.h"
+#include <optional>
 
 namespace srsran {
 namespace fapi {

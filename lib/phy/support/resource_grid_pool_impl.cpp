@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -26,15 +26,38 @@
 #include "srsran/phy/support/resource_grid_context.h"
 #include "srsran/phy/support/resource_grid_reader.h"
 #include "srsran/support/executors/task_executor.h"
+#include "srsran/support/rtsan.h"
 #include "srsran/support/srsran_assert.h"
+#include <mutex>
 
 using namespace srsran;
+
+/// \brief Creates a static vector that outlives the resource grid pool and returns a view to the scope counts.
+///
+/// The working principle of this mechanism is that the shared resource grid scopes outlive the resource grid pool and
+/// the instances detect that the pool has been destroyed before notifying their destruction.
+static span<std::atomic<unsigned>> get_grids_scope_count(unsigned nof_grids)
+{
+  // Mutex that protects the creation of the scopes concurrently.
+  static std::mutex common_grids_scope_count_mutex;
+  // Global static vector of created resource grid scopes.
+  static std::vector<std::vector<std::atomic<unsigned>>> common_grids_scope_count;
+
+  // Protect from concurrent creation of scopes.
+  std::lock_guard lock(common_grids_scope_count_mutex);
+
+  // Create scopes for this pool.
+  common_grids_scope_count.emplace_back(nof_grids);
+
+  // Return the reference of scopes.
+  return common_grids_scope_count.back();
+}
 
 resource_grid_pool_impl::resource_grid_pool_impl(task_executor*                 async_executor_,
                                                  std::vector<resource_grid_ptr> grids_) :
   logger(srslog::fetch_basic_logger("PHY", true)),
   grids(std::move(grids_)),
-  grids_scope_count(grids.size()),
+  grids_scope_count(get_grids_scope_count(grids.size())),
   grids_str_zero(grids.size()),
   grids_str_reserved(grids.size()),
   async_executor(async_executor_)
@@ -51,17 +74,22 @@ resource_grid_pool_impl::resource_grid_pool_impl(task_executor*                 
 
 resource_grid_pool_impl::~resource_grid_pool_impl()
 {
-  // Ensure that all the grids returned to the pool. The application will result in segmentation fault.
-  report_fatal_error_if_not(std::all_of(grids_scope_count.cbegin(),
-                                        grids_scope_count.cend(),
-                                        [](auto& e) { return e == ref_counter_available; }),
-                            "Not all the resource grids have returned to the pool.");
+  // Ensure that all the grids returned to the pool. Log a warning message if any resource grid is left in an active
+  // scope.
+  if (!std::all_of(
+          grids_scope_count.begin(), grids_scope_count.end(), [](auto& e) { return e == ref_counter_available; })) {
+    logger.warning("Not all the resource grids have returned to the pool.");
+  }
+
+  // Ensure that all the grids see that the pool has been destroyed and prevent any further operations involving the
+  // pool.
+  std::fill(grids_scope_count.begin(), grids_scope_count.end(), ref_counter_destroyed);
 }
 
-shared_resource_grid resource_grid_pool_impl::allocate_resource_grid(const resource_grid_context& context)
+shared_resource_grid resource_grid_pool_impl::allocate_resource_grid(slot_point slot)
 {
   // Trace point for grid reservation.
-  trace_point tp = l1_tracer.now();
+  trace_point tp = l1_common_tracer.now();
 
   // Select an identifier from the current request counter.
   unsigned identifier = counter;
@@ -78,15 +106,12 @@ shared_resource_grid resource_grid_pool_impl::allocate_resource_grid(const resou
 
   // Return an invalid grid if not available.
   if (!available) {
-    logger.warning(context.slot.sfn(),
-                   context.slot.slot_index(),
-                   "Resource grid with identifier {} is not available.",
-                   identifier);
+    logger.warning(slot.sfn(), slot.slot_index(), "Resource grid with identifier {} is not available.", identifier);
     return {};
   }
 
   // Trace the resource grid reservation.
-  l1_tracer << trace_event(grids_str_reserved[identifier].c_str(), tp);
+  l1_common_tracer << trace_event(grids_str_reserved[identifier].c_str(), tp);
 
   return {*this, ref_count, identifier};
 }
@@ -121,8 +146,8 @@ void resource_grid_pool_impl::notify_release_scope(unsigned identifier)
   }
 
   // Create lambda function for setting the grid to zero.
-  auto set_all_zero_func = [this, identifier]() {
-    trace_point tp = l1_tracer.now();
+  auto set_all_zero_func = [this, identifier]() SRSRAN_RTSAN_NONBLOCKING {
+    trace_point tp = l1_common_tracer.now();
 
     // Set grid to zero.
     grids[identifier]->set_all_zero();
@@ -130,7 +155,7 @@ void resource_grid_pool_impl::notify_release_scope(unsigned identifier)
     // Make the grid available.
     grids_scope_count[identifier] = ref_counter_available;
 
-    l1_tracer << trace_event(grids_str_zero[identifier].c_str(), tp);
+    l1_common_tracer << trace_event(grids_str_zero[identifier].c_str(), tp);
   };
 
   // Try to execute the asynchronous housekeeping task.

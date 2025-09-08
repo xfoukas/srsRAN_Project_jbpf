@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -23,6 +23,7 @@
 #include "prach_detector_generic_impl.h"
 #include "prach_detector_generic_thresholds.h"
 #include "srsran/adt/interval.h"
+#include "srsran/phy/upper/channel_processors/prach_detector_phy_validator.h"
 #include "srsran/ran/prach/prach_cyclic_shifts.h"
 #include "srsran/ran/prach/prach_preamble_information.h"
 #include "srsran/srsvec/accumulate.h"
@@ -36,24 +37,13 @@
 #include "srsran/srsvec/prod.h"
 #include "srsran/srsvec/sc_prod.h"
 #include "srsran/srsvec/zero.h"
-#include "srsran/support/math_utils.h"
+#include "srsran/support/math/math_utils.h"
 
 using namespace srsran;
 
-static const detail::threshold_and_margin_finder threshold_and_margin_table(detail::all_threshold_and_margins);
-
-bool prach_detector_validator_impl::is_valid(const prach_detector::configuration& config) const
+error_type<std::string> prach_detector_validator_impl::is_valid(const prach_detector::configuration& config) const
 {
-  detail::threshold_params th_params;
-  th_params.nof_rx_ports          = config.nof_rx_ports;
-  th_params.scs                   = config.ra_scs;
-  th_params.format                = config.format;
-  th_params.zero_correlation_zone = config.zero_correlation_zone;
-  th_params.combine_symbols       = true;
-
-  auto flag = threshold_and_margin_table.check_flag(th_params);
-
-  return (flag != detail::threshold_and_margin_finder::threshold_flag::red);
+  return validate_prach_detector_phy(config.format, config.ra_scs, config.zero_correlation_zone, config.nof_rx_ports);
 }
 
 prach_detector_generic_impl::prach_detector_generic_impl(std::unique_ptr<dft_processor>   idft_long_,
@@ -85,7 +75,7 @@ prach_detector_generic_impl::prach_detector_generic_impl(std::unique_ptr<dft_pro
                 "IDFT size for short preambles (i.e., {}) must be in range {}.",
                 idft_short->get_size(),
                 idft_long_sz_range);
-};
+}
 
 prach_detection_result prach_detector_generic_impl::detect(const prach_buffer& input, const configuration& config)
 {
@@ -133,7 +123,7 @@ prach_detection_result prach_detector_generic_impl::detect(const prach_buffer& i
   unsigned dft_size = idft.get_size();
 
   // Deduce sampling rate.
-  double sample_rate_Hz = dft_size * ra_scs_to_Hz(preamble_info.scs);
+  double sampling_rate_Hz = dft_size * ra_scs_to_Hz(preamble_info.scs);
 
   // Calculate cyclic prefix duration in seconds.
   double cp_duration = preamble_info.cp_length.to_seconds();
@@ -156,7 +146,7 @@ prach_detection_result prach_detector_generic_impl::detect(const prach_buffer& i
   th_params.zero_correlation_zone = config.zero_correlation_zone;
   th_params.combine_symbols       = combine_symbols;
 
-  auto     th_and_margin = threshold_and_margin_table.get(th_params);
+  auto     th_and_margin = detail::get_threshold_and_margin(th_params);
   float    threshold     = std::get<0>(th_and_margin);
   unsigned win_margin    = std::get<1>(th_and_margin);
   srsran_assert((win_margin > 0) && (threshold > 0.0),
@@ -187,9 +177,9 @@ prach_detection_result prach_detector_generic_impl::detect(const prach_buffer& i
   // Prepare results.
   prach_detection_result result;
   result.rssi_dB         = convert_power_to_dB(rssi);
-  result.time_resolution = phy_time_unit::from_seconds(1.0 / static_cast<double>(sample_rate_Hz));
+  result.time_resolution = phy_time_unit::from_seconds(1.0 / static_cast<double>(sampling_rate_Hz));
   result.time_advance_max =
-      phy_time_unit::from_seconds(static_cast<double>(max_delay_samples) * 0.8 / static_cast<double>(sample_rate_Hz));
+      phy_time_unit::from_seconds(static_cast<double>(max_delay_samples) * 0.8 / static_cast<double>(sampling_rate_Hz));
   result.preambles.clear();
 
   // Early stop if the RSSI is zero.
@@ -247,15 +237,15 @@ prach_detection_result prach_detector_generic_impl::detect(const prach_buffer& i
         if (combine_symbols && (nof_symbols > 1)) {
           for (unsigned i_comb_symbol = 1; i_comb_symbol != nof_symbols; ++i_comb_symbol) {
             srsvec::add(combined_symbols,
-                        input.get_symbol(i_port, i_td_occasion, i_fd_occasion, i_comb_symbol),
-                        combined_symbols);
+                        combined_symbols,
+                        input.get_symbol(i_port, i_td_occasion, i_fd_occasion, i_comb_symbol));
           }
         }
 
         // Multiply the preamble by the complex conjugate of the root sequence.
         std::array<cf_t, prach_constants::LONG_SEQUENCE_LENGTH> no_root_temp;
         span<cf_t>                                              no_root = span<cf_t>(no_root_temp).first(L_ra);
-        srsvec::prod_conj(combined_symbols, root, no_root);
+        srsvec::prod_conj(no_root, combined_symbols, root);
 
         // Prepare IDFT for correlation.
         srsvec::copy(idft_input.first(L_ra / 2 + 1), no_root.last(L_ra / 2 + 1));
@@ -270,7 +260,7 @@ prach_detection_result prach_detector_generic_impl::detect(const prach_buffer& i
 
         // Normalize the signal: we divide by the DFT size to compensate for the inherent scaling of the DFT, and by
         // L_ra^2 to compensate for the amplitude of the ZC sequence in the frequency domain.
-        srsvec::sc_prod(mod_square, 1.0F / static_cast<float>(dft_size * L_ra * L_ra), mod_square);
+        srsvec::sc_prod(mod_square, mod_square, 1.0F / static_cast<float>(dft_size * L_ra * L_ra));
 
         // Process each shift of the sequence.
         for (unsigned i_window = 0; i_window != nof_shifts; ++i_window) {
@@ -292,9 +282,9 @@ prach_detection_result prach_detector_generic_impl::detect(const prach_buffer& i
           span<float> window_mod_square = span<float>(temp2).first(win_width);
 
           // Scale window.
-          srsvec::sc_prod(mod_square.subspan(window_start, win_width),
-                          static_cast<float>(dft_size) / static_cast<float>(L_ra),
-                          window_mod_square);
+          srsvec::sc_prod(window_mod_square,
+                          mod_square.subspan(window_start, win_width),
+                          static_cast<float>(dft_size) / static_cast<float>(L_ra));
 
           // Select metric global numerator.
           span<float> window_metric_global_num = metric_global_num.get_view({i_window});
@@ -346,7 +336,7 @@ prach_detection_result prach_detector_generic_impl::detect(const prach_buffer& i
         prach_detection_result::preamble_indication& info = result.preambles.emplace_back();
         info.preamble_index                               = preamble_index;
         info.time_advance =
-            phy_time_unit::from_seconds(static_cast<double>(delay) / static_cast<double>(sample_rate_Hz));
+            phy_time_unit::from_seconds(static_cast<double>(delay) / static_cast<double>(sampling_rate_Hz));
         // Normalize the detection metric with respect to the threshold.
         info.detection_metric = peak / threshold;
       }

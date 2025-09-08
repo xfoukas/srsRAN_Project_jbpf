@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -21,16 +21,11 @@
  */
 
 #pragma once
+
 #include "downlink_processor_baseband_impl.h"
 #include "srsran/adt/blocking_queue.h"
-#include "srsran/gateways/baseband/buffer/baseband_gateway_buffer_dynamic.h"
-#include "srsran/phy/lower/modulation/ofdm_modulator.h"
 #include "srsran/phy/lower/processors/downlink/downlink_processor.h"
-#include "srsran/phy/lower/processors/downlink/downlink_processor_baseband.h"
-#include "srsran/phy/lower/processors/downlink/downlink_processor_notifier.h"
 #include "srsran/phy/lower/processors/downlink/pdxch/pdxch_processor.h"
-#include "srsran/phy/lower/processors/downlink/pdxch/pdxch_processor_request_handler.h"
-#include "srsran/phy/lower/sampling_rate.h"
 
 namespace srsran {
 
@@ -48,6 +43,18 @@ public:
 
   // See interface for documentation.
   void connect(downlink_processor_notifier& notifier, pdxch_processor_notifier& pdxch_notifier) override;
+
+  // See interface for documentation.
+  void stop() override { pdxch_proc->stop(); }
+
+  // See interface for documentation.
+  baseband_cfo_processor& get_cfo_control() override;
+
+  // See interface for documentation.
+  lower_phy_center_freq_controller& get_carrier_center_frequency_control() override;
+
+  // See interface for documentation.
+  lower_phy_tx_time_offset_controller& get_tx_time_offset_control() override;
 
   // See interface for documentation.
   pdxch_processor_request_handler& get_downlink_request_handler() override;

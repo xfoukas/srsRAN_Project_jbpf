@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -225,6 +225,7 @@ public:
 
   bool operator==(const plmn_identity& rhs) const { return data == rhs.data; }
   bool operator!=(const plmn_identity& rhs) const { return data != rhs.data; }
+  bool operator<(const plmn_identity& rhs) const { return data < rhs.data; }
 
 private:
   uint32_t data;
@@ -252,7 +253,7 @@ struct formatter<srsran::mobile_country_code> {
   }
 
   template <typename FormatContext>
-  auto format(const srsran::mobile_country_code& val, FormatContext& ctx)
+  auto format(const srsran::mobile_country_code& val, FormatContext& ctx) const
   {
     return format_to(ctx.out(), "{}", val.to_string());
   }
@@ -267,7 +268,7 @@ struct formatter<srsran::mobile_network_code> {
   }
 
   template <typename FormatContext>
-  auto format(const srsran::mobile_network_code& val, FormatContext& ctx)
+  auto format(const srsran::mobile_network_code& val, FormatContext& ctx) const
   {
     return format_to(ctx.out(), "{}", val.to_string());
   }
@@ -282,7 +283,7 @@ struct formatter<srsran::plmn_identity> {
   }
 
   template <typename FormatContext>
-  auto format(const srsran::plmn_identity& val, FormatContext& ctx)
+  auto format(const srsran::plmn_identity& val, FormatContext& ctx) const
   {
     return format_to(ctx.out(), "{}", val.to_string());
   }

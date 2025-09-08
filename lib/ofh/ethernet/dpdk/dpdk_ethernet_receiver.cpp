@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -21,8 +21,8 @@
  */
 
 #include "dpdk_ethernet_receiver.h"
-#include "dpdk_ethernet_rx_buffer_impl.h"
 #include "srsran/instrumentation/traces/ofh_traces.h"
+#include "srsran/ofh/ethernet/dpdk/dpdk_ethernet_rx_buffer.h"
 #include "srsran/ofh/ethernet/ethernet_frame_notifier.h"
 #include "srsran/support/executors/task_executor.h"
 #include <future>
@@ -48,37 +48,41 @@ static dummy_frame_notifier dummy_notifier;
 
 dpdk_receiver_impl::dpdk_receiver_impl(task_executor&                     executor_,
                                        std::shared_ptr<dpdk_port_context> port_ctx_,
-                                       srslog::basic_logger&              logger_) :
-  logger(logger_), executor(executor_), notifier(dummy_notifier), port_ctx(std::move(port_ctx_))
+                                       srslog::basic_logger&              logger_,
+                                       bool                               are_metrics_enabled) :
+  logger(logger_),
+  executor(executor_),
+  notifier(&dummy_notifier),
+  port_ctx(std::move(port_ctx_)),
+  metrics_collector(are_metrics_enabled)
 {
   srsran_assert(port_ctx, "Invalid port context");
 }
 
 void dpdk_receiver_impl::start(frame_notifier& notifier_)
 {
-  notifier = std::ref(notifier_);
+  notifier = &notifier_;
 
   std::promise<void> p;
   std::future<void>  fut = p.get_future();
 
   if (!executor.defer([this, &p]() {
-        rx_status.store(receiver_status::running, std::memory_order_relaxed);
-        // Signal start() caller thread that the operation is complete.
+        // Signal to the start() caller thread that the operation is complete.
         p.set_value();
         receive_loop();
       })) {
-    report_error("Unable to start the DPDK ethernet frame receiver");
+    report_error("Unable to start the DPDK ethernet frame receiver on port '{}'", port_ctx->get_port_id());
   }
 
   // Block waiting for timing executor to start.
   fut.wait();
 
-  logger.info("Started the DPDK ethernet frame receiver");
+  logger.info("Started the DPDK ethernet frame receiver on port '{}'", port_ctx->get_port_id());
 }
 
 void dpdk_receiver_impl::stop()
 {
-  logger.info("Requesting stop of the DPDK ethernet frame receiver");
+  logger.info("Requesting stop of the DPDK ethernet frame receiver on port '{}'", port_ctx->get_port_id());
   rx_status.store(receiver_status::stop_requested, std::memory_order_relaxed);
 
   // Wait for the receiver thread to stop.
@@ -86,7 +90,7 @@ void dpdk_receiver_impl::stop()
     std::this_thread::sleep_for(std::chrono::milliseconds(1));
   }
 
-  logger.info("Stopped the DPDK ethernet frame receiver");
+  logger.info("Stopped the DPDK ethernet frame receiver on port '{}'", port_ctx->get_port_id());
 }
 
 void dpdk_receiver_impl::receive_loop()
@@ -108,17 +112,34 @@ void dpdk_receiver_impl::receive()
 {
   std::array<::rte_mbuf*, MAX_BURST_SIZE> mbufs;
 
+  auto        meas       = metrics_collector.create_time_execution_measurer();
   trace_point dpdk_rx_tp = ofh_tracer.now();
-  unsigned    num_frames = ::rte_eth_rx_burst(port_ctx->get_port_id(), 0, mbufs.data(), MAX_BURST_SIZE);
+
+  unsigned num_frames = ::rte_eth_rx_burst(port_ctx->get_dpdk_port_id(), 0, mbufs.data(), MAX_BURST_SIZE);
   if (num_frames == 0) {
     ofh_tracer << instant_trace_event("ofh_receiver_wait_data", instant_trace_event::cpu_scope::thread);
+    metrics_collector.update_stats(meas.stop());
+
     std::this_thread::sleep_for(std::chrono::microseconds(5));
     return;
   }
 
+  if (!metrics_collector.disabled()) {
+    uint64_t nof_bytes_received = 0;
+    for (auto* mbuf : span<::rte_mbuf*>(mbufs.data(), num_frames)) {
+      nof_bytes_received += mbuf->data_len;
+    }
+    metrics_collector.update_stats(meas.stop(), nof_bytes_received, num_frames);
+  }
+
   for (auto* mbuf : span<::rte_mbuf*>(mbufs.data(), num_frames)) {
     ::rte_vlan_strip(mbuf);
-    notifier.get().on_new_frame(unique_rx_buffer(dpdk_rx_buffer_impl(mbuf)));
+    notifier->on_new_frame(unique_rx_buffer(dpdk_rx_buffer_impl(mbuf)));
   }
   ofh_tracer << trace_event("ofh_dpdk_rx", dpdk_rx_tp);
+}
+
+receiver_metrics_collector* dpdk_receiver_impl::get_metrics_collector()
+{
+  return metrics_collector.disabled() ? nullptr : &metrics_collector;
 }

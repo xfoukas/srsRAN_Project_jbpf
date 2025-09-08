@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -22,7 +22,39 @@
 
 #include "cell_harq_manager.h"
 #include "srsran/scheduler/resource_grid_util.h"
-#include "srsran/scheduler/scheduler_slot_handler.h"
+#include "srsran/scheduler/result/pdsch_info.h"
+#include "srsran/scheduler/result/pusch_info.h"
+
+#ifdef JBPF_ENABLED
+#include "jbpf_srsran_hooks.h"
+DEFINE_JBPF_HOOK(mac_sched_harq_ul);
+DEFINE_JBPF_HOOK(mac_sched_harq_dl);
+
+
+#define CALL_JBPF_HARQ_HOOK(__jbpf_harq_event, __h, __harq_type) { \
+    struct jbpf_mac_sched_harq_ctx_info __jbpf_harq_info = { \
+      __jbpf_harq_event,\
+      static_cast<uint8_t>(__h.h_id),\
+      __h.ndi,\
+      static_cast<uint8_t>(__h.nof_retxs),\
+      static_cast<uint8_t>(__h.max_nof_harq_retxs),\
+      static_cast<uint8_t>(__h.prev_tx_params.mcs_table),\
+      static_cast<uint8_t>(__h.prev_tx_params.mcs),\
+      static_cast<uint32_t>(__h.prev_tx_params.tbs_bytes),\
+      __h.prev_tx_params.slice_id.has_value(),\
+      __h.prev_tx_params.slice_id.has_value() ? __h.prev_tx_params.slice_id->value() : static_cast<uint8_t>(0),\
+    };\
+    if (std::is_same_v<__harq_type, ul_harq_process_impl>) {\
+      hook_mac_sched_harq_ul(&__jbpf_harq_info, 0, 0, (uint16_t)__h.ue_idx, static_cast<uint16_t>(__h.rnti));\
+    } else if constexpr (std::is_same_v<__harq_type, dl_harq_process_impl>) {\
+      jbpf_mac_sched_harq_ctx_info_dl __jbpf_harq_info_dl = {\
+        __jbpf_harq_info, static_cast<uint8_t>(__h.prev_tx_params.cqi)};\
+      hook_mac_sched_harq_dl(&__jbpf_harq_info_dl, 0, 0, (uint16_t)__h.ue_idx, static_cast<uint16_t>(__h.rnti));\
+    }\
+  }
+
+
+#endif
 
 using namespace srsran;
 using namespace harq_utils;
@@ -47,7 +79,7 @@ public:
     harq_pool(parent_), ntn_cs_koffset(ntn_cs_koffset_)
   {
     srsran_assert(ntn_cs_koffset > 0 and ntn_cs_koffset <= NTN_CELL_SPECIFIC_KOFFSET_MAX, "Invalid NTN koffset");
-    unsigned ring_size = get_allocator_ring_size_gt_min(ntn_cs_koffset);
+    unsigned ring_size = get_allocator_ring_size_gt_min(ntn_cs_koffset * 2 + SCHEDULER_MAX_K1);
     history.resize(ring_size);
   }
 
@@ -55,18 +87,18 @@ public:
   {
     last_sl_ind = sl_tx;
     // If there are no allocations for a long time, we may need to reset last_sl_ack.
-    if (last_sl_ack.valid() and last_sl_ack < last_sl_ind - ntn_cs_koffset) {
+    if (last_sl_ack.valid() and last_sl_ack < sl_tx - ntn_cs_koffset - SCHEDULER_MAX_K1) {
       last_sl_ack.clear();
     }
 
     // Clear old entries.
-    unsigned idx = get_current_index(sl_tx - 1);
+    unsigned idx = get_current_index(sl_tx - ntn_cs_koffset - SCHEDULER_MAX_K1);
     history[idx].clear();
   }
 
   void save_harq_newtx_info(const harq_impl_type& h)
   {
-    unsigned idx = get_offset_index(h.slot_ack);
+    unsigned idx = get_current_index(h.slot_ack);
     history[idx].emplace_back(h);
 
     if (not last_sl_ack.valid() or h.slot_ack > last_sl_ack) {
@@ -76,7 +108,7 @@ public:
 
   void handle_ack(harq_impl_type& h)
   {
-    auto& hist_entry = history[get_offset_index(h.slot_ack)];
+    auto& hist_entry = history[get_current_index(h.slot_ack)];
     if (&h < hist_entry.data() or &h >= hist_entry.data() + hist_entry.size()) {
       // Check if the HARQ Process being ACKed is the same as the one managed by the NTN history.
       srsran_assertion_failure("ACK Info handled for a non-NTN HARQ process");
@@ -88,7 +120,6 @@ public:
 
 protected:
   unsigned get_current_index(slot_point sl) const { return mod(sl.to_uint()); }
-  unsigned get_offset_index(slot_point sl) const { return get_current_index(sl + ntn_cs_koffset); }
   unsigned mod(unsigned idx) const { return idx % history.size(); }
 
   cell_harq_repository<IsDl>&              harq_pool;
@@ -111,7 +142,7 @@ public:
 
   std::optional<dl_harq_process_handle> find_dl_harq(du_ue_index_t ue_idx, slot_point uci_slot, unsigned harq_bit_idx)
   {
-    unsigned idx = get_offset_index(uci_slot);
+    unsigned idx = get_current_index(uci_slot);
     for (dl_harq_process_impl& h_impl : history[idx]) {
       if (h_impl.ue_idx == ue_idx and h_impl.status == harq_state_t::waiting_ack and h_impl.slot_ack == uci_slot and
           h_impl.harq_bit_idx == harq_bit_idx) {
@@ -130,7 +161,7 @@ public:
 
   std::optional<ul_harq_process_handle> find_ul_harq(du_ue_index_t ue_idx, slot_point pusch_slot)
   {
-    unsigned idx = get_offset_index(pusch_slot);
+    unsigned idx = get_current_index(pusch_slot);
     for (ul_harq_process_impl& h_impl : history[idx]) {
       if (h_impl.ue_idx == ue_idx and h_impl.status == harq_state_t::waiting_ack and h_impl.slot_ack == pusch_slot) {
         return ul_harq_process_handle{harq_pool, h_impl};
@@ -141,11 +172,11 @@ public:
 
   unsigned sum_pending_ul_tbs(du_ue_index_t ue_idx) const
   {
-    if (not last_sl_ack.valid() or last_sl_ack + ntn_cs_koffset < last_sl_ind) {
+    if (not last_sl_ack.valid() or last_sl_ack < last_sl_ind) {
       return 0;
     }
     unsigned sum     = 0;
-    unsigned end_idx = get_current_index(last_sl_ack + ntn_cs_koffset + 1);
+    unsigned end_idx = get_current_index(last_sl_ack + 1);
     for (unsigned idx = get_current_index(last_sl_ind); idx != end_idx; idx = mod(idx + 1)) {
       for (const ul_harq_process_impl& h : history[idx]) {
         if (h.ue_idx == ue_idx and h.status != harq_state_t::empty) {
@@ -166,15 +197,18 @@ static const unsigned NTN_ACK_WAIT_TIMEOUT = 1;
 template <bool IsDl>
 cell_harq_repository<IsDl>::cell_harq_repository(unsigned               max_ues,
                                                  unsigned               max_ack_wait_timeout,
+                                                 unsigned               harq_retx_timeout_,
                                                  unsigned               max_harqs_per_ue_,
-                                                 unsigned               ntn_cs_koffset,
+                                                 unsigned               ntn_cs_koffset_,
                                                  harq_timeout_notifier& timeout_notifier_,
                                                  srslog::basic_logger&  logger_) :
-  max_ack_wait_in_slots(ntn_cs_koffset == 0 ? max_ack_wait_timeout : NTN_ACK_WAIT_TIMEOUT),
+  max_ack_wait_in_slots(ntn_cs_koffset_ == 0 ? max_ack_wait_timeout : NTN_ACK_WAIT_TIMEOUT),
+  harq_retx_timeout(harq_retx_timeout_),
   max_harqs_per_ue(max_harqs_per_ue_),
   timeout_notifier(timeout_notifier_),
   logger(logger_),
-  alloc_hist(ntn_cs_koffset > 0 ? std::make_unique<harq_alloc_history>(*this, ntn_cs_koffset) : nullptr)
+  ntn_cs_koffset(ntn_cs_koffset_),
+  alloc_hist(ntn_cs_koffset_ > 0 ? std::make_unique<harq_alloc_history>(*this, ntn_cs_koffset_) : nullptr)
 {
   // Reserve space in advance for UEs and their HARQs.
   ues.resize(max_ues);
@@ -183,7 +217,8 @@ cell_harq_repository<IsDl>::cell_harq_repository(unsigned               max_ues,
     ues[i].harqs.reserve(max_harqs_per_ue);
   }
 
-  harq_timeout_wheel.resize(get_allocator_ring_size_gt_min(max_ack_wait_timeout + get_max_slot_ul_alloc_delay(0)));
+  harq_timeout_wheel.resize(
+      get_allocator_ring_size_gt_min(max_ack_wait_timeout + get_max_slot_ul_alloc_delay(ntn_cs_koffset_)));
 }
 
 template <bool IsDl>
@@ -213,18 +248,23 @@ void cell_harq_repository<IsDl>::slot_indication(slot_point sl_tx)
     auto& h = harq_pending_retx_list.front();
     srsran_sanity_check(h.status == harq_state_t::pending_retx, "HARQ process in wrong state");
     // [Implementation-defined] Maximum time we give to the scheduler policy to retransmit a HARQ process.
-    const unsigned max_nof_slots_for_retx = last_sl_ind.nof_slots_per_system_frame() / 4;
+    const unsigned max_nof_slots_for_retx = last_sl_ind.nof_slots_per_hyper_system_frame() / 4;
     if (last_sl_ind < (h.slot_ack + max_nof_slots_for_retx)) {
       break;
     }
 
     // HARQ retransmission is trapped. Deallocate HARQ process.
-    logger.warning(
-        "rnti={} h_id={}: Discarding {} HARQ. Cause: Too much time has passed since the last HARQ "
-        "transmission. The scheduler policy is likely not prioritizing retransmissions of old HARQ processes.",
-        h.rnti,
-        h.h_id,
-        IsDl ? "DL" : "UL");
+    logger.warning("rnti={} h_id={}: Discarding {} HARQ. Cause: Too much time has passed since the last HARQ "
+                   "transmission. The scheduler policy is likely not prioritizing retransmissions of old HARQ "
+                   "processes. Parameters: dci={} rbs={} mcs={} nof_symbols={} nof_layers={}",
+                   h.rnti,
+                   fmt::underlying(h.h_id),
+                   IsDl ? std::string_view{"DL"} : std::string_view{"UL"},
+                   dci_format_to_string(get_dci_format(h.prev_tx_params.dci_cfg_type)),
+                   h.prev_tx_params.rbs,
+                   h.prev_tx_params.mcs,
+                   h.prev_tx_params.nof_symbols,
+                   h.prev_tx_params.nof_layers);
     dealloc_harq(h);
 
     // Report timeout after the HARQ gets deleted to avoid reentrancy.
@@ -235,39 +275,50 @@ void cell_harq_repository<IsDl>::slot_indication(slot_point sl_tx)
 template <bool IsDl>
 void cell_harq_repository<IsDl>::handle_harq_ack_timeout(harq_type& h, slot_point sl_tx)
 {
-  srsran_sanity_check(h.status == harq_state_t::waiting_ack, "HARQ process in wrong state");
+  srsran_sanity_check(h.status == harq_state_t::waiting_ack or h.status == harq_state_t::pending_retx,
+                      "HARQ process in wrong state");
+
+  if (is_ntn_mode()) {
+    // Deallocate HARQ.
+    dealloc_harq(h);
+    return;
+  }
 
   bool ack_val = h.ack_on_timeout;
-  if (not is_ntn_mode()) {
-    // Only in non-NTN case, we log a warning.
+  if (h.status == harq_state_t::pending_retx) {
+    // This HARQ is being starved by the scheduler.
+    logger.info("rnti={} h_id={}: Discarding {} HARQ. Cause: The scheduler took too long to reschedule this HARQ "
+                "process ({} slots elapsed since last NOK).",
+                h.rnti,
+                fmt::underlying(h.h_id),
+                IsDl ? std::string_view{"DL"} : std::string_view{"UL"},
+                h.slot_timeout - h.slot_ack);
+  } else {
     if (ack_val) {
       // Case: Not all HARQ-ACKs were received, but at least one positive ACK was received.
-      logger.debug("rnti={} h_id={}: Setting {} HARQ to \"ACKed\" state. Cause: HARQ-ACK wait timeout ({} slots) was "
-                   "reached with still missing PUCCH HARQ-ACKs. However, one positive ACK was received.",
+      logger.debug("rnti={} h_id={}: Setting {} HARQ to \"ACKed\" state. Cause: Timeout was reached ({} slots), but "
+                   "there are still missing PUCCH HARQ-ACK indications. However, one positive ACK was received.",
                    h.rnti,
-                   h.h_id,
-                   IsDl ? "DL" : "UL",
-                   h.slot_ack_timeout - h.slot_ack);
+                   fmt::underlying(h.h_id),
+                   IsDl ? std::string_view{"DL"} : std::string_view{"UL"},
+                   h.slot_timeout - h.slot_ack);
     } else {
       // At least one of the expected ACKs went missing and we haven't received any positive ACK.
-      logger.warning("rnti={} h_id={}: Discarding {} HARQ. Cause: HARQ-ACK wait timeout ({} slots) was reached, but "
-                     "there are still "
-                     "missing HARQ-ACKs and none of the received ones are positive.",
+      logger.warning("rnti={} h_id={}: Discarding {} HARQ. Cause: Timeout was reached ({} slots) to receive the "
+                     "respective HARQ-ACK indication from lower layers (HARQ-ACK slot={})",
                      h.rnti,
-                     h.h_id,
-                     IsDl ? "DL" : "UL",
-                     h.slot_ack_timeout - h.slot_ack);
+                     fmt::underlying(h.h_id),
+                     IsDl ? std::string_view{"DL"} : std::string_view{"UL"},
+                     h.slot_timeout - h.slot_ack,
+                     h.slot_ack);
     }
   }
 
   // Deallocate HARQ.
   dealloc_harq(h);
 
-  if (max_ack_wait_in_slots != 1) {
-    // Report timeout with NACK after we delete the HARQ to avoid reentrancy.
-    // Only in non-NTN case.
-    timeout_notifier.on_harq_timeout(h.ue_idx, IsDl, ack_val);
-  }
+  // Report timeout with NACK after we delete the HARQ to avoid reentrancy.
+  timeout_notifier.on_harq_timeout(h.ue_idx, IsDl, ack_val);
 }
 
 template <bool IsDl>
@@ -297,9 +348,19 @@ typename cell_harq_repository<IsDl>::harq_type* cell_harq_repository<IsDl>::allo
   h.ack_on_timeout     = false;
   h.retxs_cancelled    = false;
 
+  // Set UE HARQ entity common params.
+  ue_harq_entity.last_slot_tx =
+      ue_harq_entity.last_slot_tx.valid() ? std::max(ue_harq_entity.last_slot_tx, sl_tx) : sl_tx;
+  ue_harq_entity.last_slot_ack =
+      ue_harq_entity.last_slot_ack.valid() ? std::max(ue_harq_entity.last_slot_ack, sl_ack) : sl_ack;
+
   // Add HARQ to the timeout list.
-  h.slot_ack_timeout = sl_ack + max_ack_wait_in_slots;
-  harq_timeout_wheel[h.slot_ack_timeout.to_uint() % harq_timeout_wheel.size()].push_front(&h);
+  h.slot_timeout = sl_ack + max_ack_wait_in_slots - ntn_cs_koffset;
+  harq_timeout_wheel[h.slot_timeout.to_uint() % harq_timeout_wheel.size()].push_front(&h);
+
+#ifdef JBPF_ENABLED
+  CALL_JBPF_HARQ_HOOK(JBPF_HARQ_EVENT_TX, h, harq_type);
+#endif
 
   return &h;
 }
@@ -313,17 +374,28 @@ void cell_harq_repository<IsDl>::dealloc_harq(harq_type& h)
   }
 
   // Update HARQ process state.
-  if (h.status == harq_state_t::waiting_ack) {
-    // Remove the HARQ from the timeout list.
-    harq_timeout_wheel[h.slot_ack_timeout.to_uint() % harq_timeout_wheel.size()].pop(&h);
-  } else {
+  if (h.status == harq_state_t::pending_retx) {
     // Remove the HARQ from the pending Retx list.
     harq_pending_retx_list.pop(&h);
   }
-  h.status = harq_state_t::empty;
+  // Remove HARQ from the timeout list.
+  harq_timeout_wheel[h.slot_timeout.to_uint() % harq_timeout_wheel.size()].pop(&h);
+  h.slot_timeout = {};
+  h.status       = harq_state_t::empty;
+
+  // Check if common HARQ entity params need to be updated.
+  ue_harq_entity_impl& ue_harq_entity = ues[h.ue_idx];
+  if (ue_harq_entity.last_slot_tx.valid() and h.slot_tx >= ue_harq_entity.last_slot_tx) {
+    // If the HARQ being reset corresponds to the last recorded Tx, we also reset "last_slot_tx". This avoids
+    // encountering ambiguities with the slot wrap-around, when the UE stays for very long without being scheduled.
+    ue_harq_entity.last_slot_tx = {};
+  }
+  if (ue_harq_entity.last_slot_ack.valid() and h.slot_ack >= ue_harq_entity.last_slot_ack) {
+    // We do the same with last_slot_ack as we did with last_slot_tx.
+    ue_harq_entity.last_slot_ack = {};
+  }
 
   // Mark HARQ as available again.
-  ue_harq_entity_impl& ue_harq_entity = ues[h.ue_idx];
   ue_harq_entity.free_harq_ids.push_back(h.h_id);
 }
 
@@ -335,17 +407,22 @@ void cell_harq_repository<IsDl>::handle_ack(harq_type& h, bool ack)
       logger.debug("rnti={} h_id={}: Discarding {} HARQ process TB with tbs={}. Cause: Retxs for this HARQ process "
                    "were cancelled",
                    h.rnti,
-                   h.h_id,
-                   IsDl ? "DL" : "UL",
+                   fmt::underlying(h.h_id),
+                   IsDl ? std::string_view{"DL"} : std::string_view{"UL"},
                    h.prev_tx_params.tbs_bytes);
     } else {
       logger.info(
           "rnti={} h_id={}: Discarding {} HARQ process TB with tbs={}. Cause: Maximum number of reTxs {} exceeded",
           h.rnti,
-          h.h_id,
-          IsDl ? "DL" : "UL",
+          fmt::underlying(h.h_id),
+          IsDl ? std::string_view{"DL"} : std::string_view{"UL"},
           h.prev_tx_params.tbs_bytes,
           h.max_nof_harq_retxs);
+
+#ifdef JBPF_ENABLED
+      CALL_JBPF_HARQ_HOOK(JBPF_HARQ_EVENT_FAILURE, h, harq_type);
+#endif
+
     }
   }
 
@@ -373,8 +450,10 @@ void cell_harq_repository<IsDl>::set_pending_retx(harq_type& h)
     return;
   }
 
-  // Remove the HARQ from the timeout list.
-  harq_timeout_wheel[h.slot_ack_timeout.to_uint() % harq_timeout_wheel.size()].pop(&h);
+  // Remove the HARQ from the ACK timeout list and re-add it with a new timeout.
+  harq_timeout_wheel[h.slot_timeout.to_uint() % harq_timeout_wheel.size()].pop(&h);
+  h.slot_timeout = last_sl_ind + harq_retx_timeout;
+  harq_timeout_wheel[h.slot_timeout.to_uint() % harq_timeout_wheel.size()].push_front(&h);
 
   // Add HARQ to pending Retx list.
   harq_pending_retx_list.push_back(&h);
@@ -387,22 +466,37 @@ template <bool IsDl>
 bool cell_harq_repository<IsDl>::handle_new_retx(harq_type& h, slot_point sl_tx, slot_point sl_ack)
 {
   if (h.status != harq_state_t::pending_retx) {
-    logger.warning("rnti={} h_id={}: Attempt of retx in a HARQ process that has no pending retx", h.rnti, h.h_id);
+    logger.warning(
+        "rnti={} h_id={}: Attempt of retx in a HARQ process that has no pending retx", h.rnti, fmt::underlying(h.h_id));
     return false;
   }
 
   // Remove HARQ from pending Retx list.
   harq_pending_retx_list.pop(&h);
+  harq_timeout_wheel[h.slot_timeout.to_uint() % harq_timeout_wheel.size()].pop(&h);
+  h.slot_timeout = {};
 
+  // Update HARQ common parameters.
   h.status         = harq_state_t::waiting_ack;
   h.slot_tx        = sl_tx;
   h.slot_ack       = sl_ack;
   h.ack_on_timeout = false;
   h.nof_retxs++;
 
+  // Set UE HARQ entity common params.
+  ue_harq_entity_impl& ue_harq_entity = ues[h.ue_idx];
+  ue_harq_entity.last_slot_tx =
+      ue_harq_entity.last_slot_tx.valid() ? std::max(ue_harq_entity.last_slot_tx, sl_tx) : sl_tx;
+  ue_harq_entity.last_slot_ack =
+      ue_harq_entity.last_slot_ack.valid() ? std::max(ue_harq_entity.last_slot_ack, sl_ack) : sl_ack;
+
   // Add HARQ to the timeout list.
-  h.slot_ack_timeout = sl_ack + max_ack_wait_in_slots;
-  harq_timeout_wheel[h.slot_ack_timeout.to_uint() % harq_timeout_wheel.size()].push_front(&h);
+  h.slot_timeout = sl_ack + max_ack_wait_in_slots;
+  harq_timeout_wheel[h.slot_timeout.to_uint() % harq_timeout_wheel.size()].push_front(&h);
+
+#ifdef JBPF_ENABLED
+  CALL_JBPF_HARQ_HOOK(JBPF_HARQ_EVENT_RETX, h, harq_type);
+#endif
 
   return true;
 }
@@ -503,14 +597,16 @@ template class harq_utils::base_harq_process_handle<false>;
 cell_harq_manager::cell_harq_manager(unsigned                               max_ues,
                                      unsigned                               max_harqs_per_ue_,
                                      std::unique_ptr<harq_timeout_notifier> notifier,
+                                     unsigned                               dl_harq_retx_timeout,
+                                     unsigned                               ul_harq_retx_timeout,
                                      unsigned                               max_ack_wait_timeout,
                                      unsigned                               ntn_cs_koffset) :
   max_harqs_per_ue(max_harqs_per_ue_),
   timeout_notifier(notifier != nullptr and ntn_cs_koffset == 0 ? std::move(notifier)
                                                                : std::make_unique<noop_harq_timeout_notifier>()),
   logger(srslog::fetch_basic_logger("SCHED")),
-  dl(max_ues, max_ack_wait_timeout, max_harqs_per_ue, ntn_cs_koffset, *timeout_notifier, logger),
-  ul(max_ues, max_ack_wait_timeout, max_harqs_per_ue, ntn_cs_koffset, *timeout_notifier, logger)
+  dl(max_ues, max_ack_wait_timeout, dl_harq_retx_timeout, max_harqs_per_ue, ntn_cs_koffset, *timeout_notifier, logger),
+  ul(max_ues, max_ack_wait_timeout, ul_harq_retx_timeout, max_harqs_per_ue, ntn_cs_koffset, *timeout_notifier, logger)
 {
 }
 
@@ -556,11 +652,11 @@ void cell_harq_manager::destroy_ue(du_ue_index_t ue_idx)
 harq_utils::dl_harq_process_impl* cell_harq_manager::new_dl_tx(du_ue_index_t ue_idx,
                                                                rnti_t        rnti,
                                                                slot_point    pdsch_slot,
-                                                               unsigned      k1,
+                                                               unsigned      ack_delay,
                                                                unsigned      max_harq_nof_retxs,
                                                                uint8_t       harq_bit_idx)
 {
-  dl_harq_process_impl* h = dl.alloc_harq(ue_idx, pdsch_slot, pdsch_slot + k1, max_harq_nof_retxs);
+  dl_harq_process_impl* h = dl.alloc_harq(ue_idx, pdsch_slot, pdsch_slot + ack_delay, max_harq_nof_retxs);
   if (h == nullptr) {
     return nullptr;
   }
@@ -589,9 +685,9 @@ cell_harq_manager::new_ul_tx(du_ue_index_t ue_idx, rnti_t rnti, slot_point pusch
   return h;
 }
 
-bool dl_harq_process_handle::new_retx(slot_point pdsch_slot, unsigned k1, uint8_t harq_bit_idx)
+bool dl_harq_process_handle::new_retx(slot_point pdsch_slot, unsigned ack_delay, uint8_t harq_bit_idx)
 {
-  if (not harq_repo->handle_new_retx(*impl, pdsch_slot, pdsch_slot + k1)) {
+  if (not harq_repo->handle_new_retx(*impl, pdsch_slot, pdsch_slot + ack_delay)) {
     return false;
   }
   // Reset DL-only HARQ parameters.
@@ -607,7 +703,8 @@ dl_harq_process_handle::status_update dl_harq_process_handle::dl_ack_info(mac_ha
 {
   if (impl->status != harq_state_t::waiting_ack) {
     // If the HARQ process is not expecting an HARQ-ACK, it means that it has already been ACKed/NACKed.
-    harq_repo->logger.warning("rnti={} h_id={}: ACK arrived for inactive DL HARQ", impl->rnti, impl->h_id);
+    harq_repo->logger.warning(
+        "rnti={} h_id={}: ACK arrived for inactive DL HARQ", impl->rnti, fmt::underlying(impl->h_id));
     return status_update::error;
   }
 
@@ -641,9 +738,9 @@ dl_harq_process_handle::status_update dl_harq_process_handle::dl_ack_info(mac_ha
   // We reduce the HARQ process timeout to receive the next HARQ-ACK. This is done because the two HARQ-ACKs should
   // arrive almost simultaneously, and in case the second goes missing, we don't want to block the HARQ for too long.
   auto& wheel = harq_repo->harq_timeout_wheel;
-  wheel[impl->slot_ack_timeout.to_uint() % wheel.size()].pop(impl);
-  impl->slot_ack_timeout = harq_repo->last_sl_ind + SHORT_ACK_TIMEOUT_DTX;
-  wheel[impl->slot_ack_timeout.to_uint() % wheel.size()].push_front(impl);
+  wheel[impl->slot_timeout.to_uint() % wheel.size()].pop(impl);
+  impl->slot_timeout = harq_repo->last_sl_ind + SHORT_ACK_TIMEOUT_DTX;
+  wheel[impl->slot_timeout.to_uint() % wheel.size()].push_front(impl);
 
   return status_update::no_update;
 }
@@ -653,16 +750,19 @@ void dl_harq_process_handle::increment_pucch_counter()
   ++impl->pucch_ack_to_receive;
 }
 
-void dl_harq_process_handle::save_grant_params(const dl_harq_alloc_context& ctx, const pdsch_information& pdsch)
+void dl_harq_process_handle::save_grant_params(const dl_harq_alloc_context& ctx, const dl_msg_alloc& ue_pdsch)
 {
+  static constexpr size_t CW_INDEX = 0;
+
+  const pdsch_information& pdsch = ue_pdsch.pdsch_cfg;
   srsran_assert(pdsch.codewords.size() == 1, "Only one codeword supported");
   srsran_sanity_check(pdsch.rnti == impl->rnti, "RNTI mismatch");
   srsran_sanity_check(pdsch.harq_id == impl->h_id, "HARQ-id mismatch");
   srsran_assert(impl->status == harq_utils::harq_state_t::waiting_ack,
                 "Setting allocation parameters for DL HARQ process id={} in invalid state",
-                id());
+                fmt::underlying(id()));
 
-  const pdsch_codeword&               cw          = pdsch.codewords[0];
+  const pdsch_codeword&               cw          = pdsch.codewords[CW_INDEX];
   dl_harq_process_impl::alloc_params& prev_params = impl->prev_tx_params;
 
   if (impl->nof_retxs == 0) {
@@ -673,6 +773,10 @@ void dl_harq_process_handle::save_grant_params(const dl_harq_alloc_context& ctx,
     prev_params.slice_id     = ctx.slice_id;
     prev_params.cqi          = ctx.cqi.has_value() ? ctx.cqi.value() : cqi_value{1};
     prev_params.is_fallback  = ctx.is_fallback;
+    prev_params.lc_sched_info.clear();
+    for (const dl_msg_lc_info& lc : ue_pdsch.tb_list[CW_INDEX].lc_chs_to_sched) {
+      prev_params.lc_sched_info.push_back({lc.lcid, units::bytes{lc.sched_bytes}});
+    }
   } else {
     srsran_assert(ctx.dci_cfg_type == prev_params.dci_cfg_type,
                   "DCI format and RNTI type cannot change during DL HARQ retxs");
@@ -707,8 +811,9 @@ int ul_harq_process_handle::ul_crc_info(bool ack)
 {
   if (impl->status != harq_state_t::waiting_ack) {
     // HARQ is not expecting CRC info.
-    harq_repo->logger.warning(
-        "rnti={} h_id={}: Discarding CRC. Cause: UL HARQ process is not expecting any CRC", impl->rnti, impl->h_id);
+    harq_repo->logger.warning("rnti={} h_id={}: Discarding CRC. Cause: UL HARQ process is not expecting any CRC",
+                              impl->rnti,
+                              fmt::underlying(impl->h_id));
     return -1;
   }
 
@@ -723,7 +828,7 @@ void ul_harq_process_handle::save_grant_params(const ul_harq_alloc_context& ctx,
   srsran_sanity_check(pusch.harq_id == impl->h_id, "HARQ-id mismatch");
   srsran_assert(impl->status == harq_utils::harq_state_t::waiting_ack,
                 "Setting allocation parameters for DL HARQ process id={} in invalid state",
-                id());
+                fmt::underlying(id()));
 
   ul_harq_process_impl::alloc_params& prev_tx_params = impl->prev_tx_params;
 
@@ -793,10 +898,44 @@ void unique_ue_harq_entity::reset()
   }
 }
 
-std::optional<dl_harq_process_handle>
-unique_ue_harq_entity::alloc_dl_harq(slot_point sl_tx, unsigned k1, unsigned max_harq_nof_retxs, unsigned harq_bit_idx)
+void unique_ue_harq_entity::cancel_retxs()
 {
-  dl_harq_process_impl* h = cell_harq_mgr->new_dl_tx(ue_index, crnti, sl_tx, k1, max_harq_nof_retxs, harq_bit_idx);
+  for (auto& h_dl : get_dl_ue().harqs) {
+    if (h_dl.status != harq_state_t::empty) {
+      dl_harq_process_handle{cell_harq_mgr->dl, h_dl}.cancel_retxs();
+    }
+  }
+
+  for (auto& h_ul : get_ul_ue().harqs) {
+    if (h_ul.status != harq_state_t::empty) {
+      ul_harq_process_handle{cell_harq_mgr->ul, h_ul}.cancel_retxs();
+    }
+  }
+}
+
+std::optional<ul_harq_process_handle> unique_ue_harq_entity::ul_harq(harq_id_t h_id, slot_point slot)
+{
+  if (cell_harq_mgr->ul.is_ntn_mode()) {
+    return cell_harq_mgr->ul.alloc_hist->find_ul_harq(ue_index, slot);
+  }
+  return ul_harq(h_id);
+}
+
+std::optional<const ul_harq_process_handle> unique_ue_harq_entity::ul_harq(harq_id_t h_id, slot_point slot) const
+{
+  if (cell_harq_mgr->ul.is_ntn_mode()) {
+    return cell_harq_mgr->ul.alloc_hist->find_ul_harq(ue_index, slot);
+  }
+  return ul_harq(h_id);
+}
+
+std::optional<dl_harq_process_handle> unique_ue_harq_entity::alloc_dl_harq(slot_point sl_tx,
+                                                                           unsigned   ack_delay,
+                                                                           unsigned   max_harq_nof_retxs,
+                                                                           unsigned   harq_bit_idx)
+{
+  dl_harq_process_impl* h =
+      cell_harq_mgr->new_dl_tx(ue_index, crnti, sl_tx, ack_delay, max_harq_nof_retxs, harq_bit_idx);
   if (h == nullptr) {
     return std::nullopt;
   }
@@ -870,7 +1009,7 @@ std::optional<ul_harq_process_handle> unique_ue_harq_entity::find_ul_harq_waitin
 std::optional<dl_harq_process_handle> unique_ue_harq_entity::find_dl_harq_waiting_ack(slot_point uci_slot,
                                                                                       uint8_t    harq_bit_idx)
 {
-  if (cell_harq_mgr->dl.alloc_hist != nullptr) {
+  if (cell_harq_mgr->dl.is_ntn_mode()) {
     // NTN mode.
     return cell_harq_mgr->dl.alloc_hist->find_dl_harq(ue_index, uci_slot, harq_bit_idx);
   }
@@ -887,7 +1026,7 @@ std::optional<dl_harq_process_handle> unique_ue_harq_entity::find_dl_harq_waitin
 
 std::optional<ul_harq_process_handle> unique_ue_harq_entity::find_ul_harq_waiting_ack(slot_point pusch_slot)
 {
-  if (cell_harq_mgr->ul.alloc_hist != nullptr) {
+  if (cell_harq_mgr->ul.is_ntn_mode()) {
     // NTN mode.
     return cell_harq_mgr->ul.alloc_hist->find_ul_harq(ue_index, pusch_slot);
   }
@@ -922,7 +1061,7 @@ unsigned unique_ue_harq_entity::total_ul_bytes_waiting_ack() const
   }
 
   unsigned harq_bytes = 0;
-  for (unsigned i = 0; i != nof_ul_harqs(); ++i) {
+  for (unsigned i = 0, e = nof_ul_harqs(); i != e; ++i) {
     if (get_ul_ue().harqs[i].status != harq_utils::harq_state_t::empty) {
       harq_bytes += get_ul_ue().harqs[i].prev_tx_params.tbs_bytes;
     }

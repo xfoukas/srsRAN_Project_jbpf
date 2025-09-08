@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2021-2024 Software Radio Systems Limited
+ * Copyright 2021-2025 Software Radio Systems Limited
  *
  * This file is part of srsRAN.
  *
@@ -29,9 +29,10 @@ namespace srsran {
 namespace srs_du {
 
 struct du_low_config;
+struct du_low_dependencies;
 
 /// Creates and returns the DU low.
-std::unique_ptr<du_low> make_du_low(const du_low_config& config);
+std::unique_ptr<du_low> make_du_low(const du_low_config& config, du_low_dependencies&& deps);
 
 } // namespace srs_du
 } // namespace srsran
