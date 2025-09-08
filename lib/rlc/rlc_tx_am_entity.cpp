@@ -573,6 +573,12 @@ size_t rlc_tx_am_entity::build_continued_sdu_segment(span<uint8_t> rlc_pdu_buf, 
   if (si == rlc_si_field::last_segment) {
     auto latency = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() -
                                                                         sdu_info.time_of_arrival);
+
+#ifdef JBPF_ENABLED
+  CALL_JBPF_HOOK(hook_rlc_dl_sdu_send_completed, sdu_info.pdcp_sn.value(), sdu_info.is_retx,
+   (uint64_t)latency.count());
+#endif
+
     metrics_low.metrics_add_sdu_latency_us(latency.count() / 1000);
     metrics_low.metrics_add_pulled_sdus(1);
     st.tx_next = (st.tx_next + 1) % mod;
@@ -842,10 +848,12 @@ void rlc_tx_am_entity::handle_status_pdu(rlc_am_status_pdu status) noexcept SRSR
 #endif      
       auto ack_latency = std::chrono::duration_cast<std::chrono::milliseconds>(t_start - sdu_info.time_of_departure);
 #ifdef JBPF_ENABLED
+      auto latency = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() -
+                                                                        sdu_info.time_of_arrival);
       if (sdu_info.is_retx) {
-        CALL_JBPF_HOOK(hook_rlc_dl_sdu_delivered, max_deliv_retx_pdcp_sn.value(), true, (uint64_t)ack_latency.count());
+        CALL_JBPF_HOOK(hook_rlc_dl_sdu_delivered, max_deliv_retx_pdcp_sn.value(), true, (uint64_t)latency.count());
       } else {
-        CALL_JBPF_HOOK(hook_rlc_dl_sdu_delivered, max_deliv_pdcp_sn.value(), false, (uint64_t)ack_latency.count());
+        CALL_JBPF_HOOK(hook_rlc_dl_sdu_delivered, max_deliv_pdcp_sn.value(), false, (uint64_t)latency.count());
       }
 #endif      
       metrics_low.metrics_add_ack_latency_ms(ack_latency.count());
