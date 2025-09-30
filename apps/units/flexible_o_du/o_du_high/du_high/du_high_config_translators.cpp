@@ -281,6 +281,11 @@ generate_du_slicing_rrm_policy_config(span<const std::string>                   
       rrm_policy_cfgs.back().rrc_member.plmn_id = plmn_identity::parse(plmn).value();
       rrm_policy_cfgs.back().min_prb            = (nof_cell_crbs * cfg.sched_cfg.min_prb_policy_ratio) / 100;
       rrm_policy_cfgs.back().max_prb            = (nof_cell_crbs * cfg.sched_cfg.max_prb_policy_ratio) / 100;
+#ifdef JBPF_ENABLED
+      rrm_policy_cfgs.back().nof_cell_crbs = nof_cell_crbs;
+      rrm_policy_cfgs.back().min_prb_policy_ratio = cfg.sched_cfg.min_prb_policy_ratio;
+      rrm_policy_cfgs.back().max_prb_policy_ratio = cfg.sched_cfg.max_prb_policy_ratio;
+#endif
       rrm_policy_cfgs.back().priority           = cfg.sched_cfg.priority;
       rrm_policy_cfgs.back().policy_sched_cfg = cfg.sched_cfg.slice_policy_sched_cfg.value_or(default_policy_sched_cfg);
     }

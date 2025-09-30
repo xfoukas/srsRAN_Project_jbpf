@@ -27,6 +27,10 @@
 #include "ran_slice_instance.h"
 #include <queue>
 
+#ifdef JBPF_ENABLED
+#include "jbpf_srsran_hooks.h"
+#endif
+
 namespace srsran {
 
 /// Inter-slice Scheduler.
@@ -92,6 +96,14 @@ private:
     bool operator<(const slice_candidate_context& rhs) const { return prio < rhs.prio; }
     bool operator>(const slice_candidate_context& rhs) const { return prio > rhs.prio; }
   };
+
+#ifdef JBPF_ENABLED
+    struct jbpf_slice_allocation jbpf_slice_allocation_candidiate;
+    struct jbpf_slice_allocation jbpf_slice_allocation;
+    void map_slice_allocation_to_jbpf(void); 
+    void map_slice_allocation_from_jbpf(void);
+    bool validate_map_slice_allocation_candidate(void);
+#endif
 
   // Note: the std::priority_queue makes its underlying container protected, so it seems that they are ok with
   // inheritance.

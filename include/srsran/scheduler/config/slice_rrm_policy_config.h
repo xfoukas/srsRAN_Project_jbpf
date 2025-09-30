@@ -41,6 +41,13 @@ struct slice_rrm_policy_config {
   unsigned max_prb = MAX_NOF_PRBS;
   /// RAN slice scheduling priority. Values: {0, ..., 255}.
   unsigned priority = 0;
+
+#ifdef JBPF_ENABLED
+  unsigned nof_cell_crbs = MAX_NOF_PRBS; 
+  unsigned min_prb_policy_ratio = 0;
+  unsigned max_prb_policy_ratio = 100;
+#endif
+
   /// Policy scheduler configuration for the slice.
   policy_scheduler_expert_config policy_sched_cfg = time_qos_scheduler_expert_config{};
 };
