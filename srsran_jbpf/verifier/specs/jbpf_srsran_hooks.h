@@ -267,6 +267,26 @@ DECLARE_JBPF_HOOK(mac_sched_crc_indication,
 DECLARE_MAC_SCHED_HARQ_HOOK(mac_sched_harq_ul, jbpf_mac_sched_harq_ctx_info);
 DECLARE_MAC_SCHED_HARQ_HOOK(mac_sched_harq_dl, jbpf_mac_sched_harq_ctx_info_dl);
 
+
+
+DECLARE_JBPF_CTRL_HOOK(
+    mac_sched_slice_mgmt,
+    struct jbpf_ran_generic_ctx ctx,
+    ctx,
+    HOOK_PROTO(
+        uint16_t sfn,
+        uint16_t slot_index,       
+        struct jbpf_slice_allocation* slice_allocation),
+    HOOK_ASSIGN(
+        ctx.data = (uint64_t)slice_allocation;
+        ctx.data_end = (uint64_t) ((uint8_t*)slice_allocation + sizeof(struct jbpf_slice_allocation));
+        ctx.srs_meta_data1 = ((uint64_t)sfn << 16) | (uint64_t)slot_index;
+    )
+)
+
+
+
+
 // PDCP
 
 // trigger: when PDCP DL entity is created

@@ -97,6 +97,24 @@ struct jbpf_mac_sched_ctx {
 };
 
 
+// MAC slice control
+#define JBPF_MAX_SLICES (16)
+struct jbpf_slice_allocation {
+    uint8_t num_slices;
+    struct {
+        uint16_t pci;
+        uint32_t plmn_id;              // bcd format
+        struct {
+            uint8_t sst;
+            uint32_t sd;
+        } nssai;
+        uint8_t min_prb_policy_ratio;  // Sets the minimum percentage of PRBs to be allocated to the slice. Supported [0 - 100].
+        uint8_t max_prb_policy_ratio;  // Sets the maximum percentage of PRBs to be allocated to the slice. Supported [1 - 100].
+        uint8_t priority;              // Sets the slice priority. Values: [0 - 254].
+    } slices[JBPF_MAX_SLICES];
+};
+
+
 /* E1 context info */
 struct jbpf_cucp_e1_ctx_info {
     uint16_t ctx_id;   /* Context id (could be implementation specific) */
@@ -241,7 +259,6 @@ struct jbpf_ngap_ctx_info {
 struct jbpf_ran_generic_ctx {
     uint64_t data; /* Pointer to beginning of buffer with int16_t IQ samples */
     uint64_t data_end; /* Pointer to end+1 of packet */
-    uint64_t meta_data; /* Used by ebpf */
     uint64_t srs_meta_data1; /* Used for the program to store metadata */
     uint64_t srs_meta_data2; /* Used for the program to store metadata */
     uint64_t srs_meta_data3; /* Used for the program to store metadata */
