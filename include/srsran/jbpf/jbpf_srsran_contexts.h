@@ -259,10 +259,10 @@ struct jbpf_ngap_ctx_info {
 struct jbpf_ran_generic_ctx {
     uint64_t data; /* Pointer to beginning of buffer with int16_t IQ samples */
     uint64_t data_end; /* Pointer to end+1 of packet */
+    uint64_t meta_data; /* Used by ebpf */
     uint64_t srs_meta_data1; /* Used for the program to store metadata */
     uint64_t srs_meta_data2; /* Used for the program to store metadata */
     uint64_t srs_meta_data3; /* Used for the program to store metadata */
-    uint64_t srs_meta_data4; /* Used for the program to store metadata */
 };
   
 
