@@ -239,7 +239,7 @@ void inter_slice_scheduler::slot_indication(slot_point slot_tx, const cell_resou
   {
     uint32_t ret = ctrl_hook_mac_sched_slice_mgmt(
       slot_tx.sfn(), slot_tx.slot_index(), &jbpf_slice_allocation_candidiate);
-    if (ret) {
+    if (ret > 0) {
       printf("Allocation changed by codelet \n");
       if (validate_map_slice_allocation_candidate()) {
         // promote candidiate
