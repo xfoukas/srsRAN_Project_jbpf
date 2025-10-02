@@ -87,23 +87,6 @@ inter_slice_scheduler::inter_slice_scheduler(const cell_configuration& cell_cfg_
   map_slice_allocation_to_jbpf();
   // set candidate as current config
   jbpf_slice_allocation_candidiate = jbpf_slice_allocation;
-
-
-  printf("jbpf_slice_allocation_candidiate: num_slices %d \n", jbpf_slice_allocation_candidiate.num_slices);
-  int i=0;
-  for (i=0; i<jbpf_slice_allocation_candidiate.num_slices; i++){
-
-    printf("  [%d] pci %d plmn_id %d sst %d sd %d min_prb %d max_prb %d priority %d \n",
-      i, 
-      jbpf_slice_allocation_candidiate.slices[i].pci,
-      jbpf_slice_allocation_candidiate.slices[i].plmn_id,
-      jbpf_slice_allocation_candidiate.slices[i].nssai.sst,
-      jbpf_slice_allocation_candidiate.slices[i].nssai.sd,
-      jbpf_slice_allocation_candidiate.slices[i].min_prb_policy_ratio,
-      jbpf_slice_allocation_candidiate.slices[i].max_prb_policy_ratio,
-      jbpf_slice_allocation_candidiate.slices[i].priority);
-  }
-
 #endif
 }
 
@@ -174,17 +157,22 @@ bool inter_slice_scheduler::validate_map_slice_allocation_candidate(void) {
 #define PRIORITY_RANGE_HIGH       (254)
 
   if (jbpf_slice_allocation_candidiate.num_slices != jbpf_slice_allocation.num_slices) {
-    printf("Slave allocation candidiate failure : Number of slices has changed from %d to %d\n", jbpf_slice_allocation_candidiate.num_slices, jbpf_slice_allocation.num_slices);
+    printf("Slice allocation candidiate failure : Number of slices has changed from %d to %d\n", jbpf_slice_allocation_candidiate.num_slices, jbpf_slice_allocation.num_slices);
     return false;
   }
   int i=0;
   for (i=0; i<jbpf_slice_allocation_candidiate.num_slices; i++){
     if (jbpf_slice_allocation_candidiate.slices[i].pci != jbpf_slice_allocation.slices[i].pci) {
-      printf("Slave allocation candidiate failure : PCI changed for slice idx %d\n", i);
+      printf("Slice allocation candidiate failure : PCI changed for slice idx %d\n", i);
       return false;
     }
     if (jbpf_slice_allocation_candidiate.slices[i].plmn_id != jbpf_slice_allocation.slices[i].plmn_id) {
-      printf("Slave allocation candidiate failure : plmn_id changed for slice idx %d\n", i);
+      printf("Slice allocation candidiate failure : plmn_id changed for slice idx %d\n", i);
+      return false;
+    }
+    if ((jbpf_slice_allocation_candidiate.slices[i].nssai.sst != jbpf_slice_allocation.slices[i].nssai.sst) || 
+        (jbpf_slice_allocation_candidiate.slices[i].nssai.sd != jbpf_slice_allocation.slices[i].nssai.sd)) {
+      printf("Slice allocation candidiate failure : nssai changed for slice idx %d\n", i);
       return false;
     }
     if (!((jbpf_slice_allocation_candidiate.slices[i].min_prb_policy_ratio >= MIN_PRB_RADIO_RANGE_LOW) && 
@@ -246,7 +234,7 @@ void inter_slice_scheduler::slot_indication(slot_point slot_tx, const cell_resou
         jbpf_slice_allocation = jbpf_slice_allocation_candidiate;
         // update slices with new allocation
         map_slice_allocation_from_jbpf();
-        printf("slice allocation successfuly updated \n");
+        printf("Slice allocation successfuly validated and updated \n");
       } else {
         printf("Invalid slice allocation attempted\n");
         // revert to current jbpf_slice_allocation
@@ -256,135 +244,9 @@ void inter_slice_scheduler::slot_indication(slot_point slot_tx, const cell_resou
   }
 #endif
 
-  s_nssai_t internet_slice_nssai{.sst = slice_service_type{1}, .sd = slice_differentiator::create(162).value()};
-  s_nssai_t internet2_slice_nssai{.sst = slice_service_type{1}, .sd = slice_differentiator::create(163).value()};
-
-  if ((slot_tx.sfn()==0) && (slot_tx.slot_index()==0))
-  {
-    printf("########################################################\n");
-    printf("########################################################\n");
-    printf("########################################################\n");
-    printf("########################################################\n");
-    for (auto& slice : slices) {
-
-      if ((slice.inst.cfg.rrc_member.s_nssai == internet_slice_nssai) || (slice.inst.cfg.rrc_member.s_nssai == internet2_slice_nssai))
-      {
-        printf("sfn/slot=%d/%d, BEFORE slice [sst=%d st=%d] to max_prb=%d \n",
-          slot_tx.sfn(), slot_tx.slot_index(),
-          slice.inst.cfg.rrc_member.s_nssai.sst.value(), 
-          slice.inst.cfg.rrc_member.s_nssai.sd.value(),
-          slice.inst.cfg.max_prb);
-        slice.inst.cfg.max_prb = (slice.inst.cfg.max_prb == 163) ? 109 : 163;
-        printf("sfn/slot=%d/%d, Changed slice [sst=%d st=%d] to max_prb=%d \n",
-          slot_tx.sfn(), slot_tx.slot_index(),
-          slice.inst.cfg.rrc_member.s_nssai.sst.value(), 
-          slice.inst.cfg.rrc_member.s_nssai.sd.value(),
-          slice.inst.cfg.max_prb);
-      }
-    }
-  }
-
   // Recompute the priority queues.
   unsigned max_rbs = 0;
   for (const auto& slice : slices) {
-
-#if 0
-    if (slot_tx.slot_index()==0)
-    {
-    printf("sfn/slot=%d/%d, slice : inst(id=%ld cell_cfg=[cell_index=%d cell_group_index=%d pci=%d nof_dl_prbs=%d nof_ul_prbs=%d nof_slots_per_frame=%d]" 
-           "cfg=[min_prb_policy_ratio=%d max_prb_policy_ratio=%d min_prb=%d max_prb=%d, prio=%d member=[plmn=%d s_nssai=[sst=%d st=%d]]] \n",
-      slot_tx.sfn(), slot_tx.slot_index(),
-      static_cast<std::size_t>(slice.inst.id),
-      static_cast<uint16_t>(slice.inst.cell_cfg->cell_index),
-      static_cast<uint16_t>(slice.inst.cell_cfg->cell_group_index),
-      static_cast<uint16_t>(slice.inst.cell_cfg->pci),
-      static_cast<uint16_t>(slice.inst.cell_cfg->nof_dl_prbs),
-      static_cast<uint16_t>(slice.inst.cell_cfg->nof_ul_prbs),
-      static_cast<uint16_t>(slice.inst.cell_cfg->nof_slots_per_frame),
-      slice.inst.cfg.min_prb_policy_ratio,
-      slice.inst.cfg.max_prb_policy_ratio,
-      slice.inst.cfg.min_prb,
-      slice.inst.cfg.max_prb,
-      slice.inst.cfg.priority,
-      slice.inst.cfg.rrc_member.plmn_id.to_bcd(),
-      slice.inst.cfg.rrc_member.s_nssai.sst.value(), 
-      slice.inst.cfg.rrc_member.s_nssai.sd.value());
-    }
-#endif
-
-
-//       /// \remark See O-RAN.WG3.E2SM-RC-R003-v3.00 Section 8.4.3.6
-// struct rrm_policy_member {
-//   plmn_identity plmn_id = plmn_identity::test_value();
-//   /// Single Network Slice Selection Assistance Information (S-NSSAI).
-//   s_nssai_t s_nssai;
-
-//   bool operator==(const rrm_policy_member& other) const
-//   {
-//     return plmn_id == other.plmn_id and s_nssai == other.s_nssai;
-//   }
-// };
-
-
-
-//       struct slice_rrm_policy_config {
-//   /// Maximum RAN scheduling policy.
-//   constexpr static unsigned max_priority = 255;
-
-//   /// RRM Policy identifier.
-//   rrm_policy_member rrc_member;
-//   /// Sets the minimum number of PRBs to be allocated to this group.
-//   unsigned min_prb = 0;
-//   /// Sets the maximum number of PRBs to be allocated to this group.
-//   unsigned max_prb = MAX_NOF_PRBS;
-//   /// RAN slice scheduling priority. Values: {0, ..., 255}.
-//   unsigned priority = 0;
-//   /// Policy scheduler configuration for the slice.
-//   policy_scheduler_expert_config policy_sched_cfg = time_qos_scheduler_expert_config{};
-// };
-
-  // const du_cell_index_t                        cell_index;
-  // const du_cell_group_index_t                  cell_group_index;
-  // const pci_t                                  pci;
-  // const subcarrier_spacing                     scs_common;
-  // const unsigned                               nof_dl_prbs;
-  // const unsigned                               nof_ul_prbs;
-  // const unsigned                               nof_slots_per_frame;
-
-
-
-
-
-
-
-// std::cout << "Slice ID: " << static_cast<std::size_t>(id) << std::endl;
-
-
-//       struct ran_slice_sched_context {
-//     ran_slice_instance                inst;
-//     std::unique_ptr<scheduler_policy> policy;
-
-//     ran_slice_sched_context(ran_slice_id_t                    id,
-//                             const cell_configuration&         cell_cfg,
-//                             const slice_rrm_policy_config&    cfg,
-//                             std::unique_ptr<scheduler_policy> policy_) :
-//       inst(id, cell_cfg, cfg), policy(std::move(policy_))
-//     {
-//     }
-
-//     /// Determines the slice candidate priority.
-//     priority_type get_prio(bool is_dl, slot_point pdcch_slot, slot_point pxsch_slot, bool slice_resched) const;
-//   };
-
-
-
-
-
-
-
-
-
-
 
     const bool pdsch_enabled =
         cell_cfg.expert_cfg.ue.enable_csi_rs_pdsch_multiplexing or res_grid[0].result.dl.csi_rs.empty();
