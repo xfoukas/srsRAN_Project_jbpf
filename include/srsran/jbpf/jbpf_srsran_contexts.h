@@ -263,6 +263,7 @@ struct jbpf_ran_generic_ctx {
     uint64_t srs_meta_data1; /* Used for the program to store metadata */
     uint64_t srs_meta_data2; /* Used for the program to store metadata */
     uint64_t srs_meta_data3; /* Used for the program to store metadata */
+    uint64_t srs_meta_data4; /* Used for the program to store metadata */
 };
   
 
