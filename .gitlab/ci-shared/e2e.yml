@@ -3,15 +3,21 @@ variables:
     description: Retina Testbed Description
     options:
       - "zmq"
-      - "zmq_uesim"
       - "zmq_deb"
-      - "zmq_srsue"
       - "zmq_cudu"
+      - "zmq_cu2du"
+      - "zmq_srsue"
+      - "zmq_ric"
+      - "zmq_ntn"
+      - "zmq_uesim"
+      - "s72_uesim"
       - "rf_b200"
-      - "rf_hp"
       - "android_b200"
       - "android_x300"
+      - "android_callbox"
       - "viavi"
+      - "test_mode"
+      - "test_mode_acc100"
       - "none"
     value: "zmq"
   E2E_FILE_OR_DIR:
@@ -37,6 +43,12 @@ variables:
       - warning
       - error
     value: "info"
+  CLUSTER:
+    description: Kubernetes cluster to use
+    options:
+      - "retina-e2e-amd64"
+      - "new-retina-e2e-amd64"
+    value: "retina-e2e-amd64"
 
 .load retina variables:
   stage: ci
@@ -51,10 +63,16 @@ variables:
 
 .prepare_test:
   variables: &setup_kube_variables
-    KUBECONFIG_VAR_NAME: "RETINA_NAMESPACE_KUBECONFIG"
-    KUBECONFIG_VAR_NAME_EXTRA: "RETINA_NAMESPACE_KUBECONFIG_EXTRA"
     GIT_LFS_SKIP_SMUDGE: 1
   before_script: &setup_kube_config
+    - |
+      if [ "$CLUSTER" = "new-retina-e2e-amd64" ]; then
+        export KUBECONFIG_VAR_NAME="RETINA_NAMESPACE_KUBECONFIG_LAB_BCN"
+        export KUBECONFIG_VAR_NAME_EXTRA=""
+      else
+        export KUBECONFIG_VAR_NAME="RETINA_NAMESPACE_KUBECONFIG"
+        export KUBECONFIG_VAR_NAME_EXTRA="RETINA_NAMESPACE_KUBECONFIG_EXTRA"
+      fi
     - |
       export FORCE_COLOR=1
       eval K_PATH="\$$KUBECONFIG_VAR_NAME"
@@ -82,7 +100,7 @@ variables:
     <<: *setup_kube_variables
     GROUP: zmq
   tags:
-    - retina-e2e-amd64
+    - ${CLUSTER}
   artifacts:
     paths:
       - ${SRSRANDIR}/tests/e2e/log
@@ -94,6 +112,7 @@ variables:
     - *setup_kube_config
     - |
       # Print E2E parameters
+      echo "CLUSTER=${CLUSTER}"
       echo "GROUP=${GROUP}"
       echo "TESTBED=${TESTBED}"
       echo "E2E_FILE_OR_DIR=${E2E_FILE_OR_DIR}"
@@ -110,7 +129,7 @@ variables:
       done < <(git lfs ls-files | sed -r 's/^.{13}//')
       echo "srsGNB sources+build size is" $(du -hs .)
     # Remove any existing retina resource for this group
-    - retina-delete-orchestration-network --user-name ci_${GROUP}
+    - retina release --username ci_${GROUP}
     # Add extra config env variables to the .env file
     - |
       echo "" >> .gitlab/ci/e2e/.env
@@ -134,7 +153,7 @@ variables:
   after_script:
     # Remove any existing retina resource for this group
     - *setup_kube_config
-    - retina-delete-orchestration-network --user-name ci_${GROUP}
+    - retina release --username ci_${GROUP}
     # Push test metrics
     - |
       find . -iname "test_metrics.csv" -exec sh -c \

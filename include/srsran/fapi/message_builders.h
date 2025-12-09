@@ -256,11 +256,23 @@ public:
     return *this;
   }
 
-  /// Sets the transmission power info parameters for the fields of the DL DCI PDU.
+  /// Sets the profile NR Tx Power info parameters for the fields of the DL DCI PDU.
   /// \note These parameters are specified in SCF-222 v4.0 section 3.4.2.1, in table DL DCI PDU.
-  dl_dci_pdu_builder& set_tx_power_info_parameter(int power_control_offset_ss_dB)
+  dl_dci_pdu_builder& set_profile_nr_tx_power_info_parameters(int power_control_offset_ss_dB)
   {
-    pdu.power_control_offset_ss_profile_nr = power_control_offset_ss_dB;
+    auto& power                   = pdu.power_config.emplace<dl_dci_pdu::power_profile_nr>();
+    power.power_control_offset_ss = power_control_offset_ss_dB;
+
+    return *this;
+  }
+
+  /// Sets the profile SSS Tx Power info parameters for the fields of the DL DCI PDU.
+  /// \note These parameters are specified in SCF-222 v4.0 section 3.4.2.1, in table PDCCH PDU maintenance PDU.
+  dl_dci_pdu_builder& set_profile_sss_tx_power_info_parameters(float dmrs_offset_db, float data_offset_db)
+  {
+    auto& power                = pdu.power_config.emplace<dl_dci_pdu::power_profile_sss>();
+    power.dmrs_power_offset_db = dmrs_offset_db;
+    power.data_power_offset_db = data_offset_db;
 
     return *this;
   }
@@ -482,7 +494,7 @@ public:
                                             dmrs_config_type   dmrs_type,
                                             uint16_t           pdsch_dmrs_scrambling_id,
                                             uint16_t           pdsch_dmrs_scrambling_id_complement,
-                                            low_papr_dmrs_type low_parp_dmrs,
+                                            low_papr_dmrs_type low_papr_dmrs,
                                             uint8_t            nscid,
                                             uint8_t            num_dmrs_cdm_groups_no_data,
                                             uint16_t           dmrs_ports)
@@ -491,7 +503,7 @@ public:
     pdu.dmrs_type        = (dmrs_type == dmrs_config_type::type1) ? dmrs_cfg_type::type_1 : dmrs_cfg_type::type_2;
     pdu.pdsch_dmrs_scrambling_id       = pdsch_dmrs_scrambling_id;
     pdu.pdsch_dmrs_scrambling_id_compl = pdsch_dmrs_scrambling_id_complement;
-    pdu.low_papr_dmrs                  = low_parp_dmrs;
+    pdu.low_papr_dmrs                  = low_papr_dmrs;
     pdu.nscid                          = nscid;
     pdu.num_dmrs_cdm_grps_no_data      = num_dmrs_cdm_groups_no_data;
     pdu.dmrs_ports                     = dmrs_ports;
@@ -865,6 +877,14 @@ public:
     pdu.comb_offset = comb_offset;
 
     return *this;
+  }
+
+  /// Returns a transmission precoding and beamforming PDU builder of this PRS PDU.
+  tx_precoding_and_beamforming_pdu_builder get_tx_precoding_and_beamforming_pdu_builder()
+  {
+    tx_precoding_and_beamforming_pdu_builder builder(pdu.precoding_and_beamforming);
+
+    return builder;
   }
 };
 

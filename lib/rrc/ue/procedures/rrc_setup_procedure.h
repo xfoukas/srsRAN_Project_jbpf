@@ -26,10 +26,12 @@
 #include "../rrc_ue_logger.h"
 #include "rrc_ue_event_manager.h"
 #include "srsran/asn1/rrc_nr/ul_dcch_msg_ies.h"
+#include "srsran/ran/plmn_identity.h"
 #include "srsran/rrc/rrc_du.h"
 #include "srsran/rrc/rrc_ue.h"
 #include "srsran/support/async/async_task.h"
 #include "srsran/support/async/eager_async_task.h"
+#include <chrono>
 
 namespace srsran {
 namespace srs_cu_cp {
@@ -73,6 +75,7 @@ public:
                       const byte_buffer&              du_to_cu_container_,
                       rrc_ue_setup_proc_notifier&     rrc_ue_notifier_,
                       rrc_ue_control_message_handler& srb_notifier_,
+                      rrc_ue_context_update_notifier& cu_cp_notifier_,
                       rrc_ue_event_notifier&          metrics_notifier_,
                       rrc_ue_ngap_notifier&           ngap_notifier_,
                       rrc_ue_event_manager&           event_mng_,
@@ -91,21 +94,26 @@ private:
   void send_rrc_setup();
 
   /// \remark Forward the Initial UE Message to the NGAP
-  void send_initial_ue_msg(const asn1::rrc_nr::rrc_setup_complete_s& rrc_setup_complete_msg);
+  void send_initial_ue_msg();
 
   rrc_ue_context_t&  context;
   const byte_buffer& du_to_cu_container;
 
   rrc_ue_setup_proc_notifier&     rrc_ue;           // handler to the parent RRC UE object
   rrc_ue_control_message_handler& srb_notifier;     // for creation of SRBs
+  rrc_ue_context_update_notifier& cu_cp_notifier;   // notifier to the CU-CP
   rrc_ue_event_notifier&          metrics_notifier; // notifier to the metrics
   rrc_ue_ngap_notifier&           ngap_notifier;    // notifier to the NGAP
   rrc_ue_event_manager&           event_mng;        // event manager for the RRC UE entity
   bool                            is_reestablishment_fallback = false;
   rrc_ue_logger&                  logger;
 
+  std::chrono::milliseconds     procedure_timeout{0};
   rrc_transaction               transaction;
   eager_async_task<rrc_outcome> task;
+
+  asn1::rrc_nr::rrc_setup_complete_s rrc_setup_complete_msg;
+  plmn_identity                      selected_plmn = plmn_identity::test_value();
 };
 
 } // namespace srs_cu_cp

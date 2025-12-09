@@ -94,18 +94,26 @@ void mac_dl_cell_metric_handler::handle_slot_completion(const slot_measurement& 
   const std::chrono::nanoseconds enqueue_time_diff = meas.start_tp - meas.slot_ind_enqueue_tp;
   const std::chrono::nanoseconds time_diff         = stop_tp - meas.start_tp;
 
-  // Get resource usage difference.
-  expected<resource_usage::diff, int> rusg_diff;
-  if (meas.start_rusg.has_value()) {
-    auto stop_rusg = resource_usage::now();
-    if (stop_rusg.has_value()) {
-      rusg_diff = stop_rusg.value() - meas.start_rusg.value();
-    } else {
-      rusg_diff = make_unexpected(stop_rusg.error());
+  // Compute resource usage in a lambda function.
+  auto compute_diff = [&meas]() -> expected<resource_usage::diff, int> {
+    // Get resource usage difference.
+    if (meas.start_rusg.has_value()) {
+      auto stop_rusg = resource_usage::now();
+      if (stop_rusg.has_value()) {
+        return stop_rusg.value() - *meas.start_rusg;
+      }
     }
-  } else {
-    rusg_diff = make_unexpected(meas.start_rusg.error());
+    return make_unexpected(meas.start_rusg.error());
+  };
+
+  // Get resource usage difference.
+  expected<resource_usage::diff, int> rusg_diff = compute_diff();
+
+  std::chrono::nanoseconds consecutive_slot_ind_time_diff{0};
+  if (last_slot_ind_enqueue_tp != metric_clock::time_point{}) {
+    consecutive_slot_ind_time_diff = meas.slot_ind_enqueue_tp - last_slot_ind_enqueue_tp;
   }
+  last_slot_ind_enqueue_tp = meas.slot_ind_enqueue_tp;
 
   // Update metrics.
   data.nof_slots++;
@@ -133,6 +141,7 @@ void mac_dl_cell_metric_handler::handle_slot_completion(const slot_measurement& 
     data.user.save_sample(meas.sl_tx, std::chrono::nanoseconds{rusg_val.user_time});
     data.sys.save_sample(meas.sl_tx, std::chrono::nanoseconds{rusg_val.sys_time});
   }
+  data.slot_distance.save_sample(meas.sl_tx, consecutive_slot_ind_time_diff);
 
   if (notifier->is_report_required(meas.sl_tx)) {
     send_new_report();
@@ -155,6 +164,7 @@ void mac_dl_cell_metric_handler::send_new_report()
     report.dl_tti_req_latency      = data.dl_tti_req.get_report(data.nof_slots);
     report.tx_data_req_latency     = data.tx_data_req.get_report(data.nof_slots);
     report.ul_tti_req_latency      = data.ul_tti_req.get_report(data.nof_slots);
+    report.slot_ind_msg_time_diff  = data.slot_distance.get_report(data.nof_slots);
   }
   report.count_voluntary_context_switches   = data.count_vol_context_switches;
   report.count_involuntary_context_switches = data.count_invol_context_switches;

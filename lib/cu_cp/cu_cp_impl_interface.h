@@ -28,6 +28,7 @@
 #include "srsran/f1ap/cu_cp/f1ap_cu.h"
 #include "srsran/ngap/ngap.h"
 #include "srsran/nrppa/nrppa.h"
+#include "srsran/ran/plmn_identity.h"
 #include "srsran/rrc/rrc_du.h"
 #include "srsran/rrc/rrc_ue.h"
 #include <string>
@@ -71,11 +72,14 @@ public:
   /// \returns Pointer to the NGAP UE notifier.
   virtual ngap_cu_cp_ue_notifier* handle_new_ngap_ue(ue_index_t ue_index) = 0;
 
-  /// \brief Initialize security context by selecting security algorithms and generating K_rrc_enc and K_rrc_int.
+  /// \brief Handle a reeceived handover request.
   /// \param[in] ue_index Index of the UE.
+  /// \param[in] selected_plmn The selected PLMN identity of the UE.
   /// \param[in] sec_ctxt The received security context.
-  /// \return True if the security context was successfully initialized, false otherwise.
-  virtual bool handle_handover_request(ue_index_t ue_index, security::security_context sec_ctxt) = 0;
+  /// \return True if the handover request was successfully handled, false otherwise.
+  virtual bool handle_handover_request(ue_index_t                        ue_index,
+                                       const plmn_identity&              selected_plmn,
+                                       const security::security_context& sec_ctxt) = 0;
 
   /// \brief Handle the reception of a new Initial Context Setup Request.
   /// \param[in] request The received Initial Context Setup Request.
@@ -116,7 +120,7 @@ public:
   virtual async_task<bool> handle_new_handover_command(ue_index_t ue_index, byte_buffer command) = 0;
 
   /// \brief Handles UE index allocation request for N2 handover at target gNB.
-  virtual ue_index_t handle_ue_index_allocation_request(const nr_cell_global_id_t& cgi) = 0;
+  virtual ue_index_t handle_ue_index_allocation_request(const nr_cell_global_id_t& cgi, const plmn_identity& plmn) = 0;
 
   /// \brief Handles a DL UE associated NRPPa transport.
   virtual void handle_dl_ue_associated_nrppa_transport_pdu(ue_index_t ue_index, const byte_buffer& nrppa_pdu) = 0;
@@ -161,9 +165,18 @@ class cu_cp_e1ap_event_handler : public cu_cp_task_scheduler_handler
 public:
   virtual ~cu_cp_e1ap_event_handler() = default;
 
+  /// \brief Handle the reception of an Bearer Context Release Request message.
+  /// \param[in] msg The received Bearer Context Release Request message.
+  virtual void handle_bearer_context_release_request(const cu_cp_bearer_context_release_request& msg) = 0;
+
   /// \brief Handle the reception of an Bearer Context Inactivity Notification message.
   /// \param[in] msg The received Bearer Context Inactivity Notification message.
   virtual void handle_bearer_context_inactivity_notification(const cu_cp_inactivity_notification& msg) = 0;
+
+  /// \brief Handles the reception of an E1 Release Request message.
+  /// \param[in] cu_up_index The index of the CU-UP processor.
+  /// \param[in] ue_list The indices of the UEs connected to the CU-UP.
+  virtual void handle_e1_release_request(cu_up_index_t cu_up_index, const std::vector<ue_index_t>& ue_list) = 0;
 };
 
 /// Interface used to handle DU specific procedures.
@@ -193,6 +206,12 @@ class cu_cp_rrc_ue_interface
 public:
   virtual ~cu_cp_rrc_ue_interface() = default;
 
+  /// \brief Handles a new UE connection with a selected PLMN.
+  /// \param[in] ue_index The index of the UE.
+  /// \param[in] plmn The selected PLMN of the UE.
+  /// \return True if the UE connection is accepted, false otherwise.
+  virtual bool handle_ue_plmn_selected(ue_index_t ue_index, const plmn_identity& plmn) = 0;
+
   /// \brief Handle the reception of an RRC Reestablishment Request by transfering UE Contexts at the RRC.
   /// \param[in] old_pci The old PCI contained in the RRC Reestablishment Request.
   /// \param[in] old_c_rnti The old C-RNTI contained in the RRC Reestablishment Request.
@@ -212,6 +231,11 @@ public:
   /// \brief Handle an successful reestablishment by removing the old UE.
   /// \param[in] ue_index The index of the old UE to remove.
   virtual void handle_rrc_reestablishment_complete(ue_index_t old_ue_index) = 0;
+
+  /// \brief Handle a notification of the reception of the RRC Reconfiguration Complete, and notify the DU with the F1AP
+  /// UE context modification procedure with the RRC Reconfiguration Complete Indicator IE present.
+  /// \param[in] ue_index The index of the UE that received the reconfiguration complete.
+  virtual void handle_rrc_reconf_complete_indicator(ue_index_t ue_index) = 0;
 
   /// \brief Transfer and remove UE contexts for an ongoing Reestablishment.
   /// \param[in] ue_index The new UE index of the UE that sent the Reestablishment Request.
@@ -288,9 +312,9 @@ public:
   /// \param[in] nci The cell id of the serving cell to update.
   /// \param[in] current_meas_config The current meas config of the UE (if applicable).
   virtual std::optional<rrc_meas_cfg>
-  handle_measurement_config_request(ue_index_t                  ue_index,
-                                    nr_cell_identity            nci,
-                                    std::optional<rrc_meas_cfg> current_meas_config = std::nullopt) = 0;
+  handle_measurement_config_request(ue_index_t                         ue_index,
+                                    nr_cell_identity                   nci,
+                                    const std::optional<rrc_meas_cfg>& current_meas_config = std::nullopt) = 0;
 
   /// \brief Handle a measurement report for given UE.
   virtual void handle_measurement_report(const ue_index_t ue_index, const rrc_meas_results& meas_results) = 0;

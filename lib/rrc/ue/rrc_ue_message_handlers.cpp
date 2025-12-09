@@ -33,6 +33,7 @@
 #include "srsran/asn1/rrc_nr/meas_cfg.h"
 #include "srsran/asn1/rrc_nr/ul_ccch_msg.h"
 #include "srsran/ran/rb_id.h"
+#include <chrono>
 
 using namespace srsran;
 using namespace srs_cu_cp;
@@ -76,7 +77,7 @@ void rrc_ue_impl::handle_rrc_setup_request(const asn1::rrc_nr::rrc_setup_request
       static_cast<establishment_cause_t>(request_msg.rrc_setup_request.establishment_cause.value));
 
   // Perform various checks to make sure we can serve the RRC Setup Request.
-  if (not cu_cp_notifier.on_ue_setup_request(context.cell.cgi.plmn_id)) {
+  if (not cu_cp_notifier.on_ue_setup_request()) {
     logger.log_error("Sending Connection Reject. Cause: RRC connections not allowed");
     on_ue_release_required(ngap_cause_radio_network_t::unspecified);
     return;
@@ -113,6 +114,7 @@ void rrc_ue_impl::handle_rrc_setup_request(const asn1::rrc_nr::rrc_setup_request
                                                                           du_to_cu_container,
                                                                           *this,
                                                                           get_rrc_ue_control_message_handler(),
+                                                                          cu_cp_notifier,
                                                                           metrics_notifier,
                                                                           ngap_notifier,
                                                                           *event_mng,
@@ -179,6 +181,7 @@ void rrc_ue_impl::handle_pdu(const srb_id_t srb_id, byte_buffer rrc_pdu)
         logger.log_debug("Received a RRC Reconfiguration Complete during inter CU handover. Notifying NGAP");
         ngap_notifier.on_inter_cu_ho_rrc_recfg_complete_received(context.ue_index, context.cell.cgi, context.cell.tac);
         context.transfer_context.value().is_inter_cu_handover = false;
+        cu_cp_notifier.on_rrc_reconfiguration_complete_indicator();
       } else {
         handle_rrc_transaction_complete(ul_dcch_msg, ul_dcch_msg.msg.c1().rrc_recfg_complete().rrc_transaction_id);
       }
@@ -242,7 +245,7 @@ void rrc_ue_impl::handle_ul_info_transfer(const ul_info_transfer_ies_s& ul_info_
   ul_nas_msg.ue_index                       = context.ue_index;
   ul_nas_msg.nas_pdu                        = ul_info_transfer.ded_nas_msg.copy();
   ul_nas_msg.user_location_info.nr_cgi      = context.cell.cgi;
-  ul_nas_msg.user_location_info.tai.plmn_id = context.cell.cgi.plmn_id;
+  ul_nas_msg.user_location_info.tai.plmn_id = context.plmn_id;
   ul_nas_msg.user_location_info.tai.tac     = context.cell.tac;
 
   ngap_notifier.on_ul_nas_transport_message(ul_nas_msg);
@@ -330,7 +333,7 @@ rrc_ue_security_mode_command_context rrc_ue_impl::get_security_mode_command_cont
 async_task<bool> rrc_ue_impl::handle_security_mode_complete_expected(uint8_t transaction_id)
 {
   return launch_async([this,
-                       timeout_ms = context.cfg.rrc_procedure_timeout_ms,
+                       timeout_ms = context.cfg.rrc_procedure_guard_time_ms,
                        transaction_id,
                        transaction = rrc_transaction{}](coro_context<async_task<bool>>& ctx) mutable {
     CORO_BEGIN(ctx);
@@ -543,7 +546,7 @@ rrc_ue_release_context rrc_ue_impl::get_rrc_ue_release_context(bool             
   // Prepare location info to return.
   rrc_ue_release_context release_context;
   release_context.user_location_info.nr_cgi      = context.cell.cgi;
-  release_context.user_location_info.tai.plmn_id = context.cell.cgi.plmn_id;
+  release_context.user_location_info.tai.plmn_id = context.plmn_id;
   release_context.user_location_info.tai.tac     = context.cell.tac;
 
   if (requires_rrc_message) {
@@ -607,7 +610,7 @@ rrc_ue_release_context rrc_ue_impl::get_rrc_ue_release_context(bool             
   return release_context;
 }
 
-std::optional<rrc_meas_cfg> rrc_ue_impl::generate_meas_config(std::optional<rrc_meas_cfg> current_meas_config)
+std::optional<rrc_meas_cfg> rrc_ue_impl::generate_meas_config(const std::optional<rrc_meas_cfg>& current_meas_config)
 {
   // (Re-)generate measurement config and return result.
   context.meas_cfg = measurement_notifier.on_measurement_config_request(context.cell.cgi.nci, current_meas_config);

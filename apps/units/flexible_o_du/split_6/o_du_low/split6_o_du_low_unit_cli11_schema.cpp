@@ -21,6 +21,7 @@
  */
 
 #include "split6_o_du_low_unit_cli11_schema.h"
+#include "apps/helpers/logger/logger_appconfig_cli11_utils.h"
 #include "apps/units/flexible_o_du/o_du_low/du_low_config_cli11_schema.h"
 #include "apps/units/flexible_o_du/split_7_2/helpers/ru_ofh_config_cli11_schema.h"
 #include "apps/units/flexible_o_du/split_8/helpers/ru_sdr_config_cli11_schema.h"
@@ -39,6 +40,17 @@ void srsran::configure_cli11_with_split6_o_du_low_unit_config_schema(CLI::App& a
   configure_cli11_with_du_low_config_schema(app, config.du_low_cfg);
   configure_cli11_with_ru_ofh_config_schema(app, ofh_cfg);
   configure_cli11_with_ru_sdr_config_schema(app, sdr_cfg);
+
+  add_option(app,
+             "--start_time_jitter",
+             config.start_time_jitter_ms,
+             "Start time jitter in milliseconds. A value of 0 disables the start time calculation and the session "
+             "starts it as soon as possible")
+      ->capture_default_str()
+      ->check(CLI::Range(0, 600));
+
+  CLI::App* logger_subcmd = add_subcommand(app, "log", "Logger configuration")->configurable();
+  app_helpers::add_log_option(*logger_subcmd, config.fapi_level, "--fapi_level", "FAPI log level");
 
   CLI::App* metrics_subcmd = add_subcommand(app, "metrics", "Metrics configuration")->configurable();
   auto*     periodicity_subcmd =
@@ -92,10 +104,8 @@ void srsran::autoderive_split6_o_du_low_parameters_after_parsing(CLI::App& app, 
   // Set the parsed RU.
   manage_ru(app, config);
 
-  // Auto derive DU low parameters.
-  constexpr bool is_zmq_rf_driver = false;
   // NOTE: TDD is hardcoded because it does not matter as max proc delay parameter is mandatory in this application
   // unit.
   autoderive_du_low_parameters_after_parsing(
-      app, config.du_low_cfg, duplex_mode::TDD, is_zmq_rf_driver, split6_du_low::NOF_CELLS_SUPPORTED);
+      app, config.du_low_cfg, duplex_mode::TDD, split6_du_low::NOF_CELLS_SUPPORTED);
 }

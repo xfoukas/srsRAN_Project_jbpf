@@ -61,8 +61,11 @@ struct ru_ofh_scaling_config {
   ///
   /// \f$ $$P_{BW2}\text{ [dBFS]}=P_{BW1}\text{ [dBFS]} - 10\log_{10}{\bigg(\frac{BW2}{BW1}\bigg)}\f$
   ///
+  /// If no value is specified, then the bandwidth is normalized based on the number of subcarriers, i.e.,
+  /// the back-off is set to \f$10\log_{10}(12 N_{RB})}\f$.
+  ///
   /// \warning Check the RU documentation before settings this parameter, as incorrect values may damage the RU.
-  float subcarrier_rms_backoff_dB = 30.0f;
+  std::optional<float> subcarrier_rms_backoff_dB;
 };
 
 /// Configuration parameters related to the scaling of the IQ symbols in the DL OFH resource grid (legacy version).
@@ -107,6 +110,8 @@ struct ru_ofh_unit_base_cell_config {
   bool ignore_ecpri_payload_size_field = false;
   /// If set to true, the sequence id encoded in a eCPRI packet is ignored.
   bool ignore_ecpri_seq_id_field = false;
+  /// If set to true, logs late events as warnings, otherwise as info.
+  bool enable_log_warnings_for_lates = true;
   /// Warn of unreceived Radio Unit frames status.
   ofh::warn_unreceived_ru_frames log_unreceived_ru_frames = ofh::warn_unreceived_ru_frames::after_traffic_detection;
   /// Uplink compression method.
@@ -170,24 +175,10 @@ struct ru_ofh_unit_cpu_affinities_cell_config {
   os_sched_affinity_config ru_cpu_cfg = {sched_affinity_mask_types::ru, {}, sched_affinity_mask_policy::mask};
 };
 
-/// Expert threads configuration.
-struct ru_ofh_unit_expert_threads_config {
-  ru_ofh_unit_expert_threads_config()
-  {
-    unsigned nof_threads     = cpu_architecture_info::get().get_host_nof_available_cpus();
-    is_downlink_parallelized = nof_threads > 3;
-  }
-
-  /// Open Fronthaul thread configuration.
-  bool is_downlink_parallelized = true;
-};
-
 /// Expert configuration.
 struct ru_ofh_unit_expert_execution_config {
   /// RU timing thread.
   os_sched_affinity_bitmask ru_timing_cpu;
-  /// Expert thread configuration of the Open Fronthaul Radio Unit.
-  ru_ofh_unit_expert_threads_config threads;
   /// CPU affinities per RU txrx thread.
   std::vector<os_sched_affinity_bitmask> txrx_affinities;
   /// CPU affinities per cell.

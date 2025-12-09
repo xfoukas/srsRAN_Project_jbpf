@@ -27,12 +27,12 @@
 #include "lib/cu_cp/cu_up_processor/cu_up_processor_impl_interface.h"
 #include "lib/cu_cp/du_processor/du_processor.h"
 #include "lib/cu_cp/ue_manager/ue_manager_impl.h"
+#include "srsran/asn1/f1ap/f1ap.h"
 #include "srsran/cu_cp/cu_cp_types.h"
 #include "srsran/support/async/async_task.h"
 #include "srsran/support/async/fifo_async_task_scheduler.h"
 #include <cstdint>
 #include <list>
-#include <memory>
 #include <variant>
 
 namespace srsran {
@@ -47,6 +47,9 @@ byte_buffer generate_rrc_setup_complete();
 // Generate RRC Reconfiguration Complete PDU.
 byte_buffer generate_rrc_reconfiguration_complete_pdu(unsigned transaction_id, uint8_t count);
 
+// Extract RRC timers from F1 Setup Request.
+rrc_timers_t get_timers(const asn1::f1ap::f1_setup_request_s& f1_setup_req);
+
 struct dummy_du_processor_cu_cp_notifier : public du_processor_cu_cp_notifier {
 public:
   explicit dummy_du_processor_cu_cp_notifier(ue_manager* ue_mng_ = nullptr) : ue_mng(ue_mng_) {}
@@ -55,6 +58,13 @@ public:
   {
     cu_cp_handler      = cu_cp_handler_;
     ue_removal_handler = ue_removal_handler_;
+  }
+
+  bool on_cell_config_update_request(nr_cell_identity nci, const serving_cell_meas_config& serv_cell_cfg) override
+  {
+    logger.info("Received a cell config update request for nci={}", nci);
+
+    return true;
   }
 
   void on_rrc_ue_created(ue_index_t ue_index, rrc_ue_interface& rrc_ue) override
@@ -193,7 +203,7 @@ private:
 class dummy_du_connection_notifier : public du_connection_notifier
 {
 public:
-  bool on_du_setup_request(du_index_t du_index, const du_setup_request& req) override { return true; }
+  bool on_du_setup_request(du_index_t du_index, const std::set<plmn_identity>& plmn_ids) override { return true; }
 };
 
 struct dummy_ngap_ue_context_removal_handler : public ngap_ue_context_removal_handler {
@@ -454,8 +464,8 @@ public:
   }
 
   async_task<f1ap_ue_context_setup_response>
-  handle_ue_context_setup_request(const f1ap_ue_context_setup_request&   request,
-                                  std::optional<rrc_ue_transfer_context> rrc_context) override
+  handle_ue_context_setup_request(const f1ap_ue_context_setup_request&          request,
+                                  const std::optional<rrc_ue_transfer_context>& rrc_context) override
   {
     logger.info("Received a new UE context setup request");
 
@@ -621,6 +631,8 @@ public:
       CORO_RETURN();
     });
   }
+
+  void handle_rrc_reconf_complete_indicator(ue_index_t ue_index) override {}
 
   cu_cp_ue_context_release_request last_cu_cp_ue_context_release_request;
 
