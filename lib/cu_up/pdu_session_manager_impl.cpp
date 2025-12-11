@@ -31,6 +31,13 @@
 #include "srsran/support/srsran_assert.h"
 #include <utility>
 
+#ifdef JBPF_ENABLED
+#include "jbpf_srsran_hooks.h"
+DEFINE_JBPF_HOOK(cuup_pdu_session_bearer_setup);
+DEFINE_JBPF_HOOK(cuup_pdu_session_bearer_modify);
+DEFINE_JBPF_HOOK(cuup_pdu_session_bearer_remove);
+#endif
+
 using namespace srsran;
 using namespace srs_cu_up;
 
@@ -205,6 +212,22 @@ drb_setup_result pdu_session_manager_impl::handle_drb_to_setup_item(pdu_session&
 {
   auto&    cpu_desc  = cpu_architecture_info::get();
   uint32_t nof_cores = cpu_desc.get_host_nof_available_cpus();
+
+#ifdef JBPF_ENABLED 
+  {
+    struct jbpf_pdu_session_ctx_info session_ctx_info = {0, (uint64_t)ue_index, 
+                              static_cast<uint16_t>(new_session.pdu_session_id), static_cast<uint16_t>(drb_to_setup.drb_id), 
+                              new_session.snssai.sst.value(), 
+                              new_session.snssai.sd.is_set() ? new_session.snssai.sd.value() : 0}; 
+    hook_cuup_pdu_session_bearer_setup(&session_ctx_info);
+    printf("pdu_session_bearer_setup: ue_index=%ld pdu_session_id=%d drb_id=%d snssai=[sst=%d sd=%d]\n",
+         session_ctx_info.cu_up_ue_index,
+         session_ctx_info.pdu_session_id,
+         session_ctx_info.drb_id,
+         session_ctx_info.nssai.sd,
+         session_ctx_info.nssai.sst);
+  }
+#endif
 
   // prepare DRB creation result
   drb_setup_result drb_result = {};
@@ -600,6 +623,22 @@ pdu_session_manager_impl::modify_pdu_session(const e1ap_pdu_session_res_to_modif
                   session.pdu_session_id,
                   drb_iter->second->drb_id);
 
+#ifdef JBPF_ENABLED 
+    {
+      struct jbpf_pdu_session_ctx_info session_ctx_info = {0, (uint64_t)ue_index, 
+                                static_cast<uint16_t>(session.pdu_session_id), static_cast<uint16_t>(drb_to_rem), 
+                                pdu_session->snssai.sst.value(), 
+                                pdu_session->snssai.sd.is_set() ? pdu_session->snssai.sd.value() : 0}; 
+      hook_cuup_pdu_session_bearer_modify(&session_ctx_info);
+      printf("pdu_session_bearer_modify: ue_index=%ld pdu_session_id=%d drb_id=%d snssai=[sst=%d sd=%d]\n",
+          session_ctx_info.cu_up_ue_index,
+          session_ctx_info.pdu_session_id,
+          session_ctx_info.drb_id,
+          session_ctx_info.nssai.sd,
+          session_ctx_info.nssai.sst);
+    }
+#endif
+
     // remove DRB (this will automatically disconnect from F1-U gateway)
     if (not f1u_teid_allocator.release_teid(drb_iter->second->f1u_ul_teid)) {
       logger.log_error("{} drb_id={} could not free ul_teid={}", session.pdu_session_id, drb_to_rem);
@@ -619,6 +658,25 @@ void pdu_session_manager_impl::remove_pdu_session(pdu_session_id_t pdu_session_i
     logger.log_error("PDU session {} not found", pdu_session_id);
     return;
   }
+
+#ifdef JBPF_ENABLED 
+  {
+    auto& pdu_session = pdu_sessions.at(pdu_session_id);
+    for (const auto& drb : pdu_session->drbs) {
+      struct jbpf_pdu_session_ctx_info session_ctx_info = {0, (uint64_t)ue_index, 
+                                static_cast<uint16_t>(pdu_session_id), static_cast<uint16_t>(drb.second->drb_id), 
+                                pdu_session->snssai.sst.value(), 
+                                pdu_session->snssai.sd.is_set() ? pdu_session->snssai.sd.value() : 0}; 
+      hook_cuup_pdu_session_bearer_remove(&session_ctx_info);
+      printf("pdu_session_bearer_remove: ue_index=%ld pdu_session_id=%d drb_id=%d snssai=[sst=%d sd=%d]\n",
+          session_ctx_info.cu_up_ue_index,
+          session_ctx_info.pdu_session_id,
+          session_ctx_info.drb_id,
+          session_ctx_info.nssai.sd,
+          session_ctx_info.nssai.sst);
+    }
+  }
+#endif
 
   disconnect_pdu_session(pdu_session_id);
 

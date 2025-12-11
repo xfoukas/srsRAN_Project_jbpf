@@ -114,6 +114,17 @@ struct jbpf_slice_allocation {
     } slices[JBPF_MAX_SLICES];
 };
 
+/* PDU Session context info */
+struct jbpf_pdu_session_ctx_info {
+    uint16_t ctx_id;   /* Context id (could be implementation specific) */
+    uint64_t cu_up_ue_index; 
+    uint16_t pdu_session_id; 
+    uint16_t drb_id; 
+    struct {
+        uint8_t sst;
+        uint32_t sd;
+    } nssai;
+};
 
 /* E1 context info */
 struct jbpf_cucp_e1_ctx_info {

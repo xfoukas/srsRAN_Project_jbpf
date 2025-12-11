@@ -538,7 +538,43 @@ DECLARE_JBPF_HOOK(pdcp_ul_reestablish,
 )
 
 
- // E1AP
+// PDU Sessions
+
+DECLARE_JBPF_HOOK(cuup_pdu_session_bearer_setup,
+    struct jbpf_ran_generic_ctx ctx,
+    ctx,
+    HOOK_PROTO(
+        struct jbpf_pdu_session_ctx_info *info),
+    HOOK_ASSIGN(
+        ctx.data = (uint64_t)info;
+        ctx.data_end = (uint64_t) ((uint8_t*)info + sizeof(struct jbpf_pdu_session_ctx_info));
+    )
+)
+
+DECLARE_JBPF_HOOK(cuup_pdu_session_bearer_modify,
+    struct jbpf_ran_generic_ctx ctx,
+    ctx,
+    HOOK_PROTO(
+        struct jbpf_pdu_session_ctx_info *info),
+    HOOK_ASSIGN(
+        ctx.data = (uint64_t)info;
+        ctx.data_end = (uint64_t) ((uint8_t*)info + sizeof(struct jbpf_pdu_session_ctx_info));
+    )
+)
+
+DECLARE_JBPF_HOOK(cuup_pdu_session_bearer_remove,
+    struct jbpf_ran_generic_ctx ctx,
+    ctx,
+    HOOK_PROTO(
+        struct jbpf_pdu_session_ctx_info *info),
+    HOOK_ASSIGN(
+        ctx.data = (uint64_t)info;
+        ctx.data_end = (uint64_t) ((uint8_t*)info + sizeof(struct jbpf_pdu_session_ctx_info));
+    )
+)
+
+
+// E1AP
 
 DECLARE_JBPF_HOOK(e1_cucp_bearer_context_setup,
     struct jbpf_ran_generic_ctx ctx,
