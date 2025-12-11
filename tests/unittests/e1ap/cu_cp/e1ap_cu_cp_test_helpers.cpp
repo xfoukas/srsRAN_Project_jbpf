@@ -47,6 +47,7 @@ e1ap_cu_cp_test::e1ap_cu_cp_test() :
   tmp.json_log_enabled = true;
 
   e1ap = create_e1ap(tmp,
+                     cu_up_index_t::min,
                      e1ap_pdu_notifier,
                      cu_up_processor_notifier,
                      cu_cp_notifier,
@@ -89,8 +90,9 @@ void e1ap_cu_cp_test::run_bearer_context_setup(ue_index_t ue_index, gnb_cu_up_ue
 
 e1ap_cu_cp_test::test_ue& e1ap_cu_cp_test::create_ue()
 {
-  ue_index_t ue_index = ue_mng.add_ue(du_index_t::min, plmn_identity::test_value());
-  auto       request  = generate_bearer_context_setup_request(ue_index);
+  ue_index_t ue_index = ue_mng.add_ue(du_index_t::min);
+  ue_mng.set_plmn(ue_index, plmn_identity::test_value());
+  auto request = generate_bearer_context_setup_request(ue_index);
 
   run_bearer_context_setup(request.ue_index,
                            int_to_gnb_cu_up_ue_e1ap_id(test_rgen::uniform_int<uint64_t>(

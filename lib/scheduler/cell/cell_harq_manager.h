@@ -187,6 +187,7 @@ struct cell_harq_repository {
   std::unique_ptr<harq_alloc_history>                            alloc_hist;
 
   void               slot_indication(slot_point sl_tx);
+  void               stop();
   void               handle_harq_ack_timeout(harq_type& h, slot_point sl_tx);
   harq_type*         alloc_harq(du_ue_index_t ue_idx, slot_point sl_tx, slot_point sl_ack, unsigned max_nof_harq_retxs);
   void               dealloc_harq(harq_type& h);
@@ -445,6 +446,9 @@ public:
   /// Update slot, and checks if there are HARQ processes that have reached maxReTx with no ACK
   void slot_indication(slot_point sl_tx);
 
+  /// Called on cell deactivation.
+  void stop();
+
   /// Create new UE HARQ entity.
   /// \param rnti RNTI of the UE
   /// \param nof_dl_harq_procs Number of DL HARQ processes that the UE can support. This value is derived based on
@@ -567,8 +571,9 @@ public:
   std::optional<ul_harq_process_handle>       find_pending_ul_retx();
   std::optional<const ul_harq_process_handle> find_pending_ul_retx() const;
 
-  std::optional<dl_harq_process_handle> find_dl_harq_waiting_ack();
-  std::optional<ul_harq_process_handle> find_ul_harq_waiting_ack();
+  std::optional<dl_harq_process_handle>       find_dl_harq_waiting_ack();
+  std::optional<const dl_harq_process_handle> find_dl_harq_waiting_ack() const;
+  std::optional<ul_harq_process_handle>       find_ul_harq_waiting_ack();
 
   /// Fetch a DL HARQ process expecting ACK info based on HARQ-ACK UCI slot and HARQ bit index.
   /// \param[in] uci_slot Slot when the UCI is to be received.

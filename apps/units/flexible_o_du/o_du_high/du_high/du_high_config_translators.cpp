@@ -376,6 +376,11 @@ std::vector<srs_du::du_cell_config> srsran::generate_du_cell_config(const du_hig
     out_cell.cell_sel_info.q_rx_lev_min = base_cell.q_rx_lev_min;
     out_cell.cell_sel_info.q_qual_min   = base_cell.q_qual_min;
 
+    // Cell access Related Info parameters.
+    for (const auto& plmn : base_cell.additional_plmns) {
+      out_cell.cell_acc_rel_info.additional_plmns.push_back(plmn_identity::parse(plmn).value());
+    }
+
     // SSB config.
     out_cell.ssb_cfg.ssb_period      = static_cast<ssb_periodicity>(base_cell.ssb_cfg.ssb_period_msec);
     out_cell.ssb_cfg.ssb_block_power = base_cell.ssb_cfg.ssb_block_power;
@@ -1071,6 +1076,7 @@ static scheduler_expert_config generate_scheduler_expert_config(const du_high_un
   }
   out_cfg.ue.ul_mcs = {pusch.min_ue_mcs, pusch.max_ue_mcs};
   out_cfg.ue.pusch_rv_sequence.assign(pusch.rv_sequence.begin(), pusch.rv_sequence.end());
+  out_cfg.ue.enable_csi_rs_pdsch_multiplexing = pdsch.enable_csi_rs_pdsch_multiplexing;
   out_cfg.ue.initial_ul_dc_offset             = pusch.dc_offset;
   out_cfg.ue.max_puschs_per_slot              = pusch.max_puschs_per_slot;
   out_cfg.ue.pre_policy_rr_ul_ue_group_size   = pusch.nof_preselected_newtx_ues;
@@ -1099,6 +1105,7 @@ static scheduler_expert_config generate_scheduler_expert_config(const du_high_un
   // PUCCH and scheduler expert parameters.
   out_cfg.ue.max_ul_grants_per_slot                   = cell.ul_common_cfg.max_ul_grants_per_slot;
   out_cfg.ue.max_pucchs_per_slot                      = cell.ul_common_cfg.max_pucchs_per_slot;
+  out_cfg.ue.min_pucch_pusch_prb_distance             = cell.ul_common_cfg.min_pucch_pusch_prb_distance;
   out_cfg.ue.min_k1                                   = cell.pucch_cfg.min_k1;
   const du_high_unit_pucch_config& pucch              = cell.pucch_cfg;
   out_cfg.ue.ul_power_ctrl.enable_pucch_cl_pw_control = pucch.enable_closed_loop_pw_control;
@@ -1187,11 +1194,6 @@ void srsran::fill_du_high_worker_manager_config(worker_manager_config&     confi
   du_hi_cfg.nof_cells                = unit_cfg.cells_cfg.size();
   du_hi_cfg.executor_tracing_enable  = unit_cfg.expert_execution_cfg.executor_tracing_enable;
 
-  // Set the number of cells of the affinities vector.
-  config.config_affinities.resize(du_hi_cfg.nof_cells);
-  for (unsigned i = 0; i != du_hi_cfg.nof_cells; ++i) {
-    config.config_affinities[i].push_back(unit_cfg.expert_execution_cfg.cell_affinities[i].l2_cell_cpu_cfg);
-  }
   if (unit_cfg.metrics.layers_cfg.enable_executor_log_metrics) {
     du_hi_cfg.metrics_period = std::chrono::milliseconds{unit_cfg.metrics.du_report_period};
   }

@@ -23,14 +23,12 @@
 /// \file
 /// \brief Unit test for scheduler using different TDD patterns.
 
-#include "test_utils/config_generators.h"
 #include "test_utils/indication_generators.h"
 #include "test_utils/scheduler_test_simulator.h"
 #include "tests/test_doubles/scheduler/cell_config_builder_profiles.h"
 #include "tests/test_doubles/scheduler/scheduler_config_helper.h"
 #include "srsran/ran/pucch/pucch_info.h"
 #include "srsran/ran/tdd/tdd_ul_dl_config_formatters.h"
-#include "srsran/support/test_utils.h"
 #include <gtest/gtest.h>
 #include <ostream>
 
@@ -45,7 +43,9 @@ struct tdd_test_params {
 class base_scheduler_tdd_tester : public scheduler_test_simulator
 {
 protected:
-  base_scheduler_tdd_tester(const tdd_test_params& testparams) : scheduler_test_simulator(4, testparams.tdd_cfg.ref_scs)
+  base_scheduler_tdd_tester(const tdd_test_params& testparams) :
+    scheduler_test_simulator(
+        scheduler_test_sim_config{.max_scs = testparams.tdd_cfg.ref_scs, .auto_uci = true, .auto_crc = true})
   {
     params                      = cell_config_builder_profiles::tdd(testparams.tdd_cfg.ref_scs);
     params.csi_rs_enabled       = testparams.csi_rs_enabled;
@@ -72,7 +72,7 @@ protected:
     srsran_assert(res_f2 != pucch_cfg.pucch_res_list.end(), "PUCCH resource F2 not found");
     pucch_cfg.format_max_payload[pucch_format_to_uint(pucch_format::FORMAT_2)] =
         get_pucch_format2_max_payload(std::get<pucch_format_2_3_cfg>(res_f2->format_params).nof_prbs,
-                                      std::get<pucch_format_2_3_cfg>(res_f2->format_params).nof_symbols,
+                                      res_f2->nof_symbols,
                                       to_max_code_rate_float(pucch_cfg.format_2_common_param.value().max_c_rate));
 
     this->add_ue(ue_cfg);
@@ -104,7 +104,7 @@ TEST_P(scheduler_dl_tdd_tester, all_dl_slots_are_scheduled)
   dl_buffer_state_indication_message dl_buf_st{ue_idx, ue_drb_lcid, 10000000};
   this->push_dl_buffer_state(dl_buf_st);
 
-  const unsigned MAX_COUNT = 1000;
+  static constexpr unsigned MAX_COUNT = 1000;
   for (unsigned count = 0; count != MAX_COUNT; ++count) {
     this->run_slot();
 
@@ -113,16 +113,6 @@ TEST_P(scheduler_dl_tdd_tester, all_dl_slots_are_scheduled)
       // Ensure UE PDSCH allocations are made.
       ASSERT_FALSE(this->last_sched_res_list[to_du_cell_index(0)]->dl.ue_grants.empty()) << fmt::format(
           "The UE configuration is leading to slot {} not having DL UE grant scheduled", this->last_result_slot());
-    }
-
-    for (const pucch_info& pucch : this->last_sched_res_list[to_du_cell_index(0)]->ul.pucchs) {
-      if (pucch.format() == pucch_format::FORMAT_1 and pucch.uci_bits.sr_bits != sr_nof_bits::no_sr) {
-        // Skip SRs for this test.
-        continue;
-      }
-
-      uci_indication uci_ind = test_helper::create_uci_indication(this->last_result_slot(), ue_idx, pucch);
-      this->sched->handle_uci_indication(uci_ind);
     }
   }
 }
@@ -141,26 +131,13 @@ public:
     unsigned tdd_period = nof_slots_per_tdd_period(*cell_cfg_list[0].tdd_cfg_common);
     for (unsigned i = 0; i != 2 * tdd_period; ++i) {
       run_slot();
-
-      for (const ul_sched_info& pusch : this->last_sched_res_list[to_du_cell_index(0)]->ul.puschs) {
-        ul_crc_indication crc{};
-        crc.cell_index = to_du_cell_index(0);
-        crc.sl_rx      = this->last_result_slot();
-        crc.crcs.resize(1);
-        crc.crcs[0].ue_index       = ue_idx;
-        crc.crcs[0].rnti           = ue_rnti;
-        crc.crcs[0].harq_id        = to_harq_id(pusch.pusch_cfg.harq_id);
-        crc.crcs[0].tb_crc_success = true;
-        crc.crcs[0].ul_sinr_dB     = 100.0F;
-        this->sched->handle_crc_indication(crc);
-      }
     }
   }
 };
 
 TEST_P(scheduler_ul_tdd_tester, all_ul_slots_are_scheduled)
 {
-  const unsigned MAX_COUNT = 1000;
+  static constexpr unsigned MAX_COUNT = 1000;
   for (unsigned count = 0; count != MAX_COUNT; ++count) {
     this->run_slot();
 
@@ -170,19 +147,6 @@ TEST_P(scheduler_ul_tdd_tester, all_ul_slots_are_scheduled)
       // Ensure UE PUSCH allocations are made.
       ASSERT_FALSE(this->last_sched_res_list[to_du_cell_index(0)]->ul.puschs.empty()) << fmt::format(
           "The UE configuration is leading to slot {} not having UL UE grant scheduled", this->last_result_slot());
-    }
-
-    for (const ul_sched_info& pusch : this->last_sched_res_list[to_du_cell_index(0)]->ul.puschs) {
-      ul_crc_indication crc{};
-      crc.cell_index = to_du_cell_index(0);
-      crc.sl_rx      = this->last_result_slot();
-      crc.crcs.resize(1);
-      crc.crcs[0].ue_index       = ue_idx;
-      crc.crcs[0].rnti           = ue_rnti;
-      crc.crcs[0].harq_id        = to_harq_id(pusch.pusch_cfg.harq_id);
-      crc.crcs[0].tb_crc_success = true;
-      crc.crcs[0].ul_sinr_dB     = 100;
-      this->sched->handle_crc_indication(crc);
     }
   }
 }

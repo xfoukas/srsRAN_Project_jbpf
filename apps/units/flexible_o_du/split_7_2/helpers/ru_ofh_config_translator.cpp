@@ -131,6 +131,7 @@ static void generate_config(ru_ofh_configuration&                            out
     sector_cfg.ignore_prach_start_symbol       = ofh_cell_cfg.cell.ignore_prach_start_symbol;
     sector_cfg.ignore_ecpri_payload_size_field = ofh_cell_cfg.cell.ignore_ecpri_payload_size_field;
     sector_cfg.ignore_ecpri_seq_id_field       = ofh_cell_cfg.cell.ignore_ecpri_seq_id_field;
+    sector_cfg.enable_log_warnings_for_lates   = ofh_cell_cfg.cell.enable_log_warnings_for_lates;
     sector_cfg.log_unreceived_ru_frames        = ofh_cell_cfg.cell.log_unreceived_ru_frames;
     sector_cfg.ul_compression_params           = {ofh::to_compression_type(ofh_cell_cfg.cell.compression_method_ul),
                                                   ofh_cell_cfg.cell.compression_bitwidth_ul};
@@ -158,9 +159,16 @@ static void generate_config(ru_ofh_configuration&                            out
           legacy_scaling_config->iq_scaling / std::sqrt(static_cast<float>(nof_prbs * NOF_SUBCARRIERS_PER_RB));
     } else if (const auto* scaling_config = std::get_if<ru_ofh_scaling_config>(&ofh_cell_cfg.cell.iq_scaling_config)) {
       // Take the RU reference level, apply the configured subcarrier back-off and convert the result into a linear
-      // scaling factor. Do not apply any bandwidth normalization.
+      // scaling factor. If no subcarrier back-off is configured, apply a bandwidth power normalization factor.
+      unsigned nof_prbs =
+          get_max_Nprb(bs_channel_bandwidth_to_MHz(sector_cfg.bw), sector_cfg.scs, frequency_range::FR1);
+      float subcarrier_rms_backoff_dB = convert_power_to_dB(nof_prbs * NOF_SUBCARRIERS_PER_RB);
+      // If no value of subcarrier backoff is defined, the default bandwidth normalization is used.
+      if (scaling_config->subcarrier_rms_backoff_dB) {
+        subcarrier_rms_backoff_dB = *scaling_config->subcarrier_rms_backoff_dB;
+      }
       sector_cfg.iq_scaling =
-          convert_dB_to_amplitude(scaling_config->ru_reference_level_dBFS - scaling_config->subcarrier_rms_backoff_dB);
+          convert_dB_to_amplitude(scaling_config->ru_reference_level_dBFS - subcarrier_rms_backoff_dB);
     } else {
       report_fatal_error(
           "Either the iq_scaling or the RU reference level and subarrier RMS backoff must be configured.");
@@ -185,15 +193,12 @@ ru_ofh_configuration srsran::generate_ru_ofh_config(const ru_ofh_unit_config&   
   return out_cfg;
 }
 
-void srsran::fill_ofh_worker_manager_config(worker_manager_config&    config,
-                                            const ru_ofh_unit_config& ru_cfg,
-                                            std::vector<unsigned>     nof_downlink_antennas)
+void srsran::fill_ofh_worker_manager_config(worker_manager_config& config, const ru_ofh_unit_config& ru_cfg)
 {
-  auto& ofh_cfg                    = config.ru_ofh_cfg.emplace();
-  ofh_cfg.is_downlink_parallelized = ru_cfg.expert_execution_cfg.threads.is_downlink_parallelized;
-  ofh_cfg.nof_downlink_antennas    = std::move(nof_downlink_antennas);
-  ofh_cfg.ru_timing_cpu            = ru_cfg.expert_execution_cfg.ru_timing_cpu;
-  ofh_cfg.txrx_affinities          = ru_cfg.expert_execution_cfg.txrx_affinities;
+  auto& ofh_cfg           = config.ru_ofh_cfg.emplace();
+  ofh_cfg.nof_cells       = ru_cfg.cells.size();
+  ofh_cfg.ru_timing_cpu   = ru_cfg.expert_execution_cfg.ru_timing_cpu;
+  ofh_cfg.txrx_affinities = ru_cfg.expert_execution_cfg.txrx_affinities;
 
   // If ru_txrx_cpus parameters are not specified, use the affinities of ru_cpus parameters of the cells.
   if (ofh_cfg.txrx_affinities.empty()) {

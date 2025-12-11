@@ -814,7 +814,7 @@ void ngap_impl::handle_paging(const asn1::ngap::paging_s& msg)
 }
 
 // Free function to generate a handover failure message.
-ngap_message generate_handover_failure(uint64_t amf_ue_id)
+static ngap_message generate_handover_failure(uint64_t amf_ue_id)
 {
   ngap_message ngap_msg;
   ngap_msg.pdu.set_unsuccessful_outcome();
@@ -826,13 +826,13 @@ ngap_message generate_handover_failure(uint64_t amf_ue_id)
   return ngap_msg;
 }
 
-void ngap_impl::send_handover_failure(uint64_t amf_ue_id, const std::string& cause)
+void ngap_impl::send_handover_failure(uint64_t amf_ue_id)
 {
   if (!tx_pdu_notifier.on_new_message(generate_handover_failure(amf_ue_id))) {
-    logger.warning("AMF notifier is not set. Cannot send HandoverFailure (cause: {})", cause);
+    logger.warning("AMF notifier is not set. Cannot send HandoverFailure");
     return;
   }
-  logger.warning("Sending HandoverFailure. Cause: {}", cause);
+  logger.warning("Sending HandoverFailure");
 }
 
 void ngap_impl::handle_handover_request(const asn1::ngap::ho_request_s& msg)
@@ -840,7 +840,8 @@ void ngap_impl::handle_handover_request(const asn1::ngap::ho_request_s& msg)
   // Convert Handover Request to common type.
   ngap_handover_request ho_request;
   if (!fill_ngap_handover_request(ho_request, msg)) {
-    send_handover_failure(msg->amf_ue_ngap_id, "Received invalid HandoverRequest");
+    logger.info("Received invalid HandoverRequest");
+    send_handover_failure(msg->amf_ue_ngap_id);
     return;
   }
 
@@ -849,16 +850,18 @@ void ngap_impl::handle_handover_request(const asn1::ngap::ho_request_s& msg)
               ho_request.source_to_target_transparent_container.target_cell_id.nci);
 
   // Create UE in target cell.
-  ho_request.ue_index =
-      cu_cp_notifier.request_new_ue_index_allocation(ho_request.source_to_target_transparent_container.target_cell_id);
+  ho_request.ue_index = cu_cp_notifier.request_new_ue_index_allocation(
+      ho_request.source_to_target_transparent_container.target_cell_id, ho_request.guami.plmn);
   if (ho_request.ue_index == ue_index_t::invalid) {
-    send_handover_failure(msg->amf_ue_ngap_id, "Couldn't allocate UE index");
+    logger.debug("Couldn't allocate UE index for handover target cell");
+    send_handover_failure(msg->amf_ue_ngap_id);
     return;
   }
 
   // Inititialize security context of target UE.
-  if (!cu_cp_notifier.on_handover_request_received(ho_request.ue_index, ho_request.security_context)) {
-    send_handover_failure(msg->amf_ue_ngap_id, "Couldn't initialize security context");
+  if (!cu_cp_notifier.on_handover_request_received(
+          ho_request.ue_index, ho_request.guami.plmn, ho_request.security_context)) {
+    send_handover_failure(msg->amf_ue_ngap_id);
     return;
   }
 
@@ -872,7 +875,35 @@ void ngap_impl::handle_handover_request(const asn1::ngap::ho_request_s& msg)
                                                   timers,
                                                   ctrl_exec,
                                                   logger))) {
-    send_handover_failure(msg->amf_ue_ngap_id, "Couldn't schedule handover resource allocation procedure");
+    logger.debug("Couldn't schedule handover resource allocation procedure");
+    send_handover_failure(msg->amf_ue_ngap_id);
+    return;
+  }
+}
+
+void ngap_impl::handle_ul_ran_status_transfer(const ngap_ul_ran_status_transfer& ul_ran_status_transfer)
+{
+  const ue_index_t ue_index = ul_ran_status_transfer.ue_index;
+  if (!ue_ctxt_list.contains(ue_index)) {
+    logger.warning("ue={}: Dropping UL RAN Status Transfer. UE context does not exist", ue_index);
+    return;
+  }
+
+  ngap_ue_context& ue_ctxt = ue_ctxt_list[ue_index];
+
+  ngap_message ngap_msg = {};
+  ngap_msg.pdu.set_init_msg();
+  ngap_msg.pdu.init_msg().load_info_obj(ASN1_NGAP_ID_UL_RAN_STATUS_TRANSFER);
+
+  ul_ran_status_transfer_s& asn1_ul_status = ngap_msg.pdu.init_msg().value.ul_ran_status_transfer();
+  asn1_ul_status->ran_ue_ngap_id           = ran_ue_id_to_uint(ue_ctxt.ue_ids.ran_ue_id);
+  asn1_ul_status->amf_ue_ngap_id           = amf_ue_id_to_uint(ue_ctxt.ue_ids.amf_ue_id);
+
+  fill_asn1_ul_ran_status_transfer(asn1_ul_status, ul_ran_status_transfer.drbs_subject_to_status_transfer_list);
+
+  // Forward message to AMF.
+  if (!tx_pdu_notifier.on_new_message(ngap_msg)) {
+    ue_ctxt.logger.log_warning("AMF notifier is not set. Cannot send UL Status Transfer");
     return;
   }
 }
@@ -952,6 +983,9 @@ void ngap_impl::handle_successful_outcome(const successful_outcome_s& outcome)
   switch (outcome.value.type().value) {
     case ngap_elem_procs_o::successful_outcome_c::types_opts::ng_setup_resp: {
       ev_mng.ng_setup_outcome.set(outcome.value.ng_setup_resp());
+    } break;
+    case ngap_elem_procs_o::successful_outcome_c::types_opts::ng_reset_ack: {
+      ev_mng.ng_reset_outcome.set(outcome.value.ng_reset_ack());
     } break;
     case ngap_elem_procs_o::successful_outcome_c::types_opts::ho_cmd: {
       ev_mng.handover_preparation_outcome.set(outcome.value.ho_cmd());

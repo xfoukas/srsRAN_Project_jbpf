@@ -156,14 +156,16 @@ struct scheduler_cell_metrics {
   unsigned nof_msg3_ok = 0;
   /// Number of MSG3 KOs.
   unsigned nof_msg3_nok = 0;
-  /// Average PRACH delay in ms.
-  std::optional<float> avg_prach_delay_ms;
+  /// Average PRACH delay in slots.
+  std::optional<float> avg_prach_delay_slots;
   /// Number of failed PDSCH allocations due to late HARQs.
   unsigned nof_failed_pdsch_allocs_late_harqs = 0;
   /// Number of failed PUSCH allocations due to late HARQs.
   unsigned nof_failed_pusch_allocs_late_harqs = 0;
   /// Number of UE events not reported because the maximum number of events was reached.
   unsigned nof_filtered_events = 0;
+  /// Average number of RBs used for PUCCH per UL slot.
+  float pucch_tot_rb_usage_avg = 0.0f;
 
   unsigned                                nof_error_indications = 0;
   std::chrono::microseconds               average_decision_latency{0};

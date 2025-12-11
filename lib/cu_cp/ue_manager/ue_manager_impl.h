@@ -52,6 +52,8 @@ public:
   /// \param[in] ue_index Index of the UE to be removed.
   void remove_ue(ue_index_t ue_index);
 
+  bool set_plmn(ue_index_t ue_index, const plmn_identity& plmn);
+
   /// \brief Add PLMNs to block and reject new UE connections for these.
   /// \param[in] plmns PLMN identities of UEs to be rejected.
   void add_blocked_plmns(const std::vector<plmn_identity>& plmns);
@@ -94,14 +96,12 @@ public:
 
   /// \brief Allocate resources for the UE in the CU-CP.
   /// \param[in] du_index Index of the DU the UE is connected to.
-  /// \param[in] plmn The PLMN of the UE.
   /// \param[in] du_id The gNB-DU ID of the DU the UE is connected to.
   /// \param[in] pci The PCI of the cell the UE is connected to.
   /// \param[in] rnti The RNTI of the UE.
   /// \param[in] pcell_index The index of the PCell the UE is connected to.
   /// \return ue_index of the created UE or ue_index_t::invalid in case of failure.
   ue_index_t add_ue(du_index_t                     du_index,
-                    plmn_identity                  plmn,
                     std::optional<gnb_du_id_t>     du_id       = std::nullopt,
                     std::optional<pci_t>           pci         = std::nullopt,
                     std::optional<rnti_t>          rnti        = std::nullopt,
@@ -154,7 +154,7 @@ public:
     return ues.at(ue_index).get_rrc_ue_cu_cp_adapter();
   }
 
-  std::vector<metrics_report::ue_info> handle_ue_metrics_report_request() const override;
+  std::vector<cu_cp_metrics_report::ue_info> handle_ue_metrics_report_request() const override;
 
   ue_task_scheduler_manager& get_task_sched() { return ue_task_scheds; }
 

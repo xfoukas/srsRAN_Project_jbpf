@@ -108,6 +108,26 @@ public:
   /// \brief Triggers re-establishment as specified in TS 38.323, section 5.1.2
   void reestablish(security::sec_128_as_config sec_cfg) override;
 
+  /// \brief Get the RX count for status transfer
+  pdcp_count_info get_count() const override
+  {
+    pdcp_count_info count_info;
+    uint32_t        count = st.rx_deliv;
+    count_info.sn         = SN(count);
+    count_info.hfn        = HFN(count);
+    return count_info;
+  }
+
+  /// \brief Set the RX count for status transfer
+  void set_count(pdcp_count_info count_info) override
+  {
+    uint32_t count = COUNT(count_info.hfn, count_info.sn);
+    if (st.rx_next != 0 || st.rx_deliv != 0 || st.rx_reord != 0) {
+      logger.log_warning("Status transfer applied to bearer with non-zero state. st={} count={}", st, count);
+    }
+    st = {count, count, count};
+  }
+
   /// \brief Retrun awaitable to wait for cripto tasks to be
   /// finished.
   manual_event_flag& crypto_awaitable();

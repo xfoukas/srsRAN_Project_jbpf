@@ -30,6 +30,7 @@
 #include "apps/units/flexible_o_du/split_8/helpers/ru_sdr_config_validator.h"
 #include "apps/units/flexible_o_du/split_8/helpers/ru_sdr_factories.h"
 #include "apps/units/flexible_o_du/split_helpers/flexible_o_du_configs.h"
+#include "external/fmt/include/fmt/chrono.h"
 #include "split6_constants.h"
 #include "split6_flexible_o_du_low_session.h"
 #include "srsran/du/du_low/o_du_low_config.h"
@@ -40,6 +41,35 @@
 #include "srsran/ran/slot_pdu_capacity_constants.h"
 
 using namespace srsran;
+
+std::optional<std::chrono::system_clock::time_point>
+split6_flexible_o_du_low_session_factory::start_time_calculator::calculate_start_time() const
+{
+  if (jitter.count() == 0) {
+    return std::nullopt;
+  }
+
+  auto                      current_time = std::chrono::system_clock::now();
+  std::chrono::milliseconds ms_since_epoch =
+      std::chrono::duration_cast<std::chrono::milliseconds>(current_time.time_since_epoch());
+
+  std::chrono::milliseconds offset_in_window = ms_since_epoch % window_size;
+
+  if (offset_in_window < jitter || offset_in_window > jitter_upper_border) {
+    logger.warning("Current start time is too close to the start window border, synchronization may fail");
+  }
+
+  auto start_time = std::chrono::floor<std::chrono::seconds>(current_time + (2 * window_size - offset_in_window));
+  logger.debug("Start.request received at '{:%Y-%m-%d %H:%M:%S}' jitter_ms={} window_size={}. Calculated O-DU low "
+               "start at '{:%Y-%m-%d %H:%M:%S}'",
+               current_time,
+               jitter,
+               window_size,
+               start_time);
+
+  // Return next window start.
+  return {start_time};
+}
 
 std::unique_ptr<split6_flexible_o_du_low_session>
 split6_flexible_o_du_low_session_factory::create_o_du_low_session(const fapi::fapi_cell_config& config)
@@ -71,14 +101,16 @@ split6_flexible_o_du_low_session_factory::create_o_du_low_session(const fapi::fa
       slot_messages_adaptor_factory->create_slot_messages_adaptor(config,
                                                                   fapi_sector_adaptor.get_slot_message_gateway(),
                                                                   fapi_sector_adaptor.get_slot_last_message_notifier(),
-                                                                  error_notifier);
+                                                                  ru->get_controller());
 
   if (!adaptor) {
     return nullptr;
   }
 
-  odu->set_dependencies(
-      std::move(adaptor), std::move(odu_low.o_du_lo), std::move(ru), timers.create_unique_timer(*workers.metrics_exec));
+  odu->set_dependencies(std::move(adaptor),
+                        std::move(odu_low.o_du_lo),
+                        std::move(ru),
+                        timers.create_unique_timer(workers.get_metrics_executor()));
 
   return odu;
 }
@@ -180,7 +212,7 @@ get_du_low_validation_dependencies(const fapi::fapi_cell_config& config)
   // Get PRACH info.
   subcarrier_spacing common_scs = config.phy_cfg.scs;
 
-  prach_configuration prach_info = prach_configuration_get(frequency_range::FR1,
+  prach_configuration prach_info = prach_configuration_get(split6_du_low::freq_range,
                                                            static_cast<duplex_mode>(config.cell_cfg.frame_duplex_type),
                                                            config.prach_cfg.prach_config_index);
   // PRACH format type.
@@ -226,14 +258,10 @@ split6_flexible_o_du_low_session_factory::create_o_du_low(const fapi::fapi_cell_
   // instance.
   fapi_sector.sector_id = 0;
 
-  auto&  du_low_cell = odu_low_cfg.cells.emplace_back();
-  double dl_freq_ref = band_helper::get_f_ref_from_abs_freq_point_a(
-      config.carrier_cfg.dl_freq * 1e3,
-      get_max_Nprb(config.carrier_cfg.dl_bandwidth, config.phy_cfg.scs, frequency_range::FR1),
-      config.phy_cfg.scs);
-  nr_band band                     = band_helper::get_band_from_dl_arfcn(band_helper::freq_to_nr_arfcn(dl_freq_ref));
+  auto& du_low_cell = odu_low_cfg.cells.emplace_back();
+
   du_low_cell.duplex               = static_cast<duplex_mode>(config.cell_cfg.frame_duplex_type);
-  du_low_cell.freq_range           = band_helper::get_freq_range(band);
+  du_low_cell.freq_range           = split6_du_low::freq_range;
   du_low_cell.bw_rb                = config.carrier_cfg.dl_grid_size[to_numerology_value(config.phy_cfg.scs)];
   du_low_cell.nof_rx_antennas      = config.carrier_cfg.num_rx_ant;
   du_low_cell.nof_tx_antennas      = config.carrier_cfg.num_tx_ant;
@@ -249,27 +277,35 @@ split6_flexible_o_du_low_session_factory::create_o_du_low(const fapi::fapi_cell_
     du_low_cell.tdd_pattern.emplace(generate_tdd_pattern(config.phy_cfg.scs, config.tdd_cfg));
   }
 
-  o_du_low_unit_factory odu_low_factory(unit_config.du_low_cfg.hal_config, split6_du_low::NOF_CELLS_SUPPORTED);
+  o_du_low_unit_factory odu_low_factory(unit_config.du_low_cfg.hal_config);
 
   return odu_low_factory.create(odu_low_cfg, odu_low_dependencies);
 }
 
-static flexible_o_du_ru_config generate_o_du_ru_config(const fapi::fapi_cell_config& config, unsigned max_prox_delay)
+static flexible_o_du_ru_config
+generate_o_du_ru_config(const fapi::fapi_cell_config& config, unsigned expected_max_proc_delay, bool uses_ofh)
 {
   flexible_o_du_ru_config out_cfg;
-  out_cfg.prach_nof_ports      = split6_du_low::PRACH_NOF_PORTS;
-  out_cfg.max_processing_delay = max_prox_delay;
+  out_cfg.prach_nof_ports = split6_du_low::PRACH_NOF_PORTS;
+
+  // Open Fronthaul notifies OTA + max_proc_delay.
+  if (uses_ofh) {
+    out_cfg.max_processing_delay = expected_max_proc_delay;
+  } else {
+    // Split 8 notifies OTA + max_proc_delay + 1ms.
+    out_cfg.max_processing_delay = expected_max_proc_delay - get_nof_slots_per_subframe(config.phy_cfg.scs);
+  }
 
   // Add one cell.
   auto& out_cell           = out_cfg.cells.emplace_back();
   out_cell.nof_rx_antennas = config.carrier_cfg.num_rx_ant;
   out_cell.nof_tx_antennas = config.carrier_cfg.num_tx_ant;
   out_cell.scs             = config.phy_cfg.scs;
-  out_cell.dl_arfcn        = band_helper::freq_to_nr_arfcn(config.carrier_cfg.dl_freq);
-  out_cell.ul_arfcn        = band_helper::freq_to_nr_arfcn(config.carrier_cfg.ul_freq);
+  out_cell.dl_arfcn        = config.carrier_cfg.dl_f_ref_arfcn;
+  out_cell.ul_arfcn        = config.carrier_cfg.ul_f_ref_arfcn;
   out_cell.bw              = MHz_to_bs_channel_bandwidth(config.carrier_cfg.dl_bandwidth);
-  out_cell.band = band_helper::get_band_from_dl_arfcn(band_helper::freq_to_nr_arfcn(config.carrier_cfg.dl_freq));
-  out_cell.cp   = config.phy_cfg.cp;
+  out_cell.cp              = config.phy_cfg.cp;
+  out_cell.freq_range      = split6_du_low::freq_range;
 
   // TDD pattern.
   if (config.cell_cfg.frame_duplex_type == 1) {
@@ -325,7 +361,10 @@ std::unique_ptr<radio_unit>
 split6_flexible_o_du_low_session_factory::create_radio_unit(split6_flexible_o_du_low_session& odu_low,
                                                             const fapi::fapi_cell_config&     config)
 {
-  auto ru_config = generate_o_du_ru_config(config, unit_config.du_low_cfg.expert_phy_cfg.max_processing_delay_slots);
+  auto ru_config = generate_o_du_ru_config(config,
+                                           unit_config.du_low_cfg.expert_phy_cfg.max_processing_delay_slots,
+                                           std::holds_alternative<ru_ofh_unit_parsed_config>(unit_config.ru_cfg));
+
   const auto& ru_cfg = unit_config.ru_cfg;
 
   flexible_o_du_ru_dependencies ru_dependencies{workers,
@@ -348,7 +387,7 @@ split6_flexible_o_du_low_session_factory::create_radio_unit(split6_flexible_o_du
       return nullptr;
     }
 
-    return create_sdr_radio_unit(*cfg, ru_config, ru_dependencies);
+    return create_sdr_radio_unit(*cfg, ru_config, ru_dependencies, start_time_calc.calculate_start_time());
   }
 
   report_error("Could not detect valid Radio Unit configuration");

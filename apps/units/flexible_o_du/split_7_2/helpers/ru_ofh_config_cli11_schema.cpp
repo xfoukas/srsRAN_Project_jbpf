@@ -128,6 +128,9 @@ static void configure_cli11_ru_ofh_base_cell_args(CLI::App& app, ru_ofh_unit_bas
              "Ignore the start symbol field in the PRACH U-Plane packets")
       ->capture_default_str();
 
+  add_option(app, "--log_lates_as_warnings", config.enable_log_warnings_for_lates, "Log late events as warnings")
+      ->capture_default_str();
+
   add_option_function<std::string>(
       app,
       "--warn_unreceived_ru_frames",
@@ -203,16 +206,22 @@ static void configure_cli11_ru_ofh_base_cell_args(CLI::App& app, ru_ofh_unit_bas
         return "";
       });
 
-  app.add_option_function<float>(
+  app.add_option_function<std::string>(
          "--subcarrier_rms_backoff_dB",
-         [&config](float value) {
+         [&config](std::string value) {
            if (!std::holds_alternative<ru_ofh_scaling_config>(config.iq_scaling_config)) {
              config.iq_scaling_config.emplace<ru_ofh_scaling_config>();
            }
-           std::get<ru_ofh_scaling_config>(config.iq_scaling_config).subcarrier_rms_backoff_dB = value;
+           // By default, subcarrier backoff is set to 'auto', i.e., normalize bandwidth based on number of
+           // subcarriers. If another value is specified, it is parsed.
+           if (value != "auto") {
+             // It is safe to convert the value without try-catch because it has been already checked.
+             float backoff                                                                       = std::stof(value);
+             std::get<ru_ofh_scaling_config>(config.iq_scaling_config).subcarrier_rms_backoff_dB = backoff;
+           }
          },
          "Power back-off attenuation applied to all subcarriers with respect to the RU reference level")
-      ->check(CLI::Range(0.0f, std::numeric_limits<float>::infinity()))
+      ->check(CLI::Range(0.0f, std::numeric_limits<float>::infinity()) | CLI::IsMember({"auto"}))
       ->check([&config](const std::string& value) -> std::string {
         if (std::holds_alternative<ru_ofh_legacy_scaling_config>(config.iq_scaling_config)) {
           return "IQ scaling and RU subcarrier back-off cannot be set at the same time";
@@ -291,8 +300,8 @@ static void configure_cli11_ru_ofh_base_cell_args(CLI::App& app, ru_ofh_unit_bas
           "RU IQ scaling parameter cannot be used if RU reference level and subcarrier RMS back-off are set\n");
     }
 
-    if (ref_level_count != backoff_count) {
-      report_error("RU reference level and subcarrier RMS back-off must be set together\n");
+    if (backoff_count > 0 && ref_level_count == 0) {
+      report_error("RU reference level is required if subcarrier RMS back-off is set\n");
     }
   };
 
@@ -343,7 +352,7 @@ static void configure_cli11_ru_ofh_args(CLI::App& app, ru_ofh_unit_parsed_config
   add_option(app, "--gps_beta", ofh_cfg.gps_Beta, "GPS Beta")->capture_default_str()->check(CLI::Range(-32768, 32767));
 
   // Common cell parameters.
-  auto base_cell_group = app.add_option_group("base_cell");
+  auto* base_cell_group = app.add_option_group("base_cell");
   configure_cli11_ru_ofh_base_cell_args(*base_cell_group, config.base_cell_cfg);
   base_cell_group->parse_complete_callback([&config, &app]() {
     for (auto& cell : config.config.cells) {
@@ -401,15 +410,6 @@ static void configure_cli11_cell_affinity_args(CLI::App& app, ru_ofh_unit_cpu_af
       "Policy used for assigning CPU cores to the Radio Unit tasks");
 }
 
-static void configure_cli11_ofh_threads_args(CLI::App& app, ru_ofh_unit_expert_threads_config& config)
-{
-  add_option(app,
-             "--enable_dl_parallelization",
-             config.is_downlink_parallelized,
-             "Open Fronthaul downlink parallelization flag")
-      ->capture_default_str();
-}
-
 static void configure_cli11_txrx_affinity_args(CLI::App& app, os_sched_affinity_bitmask& mask)
 {
   add_option_function<std::string>(
@@ -421,21 +421,13 @@ static void configure_cli11_txrx_affinity_args(CLI::App& app, os_sched_affinity_
 
 static void configure_cli11_expert_execution_args(CLI::App& app, ru_ofh_unit_expert_execution_config& config)
 {
-  // Affinity section.
+  // Affinities section.
   CLI::App* affinities_subcmd = add_subcommand(app, "affinities", "gNB CPU affinities configuration")->configurable();
   add_option_function<std::string>(
       *affinities_subcmd,
       "--ru_timing_cpu",
       [&config](const std::string& value) { parse_affinity_mask(config.ru_timing_cpu, value, "ru_timing_cpu"); },
       "CPU used for timing in the Radio Unit");
-
-  // Threads section.
-  CLI::App* threads_subcmd = add_subcommand(app, "threads", "Threads configuration")->configurable();
-
-  // OFH threads.
-  CLI::App* ofh_threads_subcmd =
-      add_subcommand(*threads_subcmd, "ofh", "Open Fronthaul thread configuration")->configurable();
-  configure_cli11_ofh_threads_args(*ofh_threads_subcmd, config.threads);
 
   // RU txrx affinity section.
   add_option_cell(
