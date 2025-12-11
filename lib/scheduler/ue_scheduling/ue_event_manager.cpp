@@ -595,7 +595,7 @@ void ue_cell_event_manager::handle_uci_indication(const uci_indication& ind)
 
 #ifdef JBPF_ENABLED
               hook_mac_sched_uci_indication(const_cast<void*>(static_cast<const void*>(uci_pdu.get())),
-                0, ue_cc.ue_index, ue_cc.cfg().cell_cfg_common.pci, (uint16_t)uci_pdu->crnti, sizeof(uci_indication::uci_pdu));
+                0, ue_cc->ue_index, ue_cc->cfg().cell_cfg_common.pci, (uint16_t)uci_pdu->crnti, sizeof(uci_indication::uci_pdu));
 #endif
 
       bool is_sr_opportunity_and_f1 = false;
@@ -729,10 +729,12 @@ void ue_cell_event_manager::handle_srs_indication(const srs_indication& ind)
     }
 
 #ifdef JBPF_ENABLED
-    ue* u = ue_db.find_by_rnti(srs_pdu.rnti);
-    if (u ) {
-      hook_mac_sched_srs_indication(const_cast<void*>(static_cast<const void*>(&srs_pdu)),
-        0, u->ue_index, u->get_pcell().cfg().cell_cfg_common.pci, (uint16_t)srs_pdu.rnti, sizeof(srs_indication::srs_indication_pdu));
+    {
+      ue* u = ue_db.find_by_rnti(srs_pdu.rnti);
+      if (u ) {
+        hook_mac_sched_srs_indication(const_cast<void*>(static_cast<const void*>(&srs_pdu)),
+          0, u->ue_index, u->get_pcell().cfg().cell_cfg_common.pci, (uint16_t)srs_pdu.rnti, sizeof(srs_indication::srs_indication_pdu));
+      }
     }
 #endif
 

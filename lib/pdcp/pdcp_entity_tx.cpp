@@ -277,7 +277,7 @@ void pdcp_entity_tx::handle_sdu(byte_buffer buf)
       if (not sdu_copy.has_value()) {
         logger.log_error("Unable to deep copy SDU");
 #ifdef JBPF_ENABLED 
-    CALL_JBPF_HOOK(hook_pdcp_dl_dropped_sdu, JBPF_PDCP_DL_SDU_DROP__INTERNAL_ERROR);  
+        CALL_JBPF_HOOK(hook_pdcp_dl_dropped_sdu, JBPF_PDCP_DL_SDU_DROP__INTERNAL_ERROR);  
 #endif
         metrics.add_lost_sdus(1);
         upper_cn.on_protocol_failure();
@@ -378,7 +378,7 @@ void pdcp_entity_tx::apply_reordering(pdcp_tx_buffer_info buf_info, bool is_retx
     pdcp_tx_pdu_info pdu_info{
         .pdu = std::move(tx_window[count].pdu), .count = count, .sdu_toa = tx_window[count].sdu_info.time_of_arrival};
 #ifdef JBPF_ENABLED 
-    CALL_JBPF_HOOK(hook_pdcp_dl_new_sdu, count, buf_info.buf.length());
+    CALL_JBPF_HOOK(hook_pdcp_dl_new_sdu, count, pdu_info.pdu.length());
 #endif        
     write_data_pdu_to_lower_layers(std::move(pdu_info), is_retx);
     st.tx_trans_crypto = count + 1;

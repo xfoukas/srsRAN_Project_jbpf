@@ -183,14 +183,14 @@ void rlc_tx_am_entity::discard_sdu(uint32_t pdcp_sn)
   if (sdu_queue.try_discard(pdcp_sn)) {
     logger.log_info("Discarded SDU. pdcp_sn={}", pdcp_sn);
 #ifdef JBPF_ENABLED
-  CALL_JBPF_HOOK(hook_rlc_dl_discard_sdu, pdcp_sn, true);
+    CALL_JBPF_HOOK(hook_rlc_dl_discard_sdu, pdcp_sn, true);
 #endif    
     metrics_high.metrics_add_discard(1);
     handle_changed_buffer_state();
   } else {
     logger.log_info("Could not discard SDU. pdcp_sn={}", pdcp_sn);
 #ifdef JBPF_ENABLED
-  CALL_JBPF_HOOK(hook_rlc_dl_discard_sdu, pdcp_sn, false);
+    CALL_JBPF_HOOK(hook_rlc_dl_discard_sdu, pdcp_sn, false);
 #endif    
     metrics_high.metrics_add_discard_failure(1);
   }

@@ -133,7 +133,6 @@ struct jbpf_cuup_e1_ctx_info {
 struct jbpf_cucp_uemgr_ctx_info {
     uint16_t ctx_id;    /* Context id (could be implementation specific) */
     uint16_t du_index;  
-    uint32_t plmn;      /* (mcc << 16) || mnc */ 
     uint64_t cu_cp_ue_index; 
 };
 
