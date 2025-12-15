@@ -133,13 +133,6 @@ ue_index_t ue_manager::add_ue(du_index_t                     du_index,
               rnti.has_value() ? fmt::format(" rnti={}", rnti.value()) : "",
               pcell_index.has_value() ? fmt::format(" pcell_index={}", pcell_index.value()) : "");
 
-#ifdef JBPF_ENABLED 
-  {
-    struct jbpf_cucp_uemgr_ctx_info ctx_info = {0, (uint16_t)du_index, (uint64_t)new_ue_index};
-    hook_cucp_uemgr_ue_add(&ctx_info, pci.has_value(), pci.value(), rnti.has_value(), to_value(rnti.value()));
-  }
-#endif
-
   return new_ue_index;
 }
 
@@ -170,7 +163,7 @@ void ue_manager::remove_ue(ue_index_t ue_index)
 
 #ifdef JBPF_ENABLED 
   {
-    struct jbpf_cucp_uemgr_ctx_info ctx_info = {0, 0, (uint64_t)ue_index};
+    struct jbpf_cucp_uemgr_ctx_info ctx_info = {0, 0, 0, (uint64_t)ue_index};
     hook_cucp_uemgr_ue_remove(&ctx_info);
   }
 #endif
@@ -183,6 +176,7 @@ void ue_manager::remove_ue(ue_index_t ue_index)
 
 bool ue_manager::set_plmn(ue_index_t ue_index, const plmn_identity& plmn)
 {
+
   if (ue_index == ue_index_t::invalid) {
     logger.warning("Can't set PLMN for UE with invalid UE index");
     return false;
@@ -201,6 +195,17 @@ bool ue_manager::set_plmn(ue_index_t ue_index, const plmn_identity& plmn)
 
   ues.at(ue_index).get_ue_context().plmn = plmn;
   logger.debug("ue={}: Set PLMN to {}", ue_index, plmn);
+
+#ifdef JBPF_ENABLED 
+  // This is always called, so call hook_cucp_uemgr_ue_add once we have the plmn value too.
+  {
+    auto& u = ues.at(ue_index);
+    auto& ue_ctx = u.get_ue_context();
+    struct jbpf_cucp_uemgr_ctx_info ctx_info = {0, (uint16_t)ue_ctx.du_idx, plmn.to_bcd(), (uint64_t)ue_index};
+    hook_cucp_uemgr_ue_add(&ctx_info, true, u.get_pci(), true, (uint16_t)ue_ctx.crnti);
+  }
+#endif
+
   return true;
 }
 
@@ -282,7 +287,7 @@ cu_cp_ue* ue_manager::set_ue_du_context(ue_index_t      ue_index,
 
 #ifdef JBPF_ENABLED 
   {
-    struct jbpf_cucp_uemgr_ctx_info ctx_info = {0, 0, (uint64_t)ue_index};
+    struct jbpf_cucp_uemgr_ctx_info ctx_info = {0, 0, 0, (uint64_t)ue_index};
     hook_cucp_uemgr_ue_update(&ctx_info, pci, to_value(rnti));
   }
 #endif

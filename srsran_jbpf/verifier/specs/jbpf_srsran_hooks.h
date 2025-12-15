@@ -540,7 +540,7 @@ DECLARE_JBPF_HOOK(pdcp_ul_reestablish,
 
 // PDU Sessions
 
-DECLARE_JBPF_HOOK(cuup_pdu_session_bearer_setup,
+DECLARE_JBPF_HOOK(cucp_pdu_session_bearer_setup,
     struct jbpf_ran_generic_ctx ctx,
     ctx,
     HOOK_PROTO(
@@ -551,7 +551,7 @@ DECLARE_JBPF_HOOK(cuup_pdu_session_bearer_setup,
     )
 )
 
-DECLARE_JBPF_HOOK(cuup_pdu_session_bearer_modify,
+DECLARE_JBPF_HOOK(cucp_pdu_session_bearer_modify,
     struct jbpf_ran_generic_ctx ctx,
     ctx,
     HOOK_PROTO(
@@ -562,7 +562,7 @@ DECLARE_JBPF_HOOK(cuup_pdu_session_bearer_modify,
     )
 )
 
-DECLARE_JBPF_HOOK(cuup_pdu_session_bearer_remove,
+DECLARE_JBPF_HOOK(cucp_pdu_session_remove,
     struct jbpf_ran_generic_ctx ctx,
     ctx,
     HOOK_PROTO(

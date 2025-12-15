@@ -25,6 +25,10 @@
 #include "srsran/cu_cp/ue_task_scheduler.h"
 #include "srsran/ran/cause/e1ap_cause_converters.h"
 
+#ifdef JBPF_ENABLED
+#include "jbpf_srsran_hooks.h"
+#endif
+
 using namespace srsran;
 using namespace srsran::srs_cu_cp;
 using namespace asn1::rrc_nr;
@@ -114,6 +118,25 @@ void pdu_session_resource_modification_routine::operator()(
       logger.warning("ue={}: \"{}\" failed to modify bearer at CU-UP", modify_request.ue_index, name());
       CORO_EARLY_RETURN(generate_pdu_session_resource_modify_response(false));
     }
+
+#ifdef JBPF_ENABLED    
+    if (!bearer_context_modification_request.ng_ran_bearer_context_mod_request) {
+      const auto& ng_ran_req = *bearer_context_modification_request.ng_ran_bearer_context_mod_request;
+      for (const auto& pdu_item : ng_ran_req.pdu_session_res_to_setup_mod_list)
+      {
+          // Iterate DRBs
+          for (const auto& drb_item : pdu_item.drb_to_setup_list_ng_ran)
+          {
+              struct jbpf_pdu_session_ctx_info session_ctx_info = {0, static_cast<uint64_t>(bearer_context_modification_request.ue_index), 
+                                        static_cast<uint16_t>(pdu_item.pdu_session_id), static_cast<uint16_t>(drb_item.drb_id), 
+                                        pdu_item.snssai.sst.value(), 
+                                        pdu_item.snssai.sd.is_set() ? pdu_item.snssai.sd.value() : 0};
+              hook_cucp_pdu_session_bearer_modify(&session_ctx_info);
+          }
+      }
+    }
+#endif
+
   }
 
   {

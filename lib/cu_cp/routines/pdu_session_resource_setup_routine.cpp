@@ -26,6 +26,12 @@
 #include "srsran/ran/cause/e1ap_cause_converters.h"
 #include "srsran/ran/cause/ngap_cause.h"
 
+#ifdef JBPF_ENABLED
+#include "jbpf_srsran_hooks.h"
+DEFINE_JBPF_HOOK(cucp_pdu_session_bearer_setup);
+DEFINE_JBPF_HOOK(cucp_pdu_session_bearer_modify);
+#endif
+
 using namespace srsran;
 using namespace srsran::srs_cu_cp;
 using namespace asn1::rrc_nr;
@@ -146,6 +152,24 @@ void pdu_session_resource_setup_routine::operator()(
       CORO_EARLY_RETURN(
           handle_pdu_session_resource_setup_result(false, cause_protocol_t::msg_not_compatible_with_receiver_state));
     }
+
+#ifdef JBPF_ENABLED
+    {
+      for (const auto& pdu_item : bearer_context_setup_request.pdu_session_res_to_setup_list)
+      {
+          // Iterate DRBs
+          for (const auto& drb_item : pdu_item.drb_to_setup_list_ng_ran)
+          {
+              struct jbpf_pdu_session_ctx_info session_ctx_info = {0, static_cast<uint64_t>(bearer_context_setup_request.ue_index), 
+                                        static_cast<uint16_t>(pdu_item.pdu_session_id), static_cast<uint16_t>(drb_item.drb_id), 
+                                        pdu_item.snssai.sst.value(), 
+                                        pdu_item.snssai.sd.is_set() ? pdu_item.snssai.sd.value() : 0}; 
+              hook_cucp_pdu_session_bearer_setup(&session_ctx_info);
+          }
+        }
+    }
+#endif
+
   } else {
     // Prepare BearerContextModificationRequest and modify existing bearer.
     bearer_context_modification_request.ng_ran_bearer_context_mod_request.emplace(); // initialize fresh message
@@ -169,6 +193,25 @@ void pdu_session_resource_setup_routine::operator()(
       CORO_EARLY_RETURN(
           handle_pdu_session_resource_setup_result(false, cause_protocol_t::msg_not_compatible_with_receiver_state));
     }
+
+#ifdef JBPF_ENABLED
+    if (!bearer_context_modification_request.ng_ran_bearer_context_mod_request) {
+      const auto& ng_ran_req = *bearer_context_modification_request.ng_ran_bearer_context_mod_request;
+      for (const auto& pdu_item : ng_ran_req.pdu_session_res_to_setup_mod_list)
+      {
+          // Iterate DRBs
+          for (const auto& drb_item : pdu_item.drb_to_setup_list_ng_ran)
+          {
+              struct jbpf_pdu_session_ctx_info session_ctx_info = {0, static_cast<uint64_t>(bearer_context_modification_request.ue_index), 
+                                        static_cast<uint16_t>(pdu_item.pdu_session_id), static_cast<uint16_t>(drb_item.drb_id), 
+                                        pdu_item.snssai.sst.value(), 
+                                        pdu_item.snssai.sd.is_set() ? pdu_item.snssai.sd.value() : 0};
+              hook_cucp_pdu_session_bearer_modify(&session_ctx_info);
+          }
+        }
+    }
+#endif
+
   }
 
   // Register required SRB and DRB resources at DU.

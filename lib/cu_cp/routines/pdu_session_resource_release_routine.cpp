@@ -23,6 +23,11 @@
 #include "pdu_session_resource_release_routine.h"
 #include "pdu_session_routine_helpers.h"
 
+#ifdef JBPF_ENABLED
+#include "jbpf_srsran_hooks.h"
+DEFINE_JBPF_HOOK(cucp_pdu_session_remove);
+#endif
+
 using namespace srsran;
 using namespace srsran::srs_cu_cp;
 using namespace asn1::rrc_nr;
@@ -187,6 +192,19 @@ pdu_session_resource_release_routine::handle_pdu_session_resource_release_respon
 
   if (success) {
     logger.debug("ue={}: \"{}\" finalized", release_cmd.ue_index, name());
+
+#ifdef JBPF_ENABLED
+    {
+        for (const auto& setup_item : release_cmd.pdu_session_res_to_release_list_rel_cmd) {
+            struct jbpf_pdu_session_ctx_info session_ctx_info = {0, 
+                                      static_cast<uint64_t>(release_cmd.ue_index), 
+                                      static_cast<uint16_t>(setup_item.pdu_session_id), 0, 0, 0};
+                                    
+            hook_cucp_pdu_session_remove(&session_ctx_info);
+        }
+    }
+#endif    
+  
   } else {
     logger.info("ue={}: \"{}\" failed", release_cmd.ue_index, name());
 
