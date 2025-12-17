@@ -63,6 +63,12 @@ struct grant_info {
     scs(grant.bwp_cfg->scs), symbols(grant.symbols), crbs(prb_to_crb(*grant.bwp_cfg, grant.prbs))
   {
   }
+
+  /// Checks whether this grant overlaps with another grant in time and frequency.
+  bool overlaps(const grant_info& other) const
+  {
+    return scs == other.scs and symbols.overlaps(other.symbols) and crbs.overlaps(other.crbs);
+  }
 };
 
 /// Derives Carrier CRB limits from scs-SpecificCarrier.
@@ -263,6 +269,9 @@ struct cell_slot_resource_allocator {
 
   /// Sets new slot.
   void slot_indication(slot_point sl);
+
+  /// Clears all the allocated resources and resets the scheduling result.
+  void clear();
 };
 
 /// Circular Ring of cell_slot_resource_grid objects. This class manages the automatic resetting of
@@ -287,6 +296,9 @@ struct cell_resource_allocator {
 
   /// Indicate the processing of a new slot in the scheduler.
   void slot_indication(slot_point sl_tx);
+
+  /// Called when cell is deactivated.
+  void stop();
 
   /// Cell index of the resource grid.
   du_cell_index_t cell_index() const { return cfg.cell_index; }

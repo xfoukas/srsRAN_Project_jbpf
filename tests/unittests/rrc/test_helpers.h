@@ -23,7 +23,6 @@
 #pragma once
 
 #include "srsran/cu_cp/cu_cp_types.h"
-#include "srsran/rrc/rrc_du.h"
 #include "srsran/rrc/rrc_ue.h"
 
 namespace srsran {
@@ -79,9 +78,12 @@ class dummy_rrc_ue_cu_cp_adapter : public rrc_ue_context_update_notifier, public
 public:
   void add_ue_context(rrc_ue_reestablishment_context_response context) { reest_context = context; }
 
-  bool next_ue_setup_response = true;
+  bool next_ue_setup_response          = true;
+  bool next_ue_setup_complete_response = true;
 
-  bool on_ue_setup_request(plmn_identity plmn) override { return next_ue_setup_response; }
+  bool on_ue_setup_request() override { return next_ue_setup_response; }
+
+  bool on_ue_setup_complete_received(const plmn_identity& plmn) override { return next_ue_setup_complete_response; }
 
   rrc_ue_reestablishment_context_response on_rrc_reestablishment_request(pci_t old_pci, rnti_t old_c_rnti) override
   {
@@ -130,7 +132,7 @@ public:
     });
   }
 
-  void on_up_context_setup_required(up_context ctxt) override { logger.info("UP context setup requested"); }
+  void on_up_context_setup_required(const up_context& ctxt) override { logger.info("UP context setup requested"); }
 
   up_context on_up_context_required() override
   {
@@ -148,8 +150,8 @@ public:
   }
 
   std::optional<rrc_meas_cfg>
-  on_measurement_config_request(nr_cell_identity            nci,
-                                std::optional<rrc_meas_cfg> current_meas_config = std::nullopt) override
+  on_measurement_config_request(nr_cell_identity                   nci,
+                                const std::optional<rrc_meas_cfg>& current_meas_config = std::nullopt) override
   {
     std::optional<rrc_meas_cfg> meas_cfg;
     return meas_cfg;
@@ -157,20 +159,13 @@ public:
 
   void on_measurement_report(const rrc_meas_results& meas_results) override {}
 
+  virtual void on_rrc_reconfiguration_complete_indicator() override {}
+
   cu_cp_ue_context_release_request last_cu_cp_ue_context_release_request;
 
 private:
   rrc_ue_reestablishment_context_response reest_context = {};
   srslog::basic_logger&                   logger        = srslog::fetch_basic_logger("TEST");
-};
-
-class dummy_rrc_du_cu_cp_adapter : public rrc_du_measurement_config_notifier
-{
-public:
-  bool on_cell_config_update_request(nr_cell_identity nci, const serving_cell_meas_config& serv_cell_cfg) override
-  {
-    return true;
-  }
 };
 
 class dummy_rrc_ue_rrc_du_adapter : public rrc_ue_event_notifier

@@ -102,7 +102,6 @@ rlc_tx_am_entity::rlc_tx_am_entity(gnb_du_id_t                          gnb_du_i
   head_min_size(rlc_am_pdu_header_min_size(cfg.sn_field_length)),
   head_max_size(rlc_am_pdu_header_max_size(cfg.sn_field_length)),
   poll_retransmit_timer(pcell_timer_factory.create_timer()),
-  is_poll_retransmit_timer_expired(false),
   pcell_executor(pcell_executor_),
   ue_executor(ue_executor_),
   pcap_context(ue_index, rb_id_, config)
@@ -736,8 +735,8 @@ size_t rlc_tx_am_entity::build_retx_pdu(span<uint8_t> rlc_pdu_buf)
 void rlc_tx_am_entity::on_status_pdu(rlc_am_status_pdu status)
 {
   // Redirect handling of status to pcell_executor
-  auto handle_func = TRACE_TASK([this, status = std::move(status)]() mutable { handle_status_pdu(std::move(status)); });
-  if (not pcell_executor.execute(std::move(handle_func))) {
+  if (not pcell_executor.execute(
+          [this, status = std::move(status)]() mutable { handle_status_pdu(std::move(status)); })) {
     logger.log_error("Unable to handle status report");
   }
 }
@@ -759,10 +758,9 @@ void rlc_tx_am_entity::handle_status_pdu(rlc_am_status_pdu status) noexcept SRSR
     }
 
     // redirect deletion of status report to UE executor
-    auto delete_status_pdu_func = TRACE_TASK([status = std::move(status)]() mutable {
-      // leaving this scope will implicitly delete the status PDU
-    });
-    if (not ue_executor.execute(std::move(delete_status_pdu_func))) {
+    if (not ue_executor.execute([status = std::move(status)]() mutable {
+          // leaving this scope will implicitly delete the status PDU
+        })) {
       logger.log_error("Unable to delete status report in UE executor. Deleting from pcell executor");
     }
   });
@@ -786,7 +784,7 @@ void rlc_tx_am_entity::handle_status_pdu(rlc_am_status_pdu status) noexcept SRSR
 
   if (tx_mod_base(status.ack_sn) > tx_mod_base(st.tx_next + 1)) {
     logger.log_error("Ignoring status report with ack_sn={} > tx_next. {}", status.ack_sn, st);
-    if (not ue_executor.defer(TRACE_TASK([this]() { upper_cn.on_protocol_failure(); }))) {
+    if (not ue_executor.defer([this]() { upper_cn.on_protocol_failure(); })) {
       logger.log_error("Could not trigger protocol failure on invalid ACK_SN");
     }
     return;
@@ -1023,14 +1021,14 @@ bool rlc_tx_am_entity::handle_nack(rlc_am_status_nack nack)
   if (nack.so_start > nack.so_end) {
     logger.log_warning("Invalid NACK with so_start > so_end. nack={}, sdu_length={}", nack, sdu_length);
     nack.so_start = 0;
-    if (ue_executor.defer(TRACE_TASK([this]() { upper_cn.on_protocol_failure(); }))) {
+    if (ue_executor.defer([this]() { upper_cn.on_protocol_failure(); })) {
       logger.log_error("Could not trigger protocol failure on invalid NACK");
     }
   }
   if (nack.so_start >= sdu_length) {
     logger.log_warning("Invalid NACK with so_start >= sdu_length. nack={} sdu_length={}.", nack, sdu_length);
     nack.so_start = 0;
-    if (ue_executor.defer(TRACE_TASK([this]() { upper_cn.on_protocol_failure(); }))) {
+    if (ue_executor.defer([this]() { upper_cn.on_protocol_failure(); })) {
       logger.log_error("Could not trigger protocol failure on invalid NACK");
     }
   }
@@ -1038,7 +1036,7 @@ bool rlc_tx_am_entity::handle_nack(rlc_am_status_nack nack)
     logger.log_warning("Invalid NACK: so_end >= sdu_length. nack={}, sdu_length={}.", nack, sdu_length);
     nack.so_end = sdu_length - 1;
     upper_cn.on_protocol_failure();
-    if (ue_executor.defer(TRACE_TASK([this]() { upper_cn.on_protocol_failure(); }))) {
+    if (ue_executor.defer([this]() { upper_cn.on_protocol_failure(); })) {
       logger.log_error("Could not trigger protocol failure on invalid NACK");
     }
   }
@@ -1112,7 +1110,7 @@ void rlc_tx_am_entity::handle_changed_buffer_state()
   if (not pending_buffer_state.test_and_set(std::memory_order_seq_cst)) {
     logger.log_debug("Triggering buffer state update to lower layer");
     // Redirect handling of status to pcell_executor
-    if (not pcell_executor.defer(TRACE_TASK([this]() { update_mac_buffer_state(/* force_notify */ false); }))) {
+    if (not pcell_executor.defer([this]() { update_mac_buffer_state(/* force_notify */ false); })) {
       logger.log_error("Failed to enqueue buffer state update");
     }
   } else {
@@ -1233,16 +1231,6 @@ uint8_t rlc_tx_am_entity::get_polling_bit(uint32_t sn, bool is_retx, uint32_t pa
   }
 
   /*
-   * From Sec. 5.3.3.4 Expiry of t-PollRetransmit
-   * [...]
-   * - include a poll in an AMD PDU as described in clause 5.3.3.2.
-   */
-  if (is_poll_retransmit_timer_expired.exchange(false, std::memory_order_relaxed)) {
-    logger.log_debug("Setting poll bit due to expired poll retransmit timer. sn={} poll_sn={}", sn, st.poll_sn);
-    poll = 1;
-  }
-
-  /*
    * - If poll bit is included:
    *     - set PDU_WITHOUT_POLL to 0;
    *     - set BYTE_WITHOUT_POLL to 0.
@@ -1279,6 +1267,19 @@ uint8_t rlc_tx_am_entity::get_polling_bit(uint32_t sn, bool is_retx, uint32_t pa
 
 void rlc_tx_am_entity::on_expired_poll_retransmit_timer() noexcept SRSRAN_RTSAN_NONBLOCKING
 {
+  std::chrono::time_point<std::chrono::steady_clock> t_start;
+  if (metrics_low.is_enabled()) {
+    t_start = std::chrono::steady_clock::now();
+  }
+
+  auto on_function_exit = make_scope_exit([&]() {
+    if (metrics_low.is_enabled()) {
+      auto t_end    = std::chrono::steady_clock::now();
+      auto duration = std::chrono::duration_cast<std::chrono::microseconds>(t_end - t_start);
+      metrics_low.metrics_add_t_poll_retransmission_expiry_latency_us(duration.count());
+    }
+  });
+
   // t-PollRetransmit
   logger.log_info("Poll retransmit timer expired after {}ms.", poll_retransmit_timer.duration().count());
   log_state(srslog::basic_levels::debug);
@@ -1303,16 +1304,11 @@ void rlc_tx_am_entity::on_expired_poll_retransmit_timer() noexcept SRSRAN_RTSAN_
       return;
     }
     // RETX first RLC SDU that has not been ACKed
-    // or first SDU segment of the first RLC SDU
-    // that has not been acked
     rlc_tx_amd_retx retx = {};
     retx.so              = 0;
     retx.sn              = st.tx_next_ack;
     retx.length          = tx_window[st.tx_next_ack].sdu.length();
     bool retx_enqueued   = retx_queue.try_push(retx);
-    //
-    // TODO: Revise this: shall we send a minimum-sized segment instead?
-    //
 
     if (retx_enqueued) {
       logger.log_debug(
@@ -1330,7 +1326,7 @@ void rlc_tx_am_entity::on_expired_poll_retransmit_timer() noexcept SRSRAN_RTSAN_
   /*
    * - include a poll in an AMD PDU as described in clause 5.3.3.2.
    */
-  is_poll_retransmit_timer_expired.store(true, std::memory_order_relaxed);
+  // The poll inclusion according to clause 5.3.3.2. is evaluated later upon transmission.
 }
 
 bool rlc_tx_am_entity::inside_tx_window(uint32_t sn) const
@@ -1397,7 +1393,7 @@ bool rlc_tx_am_entity::valid_nack(uint32_t ack_sn, const rlc_am_status_nack& nac
   // NACK_SN >= tx_next
   if (tx_mod_base(nack.nack_sn) > tx_mod_base(st.tx_next)) {
     logger.log_error("Ignoring status report with nack_sn={} >= tx_next. {}", nack.nack_sn, st);
-    if (ue_executor.defer(TRACE_TASK([this]() { upper_cn.on_protocol_failure(); }))) {
+    if (ue_executor.defer([this]() { upper_cn.on_protocol_failure(); })) {
       logger.log_error("Could not trigger protocol failure on invalid NACK");
     }
     return false;
@@ -1409,7 +1405,7 @@ bool rlc_tx_am_entity::valid_nack(uint32_t ack_sn, const rlc_am_status_nack& nac
                        nack.nack_sn,
                        nack.nack_range,
                        st);
-      if (ue_executor.defer(TRACE_TASK([this]() { upper_cn.on_protocol_failure(); }))) {
+      if (ue_executor.defer([this]() { upper_cn.on_protocol_failure(); })) {
         logger.log_error("Could not trigger protocol failure on invalid NACK");
       }
       return false;

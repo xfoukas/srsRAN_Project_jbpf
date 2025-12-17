@@ -75,6 +75,7 @@ std::shared_ptr<dmrs_pusch_estimator_factory> create_dmrs_pusch_estimator_factor
     std::shared_ptr<pseudo_random_generator_factory>     prg_factory,
     std::shared_ptr<low_papr_sequence_generator_factory> low_papr_sequence_gen_factory,
     std::shared_ptr<port_channel_estimator_factory>      ch_estimator_factory,
+    task_executor&                                       executor,
     port_channel_estimator_fd_smoothing_strategy         fd_smoothing_strategy,
     port_channel_estimator_td_interpolation_strategy     td_interpolation_strategy,
     bool                                                 compensate_cfo);
@@ -108,6 +109,10 @@ public:
 
 std::shared_ptr<port_channel_estimator_factory>
 create_port_channel_estimator_factory_sw(std::shared_ptr<time_alignment_estimator_factory> ta_estimator_factory);
+
+std::shared_ptr<port_channel_estimator_factory>
+create_port_channel_estimator_pool_factory(std::shared_ptr<port_channel_estimator_factory> ch_est_factory,
+                                           unsigned                                        nof_concurrent_threads);
 
 class pss_processor_factory
 {

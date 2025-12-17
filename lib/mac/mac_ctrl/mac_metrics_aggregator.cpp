@@ -40,7 +40,9 @@ struct full_cell_report {
   std::optional<mac_dl_cell_metric_report> mac;
 };
 
-full_cell_report report_preinit(unsigned max_ue_events = 64)
+} // namespace
+
+static full_cell_report report_preinit(unsigned max_ue_events = 64)
 {
   full_cell_report report{};
   // Pre-reserve space for UE metrics.
@@ -51,17 +53,15 @@ full_cell_report report_preinit(unsigned max_ue_events = 64)
   return report;
 }
 
-} // namespace
-
 class mac_metrics_aggregator::cell_metric_handler final : public mac_cell_metric_notifier,
                                                           public scheduler_cell_metrics_notifier
 {
 public:
-  cell_metric_handler(mac_metrics_aggregator& parent_,
-                      du_cell_index_t         cell_index_,
-                      subcarrier_spacing      scs_common_,
-                      du_cell_timer_source&   time_source_,
-                      srslog::basic_logger&   logger_) :
+  cell_metric_handler(mac_metrics_aggregator&    parent_,
+                      du_cell_index_t            cell_index_,
+                      subcarrier_spacing         scs_common_,
+                      mac_cell_clock_controller& time_source_,
+                      srslog::basic_logger&      logger_) :
     parent(parent_),
     cell_index(cell_index_),
     scs_common(scs_common_),
@@ -184,11 +184,11 @@ private:
     mac_builder = std::move(sched_builder);
   }
 
-  mac_metrics_aggregator&  parent;
-  const du_cell_index_t    cell_index;
-  const subcarrier_spacing scs_common;
-  const unsigned           period_slots;
-  du_cell_timer_source&    time_source;
+  mac_metrics_aggregator&    parent;
+  const du_cell_index_t      cell_index;
+  const subcarrier_spacing   scs_common;
+  const unsigned             period_slots;
+  mac_cell_clock_controller& time_source;
 
   // Reports from a given cell.
   report_queue_type          report_queue;
@@ -218,9 +218,9 @@ mac_metrics_aggregator::mac_metrics_aggregator(const mac_control_config::metrics
 
 mac_metrics_aggregator::~mac_metrics_aggregator() {}
 
-cell_metric_report_config mac_metrics_aggregator::add_cell(du_cell_index_t       cell_index,
-                                                           subcarrier_spacing    scs_common,
-                                                           du_cell_timer_source& time_source)
+cell_metric_report_config mac_metrics_aggregator::add_cell(du_cell_index_t            cell_index,
+                                                           subcarrier_spacing         scs_common,
+                                                           mac_cell_clock_controller& time_source)
 {
   srsran_assert(not cells.contains(cell_index), "Duplicate cell creation");
 
@@ -274,7 +274,13 @@ bool mac_metrics_aggregator::pop_report(cell_metric_handler& cell)
   const auto* next_ev = cell.report_queue.peek();
 
   if (next_ev == nullptr) {
-    // No report to pop.
+    // No report to pop for this cell.
+    return false;
+  }
+
+  if (not next_report_start_slot.valid()) {
+    // All cells are deactivated.
+    logger.warning("cell={}: Discarding report as all cells are deactivated", fmt::underlying(cell.cell_index));
     return false;
   }
 
@@ -364,16 +370,38 @@ void mac_metrics_aggregator::handle_cell_deactivation(du_cell_index_t           
   srsran_assert(cell.active_flag, "Deactivation of already deactivated cell not supported");
   srsran_assert(last_report.cell_deactivated, "Expected cell deactivated flag to be set");
 
-  // Save last report before deactivating cell.
-  if (last_report.start_slot.valid()) {
-    slot_point next_start_sl_tx = next_report_start_slot.without_hyper_sfn();
-    if (last_report.start_slot >= next_start_sl_tx and last_report.start_slot < next_start_sl_tx + cell.period_slots) {
-      next_report.dl.cells.push_back(last_report);
+  auto push_last_report = [&]() {
+    if (last_report.start_slot.valid()) {
+      slot_point next_start_sl_tx = next_report_start_slot.without_hyper_sfn();
+      if (last_report.start_slot >= next_start_sl_tx and
+          last_report.start_slot < next_start_sl_tx + cell.period_slots) {
+        next_report.dl.cells.push_back(last_report);
+        return true;
+      }
     }
-  }
-  cell.active_flag = false;
+    return false;
+  };
+
+  // Save last report before deactivating cell.
+  bool report_pushed = push_last_report();
+  cell.active_flag   = false;
   if (--nof_active_cells == 0) {
-    // No cells are active. Reset the next aggregated report start slot.
+    // No more cells are active.
+
+    // Stop aggregation timer.
+    aggr_timer.stop();
+
+    // We don't expect more reports. Verify if there is nothing pending to be processed.
+    handle_pending_reports();
+
+    if (not report_pushed) {
+      // It can happen that the next_report_start_slot was updated in handle_pending_reports() and therefore,
+      // the last report can be pushed.
+      push_last_report();
+    }
+    try_send_new_report();
+
+    // Reset the next aggregated report start slot.
     next_report_start_slot = {};
   }
 }

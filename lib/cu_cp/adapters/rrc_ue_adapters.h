@@ -24,12 +24,10 @@
 
 #include "../cu_cp_controller/cu_cp_ue_admission_controller.h"
 #include "../cu_cp_impl_interface.h"
-#include "../ngap_repository.h"
 #include "../ue_manager/cu_cp_ue_impl_interface.h"
 #include "../up_resource_manager/up_resource_manager_impl.h"
 #include "srsran/adt/byte_buffer.h"
 #include "srsran/cu_cp/ue_task_scheduler.h"
-#include "srsran/f1ap/cu_cp/f1ap_cu.h"
 #include "srsran/ngap/ngap.h"
 #include "srsran/ran/plmn_identity.h"
 #include "srsran/rrc/rrc_ue.h"
@@ -68,13 +66,13 @@ public:
 
   void on_initial_ue_message(const cu_cp_initial_ue_message& msg) override
   {
-    srsran_assert(ngap != nullptr, "ue={}: NGAP for not found", msg.ue_index);
+    srsran_assert(ngap != nullptr, "ue={}: NGAP not found", msg.ue_index);
     ngap->get_ngap_nas_message_handler().handle_initial_ue_message(msg);
   }
 
   void on_ul_nas_transport_message(const cu_cp_ul_nas_transport& msg) override
   {
-    srsran_assert(ngap != nullptr, "ue={}: NGAP for not found", msg.ue_index);
+    srsran_assert(ngap != nullptr, "ue={}: NGAP not found", msg.ue_index);
     ngap->get_ngap_nas_message_handler().handle_ul_nas_transport_message(msg);
   }
 
@@ -82,7 +80,7 @@ public:
                                                   const nr_cell_global_id_t& cgi,
                                                   const tac_t                tac) override
   {
-    srsran_assert(ngap != nullptr, "ue={}: NGAP for not found", ue_index);
+    srsran_assert(ngap != nullptr, "ue={}: NGAP not found", ue_index);
     ngap->get_ngap_control_message_handler().handle_inter_cu_ho_rrc_recfg_complete(ue_index, cgi, tac);
   }
 
@@ -135,7 +133,7 @@ public:
   void enable_security() override
   {
     srsran_assert(ue != nullptr, "CU-CP UE must not be nullptr");
-    return ue->get_security_manager().enable_security();
+    ue->get_security_manager().enable_security();
   }
 
   /// \brief Get the current security context
@@ -154,17 +152,17 @@ public:
 
   /// \brief Update the security context
   /// \param[in] sec_ctxt The new security context
-  void update_security_context(security::security_context sec_ctxt) override
+  void update_security_context(const security::security_context& sec_ctxt) override
   {
     srsran_assert(ue != nullptr, "CU-CP UE must not be nullptr");
-    return ue->get_security_manager().update_security_context(sec_ctxt);
+    ue->get_security_manager().update_security_context(sec_ctxt);
   }
 
   /// \brief Perform horizontal key derivation
   void perform_horizontal_key_derivation(pci_t target_pci, unsigned target_ssb_arfcn) override
   {
     srsran_assert(ue != nullptr, "CU-CP UE must not be nullptr");
-    return ue->get_security_manager().perform_horizontal_key_derivation(target_pci, target_ssb_arfcn);
+    ue->get_security_manager().perform_horizontal_key_derivation(target_pci, target_ssb_arfcn);
   }
 
 private:
@@ -190,10 +188,16 @@ public:
     meas_handler         = &meas_handler_;
   }
 
-  bool on_ue_setup_request(plmn_identity plmn) override
+  bool on_ue_setup_request() override
   {
     srsran_assert(controller != nullptr, "CU-CP controller must not be nullptr");
-    return controller->request_ue_setup(plmn);
+    return controller->request_ue_setup();
+  }
+
+  bool on_ue_setup_complete_received(const plmn_identity& plmn) override
+  {
+    srsran_assert(controller != nullptr, "CU-CP controller must not be nullptr");
+    return cu_cp_rrc_ue_handler->handle_ue_plmn_selected(ue_index, plmn);
   }
 
   rrc_ue_reestablishment_context_response on_rrc_reestablishment_request(pci_t old_pci, rnti_t old_c_rnti) override
@@ -211,13 +215,19 @@ public:
   void on_rrc_reestablishment_failure(const cu_cp_ue_context_release_request& request) override
   {
     srsran_assert(cu_cp_rrc_ue_handler != nullptr, "CU-CP handler must not be nullptr");
-    return cu_cp_rrc_ue_handler->handle_rrc_reestablishment_failure(request);
+    cu_cp_rrc_ue_handler->handle_rrc_reestablishment_failure(request);
   }
 
   void on_rrc_reestablishment_complete(ue_index_t old_ue_index) override
   {
     srsran_assert(cu_cp_rrc_ue_handler != nullptr, "CU-CP handler must not be nullptr");
-    return cu_cp_rrc_ue_handler->handle_rrc_reestablishment_complete(old_ue_index);
+    cu_cp_rrc_ue_handler->handle_rrc_reestablishment_complete(old_ue_index);
+  }
+
+  virtual void on_rrc_reconfiguration_complete_indicator() override
+  {
+    srsran_assert(cu_cp_rrc_ue_handler != nullptr, "CU-CP handler must not be nullptr");
+    cu_cp_rrc_ue_handler->handle_rrc_reconf_complete_indicator(ue_index);
   }
 
   async_task<bool> on_ue_transfer_required(ue_index_t old_ue_index) override
@@ -232,7 +242,7 @@ public:
     return cu_cp_rrc_ue_handler->handle_ue_context_release(request);
   }
 
-  void on_up_context_setup_required(up_context ctxt) override
+  void on_up_context_setup_required(const up_context& ctxt) override
   {
     srsran_assert(up_mng != nullptr, "UP resource manager must not be nullptr");
     up_mng->set_up_context(ctxt);
@@ -251,8 +261,8 @@ public:
   }
 
   std::optional<rrc_meas_cfg>
-  on_measurement_config_request(nr_cell_identity            nci,
-                                std::optional<rrc_meas_cfg> current_meas_config = std::nullopt) override
+  on_measurement_config_request(nr_cell_identity                   nci,
+                                const std::optional<rrc_meas_cfg>& current_meas_config = std::nullopt) override
   {
     srsran_assert(meas_handler != nullptr, "Measurement handler must not be nullptr");
     return meas_handler->handle_measurement_config_request(ue_index, nci, current_meas_config);

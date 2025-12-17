@@ -21,9 +21,9 @@
 ########################################################################
 # Prevent in-tree builds
 ########################################################################
-if(${CMAKE_SOURCE_DIR} STREQUAL ${CMAKE_BINARY_DIR})
+if (${CMAKE_SOURCE_DIR} STREQUAL ${CMAKE_BINARY_DIR})
     message(FATAL_ERROR "Prevented in-tree build. This is bad practice.")
-endif(${CMAKE_SOURCE_DIR} STREQUAL ${CMAKE_BINARY_DIR})
+endif (${CMAKE_SOURCE_DIR} STREQUAL ${CMAKE_BINARY_DIR})
 
 ########################################################################
 # Project setup
@@ -94,6 +94,10 @@ if (BUILD_TESTING)
 option(USE_PHY_TESTVECTORS   "Enable testvector PHY tests"                OFF)
 endif(BUILD_TESTING)
 option(ENABLE_JBPF           "Enable jbpf"                              OFF)
+
+# Set linker options and default value.
+set(LINKER "default" CACHE STRING "Which linker to use")
+set_property(CACHE LINKER PROPERTY STRINGS default bfd lld)
 
 # Set assertion level options and default value.
 set(ASSERT_LEVEL "AUTO" CACHE STRING "Assertion paranoia level")
@@ -279,6 +283,18 @@ if (ENABLE_GCOV)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fprofile-arcs -ftest-coverage")
 endif (ENABLE_GCOV)
 
+if(NOT LINKER STREQUAL "default")
+    if (LINKER STREQUAL "bfd")
+        add_link_options(-fuse-ld=bfd)
+        message(STATUS "Linker set to BFD")
+    elseif (LINKER STREQUAL "lld")
+        add_link_options(-fuse-ld=lld)
+        message(STATUS "Linker set to LLD")
+    else ()
+        message(FATAL_ERROR "Unsupported linker ${LINKER} for compiler ${CMAKE_CXX_COMPILER_ID}")
+    endif ()
+endif ()
+
 if(NOT ASSERT_LEVEL STREQUAL "MINIMAL")
     # asserts are enabled.
     add_definitions(-DASSERTS_ENABLED)
@@ -301,6 +317,7 @@ endif()
 ########################################################################
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/external/cmake-sbom")
 include(sbom)
+include(copyright)
 include(GNUInstallDirs)
 
 sbom_generate(
@@ -430,7 +447,11 @@ if (BUILD_TESTING)
     find_package(GTest REQUIRED)
     # Alias gtest_discover_tests increase discovery the timeout.
     function(gtest_discover_tests)
-        _gtest_discover_tests(${ARGV} DISCOVERY_TIMEOUT 15)
+        _gtest_discover_tests(
+            ${ARGV}
+            DISCOVERY_MODE PRE_TEST
+            DISCOVERY_TIMEOUT 15
+        )
     endfunction()
 else()
     message(STATUS "Skipping Tests. Set BUILD_TESTING to On to compile tests.")
@@ -666,6 +687,7 @@ message(STATUS "Building srsRAN version ${SRSRAN_VERSION_STRING}")
 ########################################################################
 # Generate SBOM
 ########################################################################
+parse_copyright_file("${CMAKE_SOURCE_DIR}/COPYRIGHT")
 sbom_add(
     LICENSE "LicenseRef-srsRAN"
     NAME    "AGPL-3.0-only"

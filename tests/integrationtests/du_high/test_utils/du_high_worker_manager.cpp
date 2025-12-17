@@ -21,7 +21,7 @@
  */
 
 #include "du_high_worker_manager.h"
-#include <future>
+#include "srsran/support/executors/strand_executor.h"
 
 using namespace srsran;
 
@@ -45,6 +45,9 @@ du_high_worker_manager::du_high_worker_manager()
   cfg.trace_exec_tasks   = false;
 
   exec_mapper = srs_du::create_du_high_executor_mapper(cfg);
+
+  time_exec = std::make_unique<task_strand<priority_task_worker_pool_executor, concurrent_queue_policy::lockfree_mpmc>>(
+      high_prio_exec, 128);
 }
 
 du_high_worker_manager::~du_high_worker_manager()
@@ -59,25 +62,23 @@ void du_high_worker_manager::stop()
 
 void du_high_worker_manager::flush_pending_dl_pdus()
 {
-  std::vector<std::promise<void>> promises(nof_ue_strands);
-  std::vector<std::future<void>>  futures;
+  std::vector<scoped_sync_token> tokens;
+  tokens.reserve(nof_ue_strands);
   for (unsigned i = 0; i != nof_ue_strands; ++i) {
-    futures.emplace_back(promises[i].get_future());
-    bool ret =
-        exec_mapper->ue_mapper().f1u_dl_pdu_executor(to_du_ue_index(i)).defer([p = &promises[i]]() { p->set_value(); });
+    tokens.push_back(ev.get_token());
+  }
+  for (unsigned i = 0; i != nof_ue_strands; ++i) {
+    bool ret = exec_mapper->ue_mapper().f1u_dl_pdu_executor(to_du_ue_index(i)).defer([t = std::move(tokens[i])]() {});
     report_fatal_error_if_not(ret, "unable to dispatch task");
   }
-
-  for (unsigned i = 0; i != nof_ue_strands; ++i) {
-    futures[i].get();
-  }
+  ev.wait();
 }
 
 void du_high_worker_manager::flush_pending_control_tasks()
 {
-  std::promise<void> prom;
-  std::future<void>  fut = prom.get_future();
-  bool               ret = exec_mapper->du_control_executor().defer([&prom]() { prom.set_value(); });
+  bool ret = exec_mapper->du_control_executor().defer([t = ev.get_token()]() {
+    // do nothing, just signal
+  });
   report_fatal_error_if_not(ret, "unable to dispatch task");
-  fut.wait();
+  ev.wait();
 }

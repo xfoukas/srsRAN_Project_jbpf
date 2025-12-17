@@ -32,10 +32,14 @@
 namespace srsran {
 
 struct io_broker_config {
-  explicit io_broker_config(os_sched_affinity_bitmask mask_ = {}) : cpu_mask(std::move(mask_)) {}
+  io_broker_config() = default;
+  explicit io_broker_config(os_thread_realtime_priority prio, os_sched_affinity_bitmask mask_ = {}) :
+    thread_prio(prio), cpu_mask(std::move(mask_))
+  {
+  }
 
   std::string                 thread_name = "io_broker_epoll";
-  os_thread_realtime_priority thread_prio = os_thread_realtime_priority::min() + 5;
+  os_thread_realtime_priority thread_prio = os_thread_realtime_priority::no_realtime();
   os_sched_affinity_bitmask   cpu_mask;
 };
 
@@ -86,9 +90,6 @@ public:
 
       return ret;
     }
-
-    /// Returns the file descriptor value held by this subscriber.
-    int value() const { return fd; }
 
   private:
     bool reset_impl(std::promise<bool>* complete_notifier = nullptr)

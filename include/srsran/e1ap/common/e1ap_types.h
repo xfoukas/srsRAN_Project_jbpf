@@ -36,7 +36,7 @@ namespace srsran {
 
 /// \brief GNB-CU-CP-UE-E1AP-ID used to identify the UE in the CU-CP E1AP.
 /// \remark See TS 38.463 Section 9.3.1.4: GNB-CU-UE-E1AP-ID valid values: (0..2^32-1).
-static constexpr uint64_t MAX_NOF_CU_CP_E1AP_UES = ((uint64_t)1 << 32);
+constexpr uint64_t MAX_NOF_CU_CP_E1AP_UES = ((uint64_t)1 << 32);
 enum class gnb_cu_cp_ue_e1ap_id_t : uint64_t { min = 0, max = MAX_NOF_CU_CP_E1AP_UES - 1, invalid = 0x1ffffffff };
 
 constexpr uint64_t gnb_cu_cp_ue_e1ap_id_to_uint(gnb_cu_cp_ue_e1ap_id_t id)
@@ -52,7 +52,7 @@ constexpr gnb_cu_cp_ue_e1ap_id_t int_to_gnb_cu_cp_ue_e1ap_id(uint64_t idx)
 
 /// \brief GNB-CU-UP-UE-E1AP-ID used to identify the UE in the CU-UP E1AP.
 /// \remark See TS 38.473 Section 9.3.1.5: GNB-CU-UP-UE-E1AP-ID valid values: (0..2^32-1).
-static constexpr uint64_t MAX_NOF_CU_UP_E1AP_UES = ((uint64_t)1 << 32);
+constexpr uint64_t MAX_NOF_CU_UP_E1AP_UES = ((uint64_t)1 << 32);
 enum class gnb_cu_up_ue_e1ap_id_t : uint64_t { min = 0, max = MAX_NOF_CU_CP_E1AP_UES - 1, invalid = 0x1ffffffff };
 
 constexpr uint64_t gnb_cu_up_ue_e1ap_id_to_uint(gnb_cu_up_ue_e1ap_id_t id)
@@ -285,6 +285,7 @@ struct e1ap_drb_to_modify_item_ng_ran {
   std::optional<e1ap_pdcp_config>                                pdcp_cfg;
   std::optional<e1ap_data_forwarding_info>                       drb_data_forwarding_info;
   std::optional<bool>                                            pdcp_sn_status_request;
+  std::optional<e1ap_pdcp_sn_status_info>                        pdcp_sn_status_info;
   std::vector<e1ap_up_params_item>                               dl_up_params;
   std::vector<e1ap_cell_group_info_item>                         cell_group_to_add;
   std::vector<e1ap_cell_group_info_item>                         cell_group_to_modify;

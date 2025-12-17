@@ -28,6 +28,7 @@
 #include "nzp_csi_rs_generator_impl.h"
 #include "nzp_csi_rs_generator_pool.h"
 #include "port_channel_estimator_average_impl.h"
+#include "port_channel_estimator_pool.h"
 #include "pss_processor_impl.h"
 #include "pucch/dmrs_pucch_estimator_format2.h"
 #include "pucch/dmrs_pucch_estimator_formats3_4.h"
@@ -37,6 +38,7 @@
 #include "srsran/phy/support/support_formatters.h"
 #include "srsran/phy/support/time_alignment_estimator/time_alignment_estimator_factories.h"
 #include "srsran/phy/upper/signal_processors/signal_processor_formatters.h"
+#include <map>
 
 using namespace srsran;
 
@@ -151,12 +153,14 @@ public:
   dmrs_pusch_estimator_factory_sw(std::shared_ptr<pseudo_random_generator_factory>     prg_factory_,
                                   std::shared_ptr<low_papr_sequence_generator_factory> low_papr_gen_factory_,
                                   std::shared_ptr<port_channel_estimator_factory>      ch_estimator_factory_,
+                                  task_executor&                                       executor_,
                                   port_channel_estimator_fd_smoothing_strategy         fd_smoothing_strategy_,
                                   port_channel_estimator_td_interpolation_strategy     td_interpolation_strategy_,
                                   bool                                                 compensate_cfo_) :
     prg_factory(std::move(prg_factory_)),
     low_papr_gen_factory(std::move(low_papr_gen_factory_)),
     ch_estimator_factory(std::move(ch_estimator_factory_)),
+    executor(executor_),
     fd_smoothing_strategy(fd_smoothing_strategy_),
     td_interpolation_strategy(td_interpolation_strategy_),
     compensate_cfo(compensate_cfo_)
@@ -171,13 +175,15 @@ public:
     return std::make_unique<dmrs_pusch_estimator_impl>(
         prg_factory->create(),
         low_papr_gen_factory->create(),
-        ch_estimator_factory->create(fd_smoothing_strategy, td_interpolation_strategy, compensate_cfo));
+        ch_estimator_factory->create(fd_smoothing_strategy, td_interpolation_strategy, compensate_cfo),
+        executor);
   }
 
 private:
   std::shared_ptr<pseudo_random_generator_factory>     prg_factory;
   std::shared_ptr<low_papr_sequence_generator_factory> low_papr_gen_factory;
   std::shared_ptr<port_channel_estimator_factory>      ch_estimator_factory;
+  task_executor&                                       executor;
   port_channel_estimator_fd_smoothing_strategy         fd_smoothing_strategy;
   port_channel_estimator_td_interpolation_strategy     td_interpolation_strategy;
   bool                                                 compensate_cfo;
@@ -282,6 +288,56 @@ private:
   std::shared_ptr<time_alignment_estimator_factory> ta_estimator_factory;
 };
 
+class port_channel_estimator_pool_factory : public port_channel_estimator_factory
+{
+public:
+  port_channel_estimator_pool_factory(std::shared_ptr<port_channel_estimator_factory> factory_,
+                                      unsigned                                        nof_concurrent_threads_) :
+    factory(std::move(factory_)), nof_concurrent_threads(nof_concurrent_threads_)
+  {
+    srsran_assert(factory, "Invalid port channel estimator factory.");
+    srsran_assert(nof_concurrent_threads > 1, "Number of concurrent threads must be greater than one.");
+  }
+
+  std::unique_ptr<port_channel_estimator>
+  create(port_channel_estimator_fd_smoothing_strategy     fd_smoothing_strategy,
+         port_channel_estimator_td_interpolation_strategy td_interpolation_strategy,
+         bool                                             compensate_cfo) override
+  {
+    auto& this_estimator_pool = estimators[{fd_smoothing_strategy, td_interpolation_strategy, compensate_cfo}];
+    if (!this_estimator_pool) {
+      std::vector<std::unique_ptr<port_channel_estimator>> instances(nof_concurrent_threads);
+      std::generate(instances.begin(),
+                    instances.end(),
+                    [this, fd_smoothing_strategy, td_interpolation_strategy, compensate_cfo]() {
+                      return factory->create(fd_smoothing_strategy, td_interpolation_strategy, compensate_cfo);
+                    });
+      this_estimator_pool = std::make_shared<port_channel_estimator_pool::estimator_pool>(instances);
+    }
+    return std::make_unique<port_channel_estimator_pool>(this_estimator_pool);
+  }
+
+private:
+  using estimator_config =
+      std::tuple<port_channel_estimator_fd_smoothing_strategy, port_channel_estimator_td_interpolation_strategy, bool>;
+
+  struct config_hash {
+    size_t operator()(const estimator_config& c) const noexcept
+    {
+      size_t h1 = std::hash<int>{}(static_cast<int>(std::get<0>(c)));
+      size_t h2 = std::hash<int>{}(static_cast<int>(std::get<1>(c)));
+      size_t h3 = std::hash<bool>{}(std::get<2>(c));
+
+      return (h1 ^ (h2 << 1) ^ (h3 << 2));
+    }
+  };
+
+  std::shared_ptr<port_channel_estimator_factory> factory;
+  unsigned                                        nof_concurrent_threads;
+  std::unordered_map<estimator_config, std::shared_ptr<port_channel_estimator_pool::estimator_pool>, config_hash>
+      estimators;
+};
+
 class pss_processor_factory_sw : public pss_processor_factory
 {
 public:
@@ -329,6 +385,7 @@ std::shared_ptr<dmrs_pusch_estimator_factory> srsran::create_dmrs_pusch_estimato
     std::shared_ptr<pseudo_random_generator_factory>     prg_factory,
     std::shared_ptr<low_papr_sequence_generator_factory> low_papr_sequence_gen_factory,
     std::shared_ptr<port_channel_estimator_factory>      ch_estimator_factory,
+    task_executor&                                       executor,
     port_channel_estimator_fd_smoothing_strategy         fd_smoothing_strategy,
     port_channel_estimator_td_interpolation_strategy     td_interpolation_strategy,
     bool                                                 compensate_cfo)
@@ -336,6 +393,7 @@ std::shared_ptr<dmrs_pusch_estimator_factory> srsran::create_dmrs_pusch_estimato
   return std::make_shared<dmrs_pusch_estimator_factory_sw>(std::move(prg_factory),
                                                            std::move(low_papr_sequence_gen_factory),
                                                            std::move(ch_estimator_factory),
+                                                           executor,
                                                            fd_smoothing_strategy,
                                                            td_interpolation_strategy,
                                                            compensate_cfo);
@@ -359,6 +417,13 @@ std::shared_ptr<port_channel_estimator_factory>
 srsran::create_port_channel_estimator_factory_sw(std::shared_ptr<time_alignment_estimator_factory> ta_estimator_factory)
 {
   return std::make_shared<port_channel_estimator_factory_sw>(std::move(ta_estimator_factory));
+}
+
+std::shared_ptr<port_channel_estimator_factory>
+srsran::create_port_channel_estimator_pool_factory(std::shared_ptr<port_channel_estimator_factory> ch_est_factory,
+                                                   unsigned nof_concurrent_threads)
+{
+  return std::make_shared<port_channel_estimator_pool_factory>(std::move(ch_est_factory), nof_concurrent_threads);
 }
 
 std::shared_ptr<pss_processor_factory> srsran::create_pss_processor_factory_sw()

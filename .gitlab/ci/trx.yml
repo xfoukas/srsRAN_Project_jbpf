@@ -8,7 +8,7 @@
 
 include:
   - project: softwareradiosystems/ci/tools
-    ref: "22"
+    ref: "23"
     file: .gitlab/ci-shared/setup/all.yml
   - local: .gitlab/ci/build.yml
 
@@ -31,8 +31,6 @@ build trx driver:
     - if: $ON_MR == "true" && $CI_MERGE_REQUEST_TARGET_BRANCH_PROTECTED == "true" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME != $CI_DEFAULT_BRANCH
       when: never
     - if: $ON_MR
-    - if: $ON_WEB
-    - if: $ON_API
   retry: 2
   script:
     - |
@@ -88,15 +86,12 @@ build trx driver:
   artifacts: &trx_artifacts
     paths:
       - build_trx_srsran/libtrx_srsran.so
-    expire_in: 4 hours
+    expire_in: 3 days
 
 build amariue zmq driver:
   extends: build trx driver
   rules:
     - if: $CI_DESCRIPTION =~ /Nightly E2E Tests/
-  artifacts:
-    <<: *trx_artifacts
-    expire_in: 3 days
 
 build uesim zmq driver:
   extends: build trx driver
@@ -105,16 +100,34 @@ build uesim zmq driver:
   variables:
     OS: fedora-39
     AMARISOFT_VERSION: "2024-03-15"
-  artifacts:
-    <<: *trx_artifacts
-    expire_in: 3 days
 
 build amariue ntn zmq driver:
   extends: build trx driver
   rules:
     - if: $CI_DESCRIPTION =~ /Nightly E2E Tests/
   variables:
-    AMARISOFT_VERSION: "2024-12-13"
-  artifacts:
-    <<: *trx_artifacts
-    expire_in: 3 days
+    AMARISOFT_VERSION: "2025-09-19"
+
+custom zmq driver:
+  extends: build trx driver
+  rules:
+    - if: $ON_MR
+      when: never
+    - if: $ON_DEFAULT_BRANCH
+      when: never
+    - if: $ON_SCHEDULE
+      when: never
+    - if: $ON_TAG
+      when: never
+    - if: $GROUP == "viavi" || $GROUP == "rf"
+      when: never
+    - if: $GROUP == "uesim"
+      variables:
+        OS: fedora-39
+        AMARISOFT_VERSION: "2024-03-15"
+    - if: $TESTBED == "zmq_ntn"
+      variables:
+        AMARISOFT_VERSION: "2025-09-19"
+    - if: $TESTBED != ""
+      variables:
+        AMARISOFT_VERSION: "2023-09-08"

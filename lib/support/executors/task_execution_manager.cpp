@@ -30,6 +30,17 @@
 
 using namespace srsran;
 
+/// Helper to convert execution_config_helper::task_queue into concurrent_queue_params.
+static std::vector<concurrent_queue_params> convert_to_qparams(span<const execution_config_helper::task_queue> queues)
+{
+  std::vector<concurrent_queue_params> ret;
+  ret.reserve(queues.size());
+  for (const auto& q : queues) {
+    ret.push_back(concurrent_queue_params{q.policy, q.size, q.nof_prereserved_producers});
+  }
+  return ret;
+}
+
 namespace {
 
 // Metafunction to derive parameter types based on the execution context type.
@@ -53,17 +64,6 @@ template <>
 struct execution_context_traits<priority_task_worker> {
   using params = execution_config_helper::priority_multiqueue_worker;
 };
-
-/// Helper to convert execution_config_helper::task_queue into concurrent_queue_params.
-std::vector<concurrent_queue_params> convert_to_qparams(span<const execution_config_helper::task_queue> queues)
-{
-  std::vector<concurrent_queue_params> ret;
-  ret.reserve(queues.size());
-  for (const auto& q : queues) {
-    ret.push_back(concurrent_queue_params{q.policy, q.size, q.nof_prereserved_producers});
-  }
-  return ret;
-}
 
 /// Functionality shared across single worker, prioritized multiqueue worker and worker pool task execution contexts.
 template <typename WorkerType>
@@ -405,11 +405,12 @@ bool task_execution_manager::add_execution_context(std::unique_ptr<task_executio
     logger.error("Unable to create execution context. Cause: Invalid name");
     return false;
   }
-  auto ret = contexts.insert(std::make_pair(ctxt_to_insert->name(), std::move(ctxt_to_insert)));
+  auto ctxt_name = ctxt_to_insert->name();
+  auto ret       = contexts.insert(std::make_pair(ctxt_name, std::move(ctxt_to_insert)));
   if (not ret.second) {
     logger.error("Unable to create execution context with name \"{}\". Cause: A execution context with the same name "
                  "already exists.",
-                 ctxt_to_insert->name());
+                 ctxt_name);
     return false;
   }
   task_execution_context& ctxt = *ret.first->second;

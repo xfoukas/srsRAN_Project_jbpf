@@ -32,11 +32,13 @@ ue_config_update_event::ue_config_update_event(du_ue_index_t                    
                                                sched_config_manager&             parent_,
                                                std::unique_ptr<ue_configuration> next_cfg,
                                                const std::optional<bool>&        set_fallback,
+                                               slot_point                        ul_ccch_slot_rx_,
                                                bool                              reestablished_) :
   ue_index(ue_index_),
   parent(&parent_),
   next_ded_cfg(std::move(next_cfg)),
   set_fallback_mode(set_fallback),
+  ul_ccch_slot_rx(ul_ccch_slot_rx_),
   reestablished(reestablished_)
 {
 }
@@ -56,8 +58,10 @@ void ue_config_update_event::notify_completion()
   parent.reset();
 }
 
-ue_config_delete_event::ue_config_delete_event(du_ue_index_t ue_index_, sched_config_manager& parent_) :
-  ue_idx(ue_index_), parent(&parent_)
+ue_config_delete_event::ue_config_delete_event(du_ue_index_t         ue_index_,
+                                               du_cell_index_t       pcell_index_,
+                                               sched_config_manager& parent_) :
+  ue_idx(ue_index_), pcell_idx(pcell_index_), parent(&parent_)
 {
 }
 
@@ -84,7 +88,7 @@ sched_config_manager::sched_config_manager(const scheduler_config&    sched_cfg,
   logger(srslog::fetch_basic_logger("SCHED")),
   ues_to_rem(MAX_NOF_DU_UES)
 {
-  std::fill(ue_to_cell_group_index.begin(), ue_to_cell_group_index.end(), INVALID_DU_CELL_GROUP_INDEX);
+  std::fill(ue_to_pcell_index.begin(), ue_to_pcell_index.end(), INVALID_DU_CELL_INDEX);
 }
 
 const cell_configuration* sched_config_manager::add_cell(const sched_cell_configuration_request_message& msg)
@@ -107,6 +111,29 @@ const cell_configuration* sched_config_manager::add_cell(const sched_cell_config
   srsran_assert(cell_metrics != nullptr, "Unable to create metrics handler");
 
   return added_cells[msg.cell_index].get();
+}
+
+void sched_config_manager::update_cell(const sched_cell_reconfiguration_request_message& msg)
+{
+  if (msg.slice_reconf_req.has_value()) {
+    const auto& cell_index = msg.slice_reconf_req->cell_index;
+    srsran_assert(added_cells.contains(cell_index), "cell={} does not exist", fmt::underlying(cell_index));
+    for (const auto& rrm : msg.slice_reconf_req->rrm_policies) {
+      bool found = false;
+      for (auto& slice : added_cells[cell_index]->rrm_policy_members) {
+        if (slice.rrc_member == rrm.rrc_member) {
+          found         = true;
+          slice.max_prb = rrm.max_prb;
+          slice.min_prb = rrm.min_prb;
+          break;
+        }
+      }
+
+      if (not found) {
+        logger.warning("No slice RRM policy found for {} in cell {}.", rrm.rrc_member, fmt::underlying(cell_index));
+      }
+    }
+  }
 }
 
 void sched_config_manager::rem_cell(du_cell_index_t cell_index)
@@ -159,12 +186,11 @@ ue_config_update_event sched_config_manager::add_ue(const sched_ue_creation_requ
   }
 
   // Ensure no UE with the same identifier exists. Lock this UE index.
-  const du_cell_group_index_t target_grp_idx = added_cells[pcell_index]->cell_group_index;
-  du_cell_group_index_t       last_grp_idx   = INVALID_DU_CELL_GROUP_INDEX;
-  if (not ue_to_cell_group_index[cfg_req.ue_index].compare_exchange_strong(last_grp_idx,
-                                                                           target_grp_idx,
-                                                                           std::memory_order::memory_order_acquire,
-                                                                           std::memory_order::memory_order_acquire)) {
+  du_cell_index_t last_pcell_idx = INVALID_DU_CELL_INDEX;
+  if (not ue_to_pcell_index[cfg_req.ue_index].compare_exchange_strong(last_pcell_idx,
+                                                                      pcell_index,
+                                                                      std::memory_order::memory_order_acquire,
+                                                                      std::memory_order::memory_order_acquire)) {
     logger.warning(
         "ue={} rnti={}: Discarding invalid UE creation request. Cause: UE with the same index already exists",
         fmt::underlying(cfg_req.ue_index),
@@ -174,10 +200,15 @@ ue_config_update_event sched_config_manager::add_ue(const sched_ue_creation_requ
   srsran_assert(ue_cfg_list[cfg_req.ue_index] == nullptr, "Invalid ue_index={}", fmt::underlying(cfg_req.ue_index));
 
   // Create UE configuration.
-  auto next_ded_cfg = std::make_unique<ue_configuration>(
+  const du_cell_group_index_t target_grp_idx = get_cell_group_index(pcell_index);
+  auto                        next_ded_cfg   = std::make_unique<ue_configuration>(
       cfg_req.ue_index, cfg_req.crnti, added_cells, group_cfg_pool[target_grp_idx]->add_ue(cfg_req));
 
-  return ue_config_update_event{cfg_req.ue_index, *this, std::move(next_ded_cfg), cfg_req.starts_in_fallback};
+  return ue_config_update_event{cfg_req.ue_index,
+                                *this,
+                                std::move(next_ded_cfg),
+                                cfg_req.starts_in_fallback,
+                                cfg_req.ul_ccch_slot_rx.value_or(slot_point())};
 }
 
 ue_config_update_event sched_config_manager::update_ue(const sched_ue_reconfiguration_message& cfg_req)
@@ -188,7 +219,8 @@ ue_config_update_event sched_config_manager::update_ue(const sched_ue_reconfigur
   flush_ues_to_rem();
 
   // Check if UE already exists.
-  const du_cell_group_index_t group_idx = ue_to_cell_group_index[cfg_req.ue_index].load(std::memory_order_relaxed);
+  const du_cell_index_t       pcell_index = get_pcell_index(cfg_req.ue_index);
+  const du_cell_group_index_t group_idx   = get_cell_group_index(pcell_index);
   if (group_idx == INVALID_DU_CELL_GROUP_INDEX) {
     logger.error("ue={}: Discarding UE configuration. Cause: UE does not exist", fmt::underlying(cfg_req.ue_index));
     return ue_config_update_event{cfg_req.ue_index, *this};
@@ -199,7 +231,7 @@ ue_config_update_event sched_config_manager::update_ue(const sched_ue_reconfigur
     logger.error("ue={} c-rnti={}: Discarding UE configuration. Cause: UE with provided C-RNTI does not exist.",
                  fmt::underlying(cfg_req.ue_index),
                  cfg_req.crnti);
-    return ue_config_update_event{cfg_req.ue_index, *this, nullptr, {}, cfg_req.reestablished};
+    return ue_config_update_event{cfg_req.ue_index, *this, nullptr, {}, slot_point(), cfg_req.reestablished};
   }
 
   // Make a copy of the current UE dedicated config.
@@ -209,7 +241,8 @@ ue_config_update_event sched_config_manager::update_ue(const sched_ue_reconfigur
   next_ded_cfg->update(added_cells, group_cfg_pool[group_idx]->reconf_ue(cfg_req));
 
   // Return RAII event.
-  return ue_config_update_event{cfg_req.ue_index, *this, std::move(next_ded_cfg), {}, cfg_req.reestablished};
+  return ue_config_update_event{
+      cfg_req.ue_index, *this, std::move(next_ded_cfg), {}, slot_point(), cfg_req.reestablished};
 }
 
 ue_config_delete_event sched_config_manager::remove_ue(du_ue_index_t ue_index)
@@ -220,7 +253,8 @@ ue_config_delete_event sched_config_manager::remove_ue(du_ue_index_t ue_index)
   flush_ues_to_rem();
 
   // Check if UE already exists.
-  const du_cell_group_index_t group_idx = ue_to_cell_group_index[ue_index].load(std::memory_order_relaxed);
+  const du_cell_index_t       pcell_index = get_pcell_index(ue_index);
+  const du_cell_group_index_t group_idx   = get_cell_group_index(pcell_index);
   if (group_idx == INVALID_DU_CELL_GROUP_INDEX) {
     srsran_assert(ue_cfg_list[ue_index] == nullptr, "Invalid ue_index={}", fmt::underlying(ue_index));
     logger.error("ue={}: Discarding UE deletion command. Cause: UE does not exist", fmt::underlying(ue_index));
@@ -233,7 +267,8 @@ ue_config_delete_event sched_config_manager::remove_ue(du_ue_index_t ue_index)
   }
 
   srsran_assert(ue_cfg_list[ue_index] != nullptr, "Invalid ue_index={}", fmt::underlying(ue_index));
-  return ue_config_delete_event{ue_index, *this};
+  du_cell_index_t pcell_idx = ue_cfg_list[ue_index]->pcell_cfg().cell_cfg_common.cell_index;
+  return ue_config_delete_event{ue_index, pcell_idx, *this};
 }
 
 void sched_config_manager::handle_ue_config_complete(du_ue_index_t ue_index, std::unique_ptr<ue_configuration> next_cfg)
@@ -262,7 +297,7 @@ void sched_config_manager::handle_ue_config_complete(du_ue_index_t ue_index, std
   } else {
     if (ue_cfg_list[ue_index] == nullptr) {
       // In case of failed UE creation, mark the UE as released.
-      ue_to_cell_group_index[ue_index].store(INVALID_DU_CELL_GROUP_INDEX, std::memory_order_release);
+      ue_to_pcell_index[ue_index].store(INVALID_DU_CELL_INDEX, std::memory_order_release);
     }
 
     // Notifies MAC that event has failed.
@@ -286,7 +321,7 @@ void sched_config_manager::handle_ue_delete_complete(du_ue_index_t ue_index)
   cell_metrics.handle_ue_deletion(ue_index);
 
   // Mark the UE as released.
-  ue_to_cell_group_index[ue_index].store(INVALID_DU_CELL_GROUP_INDEX, std::memory_order_release);
+  ue_to_pcell_index[ue_index].store(INVALID_DU_CELL_INDEX, std::memory_order_release);
 
   // Notifies MAC that event is complete.
   config_notifier.on_ue_deletion_completed(ue_index);

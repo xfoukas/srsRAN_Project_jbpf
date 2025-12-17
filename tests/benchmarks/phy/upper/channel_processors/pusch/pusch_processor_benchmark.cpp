@@ -29,6 +29,7 @@
 #include "srsran/phy/upper/channel_processors/pusch/pusch_processor_result_notifier.h"
 #include "srsran/ran/sch/tbs_calculator.h"
 #include "srsran/support/benchmark_utils.h"
+#include "srsran/support/executors/inline_task_executor.h"
 #include "srsran/support/executors/task_worker_pool.h"
 #include "srsran/support/executors/unique_thread.h"
 #include "srsran/support/math/complex_normal_random.h"
@@ -140,6 +141,7 @@ static constexpr bool                                           compensate_cfo  
 static unsigned                                                 nof_pusch_decoder_threads = 0;
 static std::unique_ptr<task_worker_pool<queue_policy>>          worker_pool               = nullptr;
 static std::unique_ptr<task_worker_pool_executor<queue_policy>> executor                  = nullptr;
+static inline_task_executor                                     ch_est_executor;
 
 // Thread shared variables.
 static std::atomic<bool>     thread_quit   = {};
@@ -344,7 +346,7 @@ static int parse_args(int argc, char** argv)
       case 'h':
       default:
         usage(argv[0]);
-        exit(0);
+        std::exit(0);
     }
   }
 
@@ -575,6 +577,7 @@ static std::shared_ptr<pusch_processor_factory> create_pusch_processor_factory()
       create_dmrs_pusch_estimator_factory_sw(prg_factory,
                                              low_papr_sequence_gen_factory,
                                              port_chan_estimator_factory,
+                                             ch_est_executor,
                                              fd_smoothing_strategy,
                                              td_interpolation_strategy,
                                              compensate_cfo);
@@ -649,7 +652,6 @@ static std::shared_ptr<pusch_processor_factory> create_pusch_processor_factory()
   pusch_proc_pool_config.uci_factory            = uci_proc_factory;
   pusch_proc_pool_config.nof_regular_processors = nof_threads;
   pusch_proc_pool_config.nof_uci_processors     = nof_threads;
-  pusch_proc_pool_config.blocking               = true;
 
   pusch_proc_factory = create_pusch_processor_pool(pusch_proc_pool_config);
   TESTASSERT(pusch_proc_factory);
@@ -720,7 +722,9 @@ static void thread_process(pusch_processor&              proc,
     unique_rx_buffer rm_buffer = buffer_pool->get_pool().reserve(config.slot, buffer_id, nof_codeblocks, true);
 
     // Process PDU.
-    [&]() SRSRAN_RTSAN_NONBLOCKING { proc.process(data, std::move(rm_buffer), result_notifier, grid, config); }();
+    [&]() noexcept SRSRAN_RTSAN_NONBLOCKING {
+      proc.process(data, std::move(rm_buffer), result_notifier, grid, config);
+    }();
 
     // Wait for finish the task.
     result_notifier.wait_for_completion();
