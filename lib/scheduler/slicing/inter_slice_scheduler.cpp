@@ -228,13 +228,11 @@ void inter_slice_scheduler::slot_indication(slot_point slot_tx, const cell_resou
     uint32_t ret = ctrl_hook_mac_sched_slice_mgmt(
       slot_tx.sfn(), slot_tx.slot_index(), &jbpf_slice_allocation_candidiate);
     if (ret > 0) {
-      printf("Allocation changed by codelet \n");
       if (validate_map_slice_allocation_candidate()) {
         // promote candidiate
         jbpf_slice_allocation = jbpf_slice_allocation_candidiate;
         // update slices with new allocation
         map_slice_allocation_from_jbpf();
-        printf("Slice allocation successfuly validated and updated \n");
       } else {
         printf("Invalid slice allocation attempted\n");
         // revert to current jbpf_slice_allocation
